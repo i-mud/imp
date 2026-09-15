@@ -1,0 +1,8 @@
+{
+  "description": "message type this build does not model",
+  "direction": "server",
+  "expect": "reject",
+  "code": "unknown_type",
+  "path": "type",
+  "frame": "{\"type\":\"combat-log\",\"protocol\":1,\"at\":1}"
+}

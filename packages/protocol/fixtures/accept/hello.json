@@ -1,0 +1,6 @@
+{
+  "description": "relay greeting carrying its identity",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"hello\",\"protocol\":1,\"at\":1758000000000,\"relay\":{\"name\":\"tinyscry-relay\",\"version\":\"0.1.0\"}}"
+}

@@ -1,0 +1,8 @@
+{
+  "description": "no protocol field",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "protocol",
+  "frame": "{\"type\":\"hello\",\"at\":1,\"relay\":{\"name\":\"r\",\"version\":\"1\"}}"
+}

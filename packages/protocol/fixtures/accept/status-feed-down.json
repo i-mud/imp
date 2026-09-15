@@ -1,0 +1,6 @@
+{
+  "description": "upstream feed lost while the socket stayed up",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"status\",\"protocol\":1,\"at\":1758000000700,\"feed\":\"down\",\"detail\":\"no producer connected\"}"
+}

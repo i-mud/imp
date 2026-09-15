@@ -1,0 +1,8 @@
+{
+  "description": "state supplied as a string",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "state",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":\"broken\"}"
+}

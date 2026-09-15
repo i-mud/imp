@@ -1,0 +1,23 @@
+{
+  "name": "@tinyscry/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Canonical TinyScry wire protocol: types, limits and fail-closed validation",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "fixtures"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.1"
+  }
+}

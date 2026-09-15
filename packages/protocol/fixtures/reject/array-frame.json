@@ -1,0 +1,8 @@
+{
+  "description": "top-level array instead of an object",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "",
+  "frame": "[1,2,3]"
+}

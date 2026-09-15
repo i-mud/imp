@@ -1,0 +1,8 @@
+{
+  "description": "greeting without relay identity",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "relay",
+  "frame": "{\"type\":\"hello\",\"protocol\":1,\"at\":1}"
+}

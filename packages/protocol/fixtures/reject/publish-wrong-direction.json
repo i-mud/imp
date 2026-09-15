@@ -1,0 +1,8 @@
+{
+  "description": "server message arriving on the ingest endpoint",
+  "direction": "client",
+  "expect": "reject",
+  "code": "unknown_type",
+  "path": "type",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":null,\"target\":null}}"
+}

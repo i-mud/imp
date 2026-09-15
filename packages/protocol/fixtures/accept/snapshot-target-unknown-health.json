@@ -1,0 +1,6 @@
+{
+  "description": "target named but health not reported",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":2,\"at\":1758000000300,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":842,\"max\":1000},\"mana\":{\"current\":371,\"max\":500},\"moves\":{\"current\":189,\"max\":200}},\"target\":{\"name\":\"Training Dummy\",\"healthPercent\":null}}}"
+}

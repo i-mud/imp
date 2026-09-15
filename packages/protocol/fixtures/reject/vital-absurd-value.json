@@ -1,0 +1,8 @@
+{
+  "description": "vital beyond the sanity bound",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "state.character.hp.max",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":0,\"max\":1000000000000}},\"target\":null}}"
+}

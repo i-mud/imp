@@ -1,0 +1,8 @@
+{
+  "description": "feed value outside the enumeration",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "feed",
+  "frame": "{\"type\":\"status\",\"protocol\":1,\"at\":1,\"feed\":\"flaky\"}"
+}

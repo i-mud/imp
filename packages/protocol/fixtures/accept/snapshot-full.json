@@ -1,0 +1,6 @@
+{
+  "description": "character with all three vitals and a target",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":7,\"at\":1758000000100,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":842,\"max\":1000},\"mana\":{\"current\":371,\"max\":500},\"moves\":{\"current\":189,\"max\":200}},\"target\":{\"name\":\"Ancient Troll\",\"healthPercent\":72}}}"
+}

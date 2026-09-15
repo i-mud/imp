@@ -1,0 +1,8 @@
+{
+  "description": "fractional hit points",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "state.character.hp.current",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":1.5,\"max\":100}},\"target\":null}}"
+}

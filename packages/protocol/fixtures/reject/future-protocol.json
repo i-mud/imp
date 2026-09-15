@@ -1,0 +1,8 @@
+{
+  "description": "breaking future protocol version",
+  "direction": "server",
+  "expect": "reject",
+  "code": "unsupported_protocol",
+  "path": "protocol",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":1,\"at\":1,\"state\":{\"character\":null,\"target\":null}}"
+}

@@ -1,0 +1,8 @@
+{
+  "description": "JSON null",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "",
+  "frame": "null"
+}

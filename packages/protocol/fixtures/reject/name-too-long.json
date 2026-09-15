@@ -1,0 +1,8 @@
+{
+  "description": "name beyond the 64 character bound",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "state.character.name",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":{\"name\":\"NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\"},\"target\":null}}"
+}

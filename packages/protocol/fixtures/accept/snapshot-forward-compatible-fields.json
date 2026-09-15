@@ -1,0 +1,6 @@
+{
+  "description": "unknown fields from a newer relay are ignored",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":4,\"at\":1758000000600,\"region\":\"midgaard\",\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":5,\"max\":5,\"regen\":3},\"mana\":null,\"moves\":null,\"level\":42},\"target\":null,\"room\":{\"name\":\"Temple Square\"}}}"
+}

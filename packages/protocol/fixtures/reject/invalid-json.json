@@ -1,0 +1,8 @@
+{
+  "description": "truncated frame",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_json",
+  "path": "",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1"
+}

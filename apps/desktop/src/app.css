@@ -1,0 +1,53 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #ecf3fa;
+  background: transparent;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --panel: rgba(12, 18, 27, 0.94);
+  --panel-edge: rgba(191, 215, 235, 0.2);
+  --muted: #91a1b2;
+  --dimmed: #6e7b88;
+  --text: #ecf3fa;
+  --hp: #ef5b68;
+  --mana: #5e9df8;
+  --moves: #58c994;
+  --target: #e5ab54;
+  --good: #58c994;
+  --warn: #e5ab54;
+  --bad: #ef5b68;
+  --radius: 12px;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+html,
+body {
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+}
+
+*[data-tauri-drag-region] {
+  app-region: drag;
+}

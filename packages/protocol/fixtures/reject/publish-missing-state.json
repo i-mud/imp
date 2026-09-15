@@ -1,0 +1,8 @@
+{
+  "description": "publish without state",
+  "direction": "client",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "state",
+  "frame": "{\"type\":\"publish\",\"protocol\":1}"
+}

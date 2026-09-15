@@ -1,0 +1,9 @@
+node_modules/
+dist/
+target/
+.venv/
+package-lock.json
+uv.lock
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/icons/
+packages/protocol/fixtures/

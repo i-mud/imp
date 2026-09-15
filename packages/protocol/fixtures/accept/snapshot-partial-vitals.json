@@ -1,0 +1,6 @@
+{
+  "description": "mana and moves unknown; absent keys mean null",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1758000000200,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":10,\"max\":100}},\"target\":null}}"
+}

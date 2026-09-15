@@ -1,0 +1,8 @@
+{
+  "description": "vital without its maximum",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "state.character.hp.max",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":10}},\"target\":null}}"
+}

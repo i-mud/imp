@@ -1,0 +1,6 @@
+{
+  "description": "connected but nothing known yet",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":0,\"at\":1758000000400,\"state\":{\"character\":null,\"target\":null}}"
+}

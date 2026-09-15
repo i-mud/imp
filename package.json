@@ -1,0 +1,45 @@
+{
+  "name": "tinyscry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Always-on-top companion HUD for MUDs",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @tinyscry/desktop",
+    "tauri": "npm run tauri --workspace @tinyscry/desktop --",
+    "tauri:dev": "npm run tauri --workspace @tinyscry/desktop -- dev",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint . && prettier --check . && node scripts/check-docs.mjs",
+    "lint:fix": "eslint . --fix && prettier --write .",
+    "relay": "uv run --directory services/relay tinyscry-relay",
+    "relay:test": "uv run --directory services/relay pytest",
+    "relay:lint": "uv run --directory services/relay ruff check . && uv run --directory services/relay ruff format --check . && uv run --directory services/relay mypy src tests",
+    "tf:replay": "uv run --directory integrations/tinyfugue python -m tinyscry_tf.replay",
+    "tf:test": "uv run --directory integrations/tinyfugue pytest",
+    "tf:lint": "uv run --directory integrations/tinyfugue ruff check . && uv run --directory integrations/tinyfugue ruff format --check . && uv run --directory integrations/tinyfugue mypy src tests",
+    "test:e2e": "uv run --project services/relay python tests/e2e/relay_roundtrip.py",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-svelte": "^3.23.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.6",
+    "prettier-plugin-svelte": "^3.4.0",
+    "svelte": "^5.57.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}
