@@ -59,20 +59,23 @@ the Rust crate and does not prove native or live runtime behavior.
 These checks require a native platform, real processes, or operator-controlled
 infrastructure and remain separate from CI:
 
-| Evidence                  | Status                                                                                                                       |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Windows Tauri runtime     | Verified on Windows 11: launch, close, topmost, drag, resize, transparency, live WebView updates, and clean runtime console. |
-| Actual OpenSSH child      | Not live-verified in managed mode; deterministic Rust checks cover argv, ownership, port conflict, retry, and shutdown.      |
-| Real VPS/systemd behavior | Unit files and lifecycle boundaries are implemented; installation, lingering, restart, and reboot behavior need VPS proof.   |
-| Interactive TinyFugue     | Verified with TinyFugue 5.1.6; the fixed-path `fwrite()` hook did not block the interactive client.                          |
-| Real MUD/GMCP session     | Verified from live play and a redacted capture; observed normalization covered `Char.Status` and `Char.Vitals`.              |
-| External SSH runtime      | Verified with a manual local forward, including interruption and recovery.                                                   |
-| Relay bind                | VPS listener observed at `127.0.0.1:8787` only.                                                                              |
-| Non-loopback guard        | `--host 0.0.0.0` refused without `--allow-non-loopback`; loud warnings when opted in.                                        |
-| `GET /healthz`            | Tunneled HTTP 200; observed `down`, `live`, and `stale` feed states.                                                         |
-| Last-known safety         | Retained values were labelled `STALE`, `DOWN`, or `RECONNECTING`; they were never presented as live.                         |
-| Shell-safety boundary     | No MUD value is evaluated as TinyFugue or shell code; the hook uses a fixed path and SSH is spawned directly by argv.        |
-| Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                  |
+| Evidence                  | Status                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Windows Tauri runtime     | Verified on Windows 11: launch, close, topmost, drag, resize, transparency, live WebView updates, and clean runtime console.                                                   |
+| Actual OpenSSH child      | Verified in native managed mode: its tunnel dropped during a real VPS reboot and recovered automatically without a TinyScry restart.                                           |
+| Real VPS/systemd behavior | Verified on a real VPS reboot: `Linger=yes` preserved the user manager; `tinyscry-feed` and `tinyscry-relay` returned before interactive login.                                |
+| Interactive TinyFugue     | Verified with TinyFugue 5.1.6; the fixed-path `fwrite()` hook did not block the interactive client.                                                                            |
+| Real MUD/GMCP session     | Verified from live play and a redacted capture; observed normalization covered `Char.Status` and `Char.Vitals`.                                                                |
+| External SSH runtime      | Verified with a manual local forward, including interruption and recovery.                                                                                                     |
+| Relay bind                | Verified through the live restart and reboot: the VPS listener remained at `127.0.0.1:8787` only.                                                                              |
+| Non-loopback guard        | `--host 0.0.0.0` refused without `--allow-non-loopback`; loud warnings when opted in.                                                                                          |
+| `GET /healthz`            | Tunneled HTTP 200; observed `down`, `live`, and `stale` feed states.                                                                                                           |
+| Last-known safety         | Verified live: restarting the feed with a retained checkpoint neither republishes it nor advances relay sequence; fresh GMCP publishes and reports `live`.                     |
+| Runtime spool and hook    | Verified after reboot: systemd recreated the private runtime spool and persistent TinyFugue hook symlink.                                                                      |
+| TinyFugue ownership       | Verified after reboot: TinyFugue did not auto-start; it remains operator-owned and intentionally interactive.                                                                  |
+| Identity bootstrap limit  | Bounded limitation: reboot loses the ephemeral normalized checkpoint. If resumed GMCP omits `Char.Status.character_name`, TinyScry remains down while consuming fresh records. |
+| Shell-safety boundary     | No MUD value is evaluated as TinyFugue or shell code; the hook uses a fixed path and SSH is spawned directly by argv.                                                          |
+| Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                    |
 
 CI does not replace any row in this table and must not be cited as evidence for
 Windows Tauri behavior, actual OpenSSH supervision, VPS/systemd behavior,

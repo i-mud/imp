@@ -17,10 +17,11 @@ never owns or daemonizes the operator's interactive TinyFugue session.
 | local SSH forward                              | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process  |
 | WebSocket reconnect and public HUD state       | `RelayStateSource` / HUD model | unchanged four-state presentation             |
 
-User lingering makes the two VPS user units available after reboot without a
-root-owned service or an administrative SSH session. The feed `Wants=` the
-relay but does not `Require=` it: its existing publisher reconnect loop owns a
-relay outage.
+Live VPS reboot verification confirmed that user lingering (`Linger=yes`) keeps
+both VPS user units available without a root-owned service or administrative SSH
+session: `tinyscry-feed` and `tinyscry-relay` returned before interactive login.
+TinyFugue intentionally did not auto-start. The feed `Wants=` the relay but
+does not `Require=` it: its existing publisher reconnect loop owns a relay outage.
 
 ## Live path
 
@@ -43,8 +44,9 @@ A regular file returns immediately. The reader bounds raw runtime storage by
 rotating a fully drained active inode to a retired generation and creating a
 fresh active spool; it never truncates an inode that TinyFugue may already
 have open. The fixed hook symlink is removed when the feed stops and recreated
-when it starts again. Lost updates while the feed itself is unavailable are
-acceptable; blocking the MUD client is not.
+when it starts again. A live reboot verified recreation of both the private
+runtime spool and persistent hook symlink before operator login. Lost updates
+while the feed itself is unavailable are acceptable; blocking the MUD client is not.
 
 Normal operation persists no raw diagnostic capture. An explicit
 `--diagnostic-capture` option writes private, size-rotated files outside the
@@ -70,16 +72,17 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 
 ## Failure boundaries
 
-| Failure                                | Recovery / visible result                                      |
-| -------------------------------------- | -------------------------------------------------------------- |
-| relay process exits                    | systemd restarts it; feed publisher reconnects                 |
-| feed process exits                     | lock releases with the process; systemd starts one replacement |
-| TinyFugue absent                       | services stay healthy; relay reports feed down/stale           |
-| spool target replaced                  | next TinyFugue hook call reopens the stable path               |
-| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects         |
-| local port occupied by TinyScry relay  | use external endpoint; spawn no child                          |
-| local port occupied by another service | report conflict; spawn and kill nothing                        |
-| TinyScry closes                        | terminate and reap only its owned SSH child                    |
+| Failure                                | Recovery / visible result                                                                                                          |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| relay process exits                    | systemd restarts it; feed publisher reconnects                                                                                     |
+| feed process exits                     | lock releases with the process; systemd starts one replacement                                                                     |
+| normalized checkpoint lost at reboot   | fresh records still normalize, but without `Char.Status.character_name` TinyScry remains down; identity bootstrap is not recovered |
+| TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                               |
+| spool target replaced                  | next TinyFugue hook call reopens the stable path                                                                                   |
+| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                             |
+| local port occupied by TinyScry relay  | use external endpoint; spawn no child                                                                                              |
+| local port occupied by another service | report conflict; spawn and kill nothing                                                                                            |
+| TinyScry closes                        | terminate and reap only its owned SSH child                                                                                        |
 
 ## Source and checks
 
@@ -99,5 +102,7 @@ and `apps/desktop/test/relay-source.test.ts`.
 ## Verification
 
 Status: verified
-Verified against: focused Python, Rust, and frontend tests plus the managed
-runtime failure/recovery checks recorded in `docs/status.md`.
+Verified against: focused Python, Rust, and frontend checks plus live VPS
+restart and reboot evidence recorded in `docs/status.md`, including checkpoint
+non-publication, relay-sequence preservation, automatic user-unit and managed
+SSH recovery, loopback relay binding, and the bounded identity-bootstrap limit.

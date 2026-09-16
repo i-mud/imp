@@ -353,7 +353,47 @@ def test_run_feed_keeps_draining_and_stops_promptly_while_publish_is_blocked() -
     asyncio.run(scenario())
 
 
-def test_normalized_checkpoint_recovers_identity_after_raw_history_is_gone(tmp_path: Path) -> None:
+def test_run_feed_does_not_publish_checkpoint_without_fresh_spool_input() -> None:
+    async def scenario() -> None:
+        checkpoint = GameState(
+            character=Character(
+                name="Rin",
+                hp=Vital(current=9, max=10),
+                mana=Vital(current=4, max=8),
+                moves=Vital(current=7, max=12),
+            ),
+            target=None,
+        )
+        source = _FakeSource([[]])
+        published: list[GameState] = []
+
+        class _CollectingPublisher:
+            async def publish(self, state: GameState) -> None:
+                published.append(state)
+
+        stop = asyncio.Event()
+
+        async def stop_after_idle() -> None:
+            await asyncio.sleep(0.08)
+            stop.set()
+
+        await asyncio.gather(
+            run_feed(
+                source,
+                _CollectingPublisher(),
+                poll_interval=0.01,
+                stop=stop,
+                initial_state=checkpoint,
+            ),
+            stop_after_idle(),
+        )
+
+        assert published == []
+
+    asyncio.run(scenario())
+
+
+def test_run_feed_seeds_checkpoint_before_publishing_a_fresh_change(tmp_path: Path) -> None:
     async def scenario() -> None:
         checkpoint_path = tmp_path / "run" / "state.json"
         checkpoint_path.parent.mkdir(parents=True)
@@ -361,8 +401,8 @@ def test_normalized_checkpoint_recovers_identity_after_raw_history_is_gone(tmp_p
             character=Character(
                 name="Rin",
                 hp=Vital(current=9, max=10),
-                mana=None,
-                moves=None,
+                mana=Vital(current=4, max=8),
+                moves=Vital(current=7, max=12),
             ),
             target=None,
         )
@@ -395,12 +435,17 @@ def test_normalized_checkpoint_recovers_identity_after_raw_history_is_gone(tmp_p
             stop_after_drain(),
         )
 
-        assert published
-        character = published[-1].character
-        assert character is not None
-        assert character.name == "Rin"
-        assert character.hp == Vital(current=5, max=10)
-        assert load_checkpoint(checkpoint_path) == published[-1]
+        expected = GameState(
+            character=Character(
+                name="Rin",
+                hp=Vital(current=5, max=10),
+                mana=Vital(current=4, max=8),
+                moves=Vital(current=7, max=12),
+            ),
+            target=None,
+        )
+        assert published == [expected]
+        assert load_checkpoint(checkpoint_path) == expected
 
     asyncio.run(scenario())
 

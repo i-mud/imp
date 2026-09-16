@@ -161,9 +161,6 @@ async def run_feed(
     publish_queue: asyncio.Queue[GameState] = asyncio.Queue(maxsize=1)
     publish_task = asyncio.create_task(_publish_worker(publish_queue, publisher, published_count))
 
-    if initial_state is not None:
-        _offer_latest(publish_queue, initial_state)
-
     try:
         while stop is None or not stop.is_set():
             for line in source.read_lines():
