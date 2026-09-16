@@ -8,67 +8,75 @@ native shell is also runtime-verified on Windows 11 x64.
 The complete production-shaped path runs today:
 
 ```text
-MUD GMCP -> TinyFugue hook -> raw capture -> checked adapter JSONL
+MUD GMCP -> TinyFugue hook -> private spool -> checked adapter JSONL
          -> normalize -> publisher -> loopback relay
-         -> manual SSH tunnel -> native Windows Tauri HUD
+         -> SSH tunnel (external or TinyScry-managed) -> native Windows Tauri HUD
 ```
 
 The source data came from a real target-MUD session. A selected, redacted
-fixture was replayed from the VPS through the manual SSH tunnel into the native
-Windows HUD. Rendered identity, HP, mana, movement, target acquisition,
+fixture was replayed from the VPS through an external SSH tunnel into the
+native Windows HUD. Rendered identity, HP, mana, movement, target acquisition,
 target damage, and target clearing matched the normalized stream. Producer
 stall, producer exit, relay restart, and SSH-tunnel interruption all kept last
 known values visibly non-live.
+
+Managed mode is implemented in the Tauri backend: it starts the system OpenSSH
+client directly by argv, supervises one owned child, retries with bounded
+backoff, and leaves credentials and host verification to OpenSSH. External
+tunnel mode remains the default and remains supported.
 
 | Component                 | State                                                                                                                     |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `packages/protocol`       | Complete for version 1. Types, bounds, fail-closed decoder, 32-case corpus.                                               |
 | `services/relay`          | Complete for the first slice. Loopback bind, `/state`, `/ingest`, `/healthz`, retained snapshot, feed tracking.           |
 | `apps/desktop` (frontend) | Complete. HUD, mock source, relay source with backoff, pure reducer.                                                      |
-| `apps/desktop` (Tauri)    | Launched and directly exercised on native Windows 11. See runtime evidence below.                                         |
+| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle implemented and covered by deterministic Rust checks.     |
 | `integrations/tinyfugue`  | Real-session hook, checked converter, observed-only normalizer, publisher, bridge, replay, and redacted fixture verified. |
 
-## Verification performed
+## Verification
 
-| Check                       | Result                                                                                                                         |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npm run lint`              | clean (ESLint + Prettier + `scripts/check-docs.mjs`: documented path references all resolve)                                   |
-| `npm run typecheck`         | clean - `tsc` and `svelte-check`, 0 errors and 0 warnings                                                                      |
-| `npm run test`              | 60 passed (44 protocol, 16 HUD)                                                                                                |
-| `npm run relay:lint`        | ruff + `mypy --strict` clean                                                                                                   |
-| `npm run relay:test`        | 47 passed                                                                                                                      |
-| `npm run tf:lint`           | ruff + `mypy --strict` clean                                                                                                   |
-| `npm run tf:test`           | 18 passed                                                                                                                      |
-| `npm run test:e2e`          | 2 PASS - publish delivered, retained snapshot on reconnect                                                                     |
-| `npm run build`             | 61 kB JS / 3.7 kB CSS                                                                                                          |
-| Real GMCP capture           | 249 hook lines over 214.662 s; 200 valid JSON records; 49 invalid inventory payloads safely rejected                           |
-| Fixture provenance          | 14 selected records; 68 retained fields and 2 redacted name fields compared to the private capture with 0 mismatches           |
-| Observed normalization      | `Char.Status` and `Char.Vitals` only; unknown `Char.Group.List` preserved the exact prior HUD state                            |
-| Live MUD session            | live play at 08:36-08:52 UTC: `feed=live`, `seq` 1 to 11, one producer socket, native HUD rendered the live character          |
-| Relay bind                  | VPS listener observed at `127.0.0.1:8787` only; manual SSH local forward used                                                  |
-| Non-loopback guard          | `--host 0.0.0.0` refused without `--allow-non-loopback`; loud warnings when opted in                                           |
-| `GET /healthz`              | tunneled HTTP 200; observed `down`, `live`, and `stale` feed states                                                            |
-| Native real-session HUD     | rendered captured identity/resources and target `81% -> 29% -> 0% -> cleared`                                                  |
-| Native connection lifecycle | producer stall `STALE`; producer exit `DOWN`; relay/SSH interruption `RECONNECTING`; both recovered to `LIVE`                  |
-| Last-known safety           | retained values were labelled `STALE`, `DOWN`, or `RECONNECTING`; they were never presented as live                            |
-| Shell-safety audit          | no MUD value is evaluated as TF or shell code; capture uses fixed-path `fwrite`, checked parsing, and direct pipes             |
-| HUD visual, mock source     | changing HP/mana/MV and target percentage confirmed                                                                            |
-| Tauri Rust crate            | `cargo check`, `cargo clippy -D warnings`, `cargo fmt --check` clean (rustc 1.98.1, Tauri 2.11.5, in a `webkit2gtk` container) |
-| Windows native environment  | Rust 1.98.1 stable MSVC host; Visual Studio 2022 native desktop workload; Windows SDK 10.0.22621.0; WebView2 152.0.4191.66     |
-| Windows native launch       | `target\debug\tinyscry-desktop.exe` launched and responded; the in-HUD close control ended the full dev process with exit 0    |
-| Always on top               | `WS_EX_TOPMOST` present on the live native window (`extendedStyle=0x00040118`)                                                 |
-| Drag region                 | pointer drag on the blank title region moved the window exactly `(+90, +60)`                                                   |
-| Resize                      | pointer resize changed `320x210` to `422x282`; shrinking stopped at configured `280x180`                                       |
-| Native HUD                  | two WebView snapshots 1.3 seconds apart changed HP `806→748`, mana `533→523`, movement `276→241`, target `52%→46%`             |
-| Transparency and chrome     | native screen captures show the desktop through rounded corners and translucent panel; no native title bar or frame is visible |
-| Native runtime console      | WebView console warnings `[]`, page errors `[]`; final Tauri process log contains no material error                            |
+### Automated CI coverage
 
-## Not done, and why
+`.github/workflows/ci.yml` runs on pull requests targeting `main`, pushes to
+`main`, and manual dispatch. It installs the committed npm and uv dependency
+state with Node 24 and Python 3.12, then runs the canonical project gate once:
+`npm run check`.
 
-- **Automated SSH tunnelling.** Out of scope by decision
-  (`docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md`); the
-  verified manual `ssh -N -L` command remains the supported boundary.
-- **No CI.** `npm run check` is the intended CI command; no workflow file yet.
+That gate covers:
+
+- protocol validation and the shared fixture corpus;
+- frontend formatting, lint, type checks, tests, and production build;
+- relay lint, strict type checks, and tests;
+- TinyFugue adapter lint, strict type checks, and tests;
+- deterministic fixture and trust-boundary behavior; and
+- the producer-to-relay-to-subscriber loopback end-to-end test.
+
+CI requires no TinyScry secrets or external infrastructure. It does not compile
+the Rust crate and does not prove native or live runtime behavior.
+
+### Manual, native, and live evidence
+
+These checks require a native platform, real processes, or operator-controlled
+infrastructure and remain separate from CI:
+
+| Evidence                  | Status                                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows Tauri runtime     | Verified on Windows 11: launch, close, topmost, drag, resize, transparency, live WebView updates, and clean runtime console.                         |
+| Actual OpenSSH child      | Not live-verified in managed mode; deterministic Rust checks cover argv, ownership, port conflict, retry, and shutdown.                              |
+| Real VPS/systemd behavior | Unit files and lifecycle boundaries are implemented; installation, lingering, restart, and reboot behavior need VPS proof.                           |
+| Interactive TinyFugue     | Verified with TinyFugue 5.1.6; the fixed-path `fwrite()` hook did not block the interactive client.                                                  |
+| Real MUD/GMCP session     | Verified from live play and a redacted capture; observed normalization covered `Char.Status` and `Char.Vitals`.                                      |
+| External SSH runtime      | Verified with a manual local forward, including interruption and recovery.                                                                           |
+| Relay bind                | VPS listener observed at `127.0.0.1:8787` only.                                                                                                      |
+| Non-loopback guard        | `--host 0.0.0.0` refused without `--allow-non-loopback`; loud warnings when opted in.                                                                |
+| `GET /healthz`            | Tunneled HTTP 200; observed `down`, `live`, and `stale` feed states.                                                                                 |
+| Last-known safety         | Retained values were labelled `STALE`, `DOWN`, or `RECONNECTING`; they were never presented as live.                                                 |
+| Shell-safety boundary     | No MUD value is evaluated as TinyFugue or shell code; the hook uses a fixed path and SSH is spawned directly by argv.                                |
+| Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                          |
+
+CI does not replace any row in this table and must not be cited as evidence for
+Windows Tauri behavior, actual OpenSSH supervision, VPS/systemd behavior,
+interactive TinyFugue, or a real MUD/GMCP session.
 
 ## Bugs found and fixed during bootstrap
 
@@ -104,10 +112,8 @@ each is the kind that comes back.
    for close, ping and timeout handling. Pinned by
    `integrations/tinyfugue/tests/test_bridge.py`.
 
-## Next milestone
+## Current milestone
 
-Add a CI workflow that runs `npm run check`. The native and remote runtime
-paths require platform credentials and interactive infrastructure, so CI
-should keep exercising their deterministic protocol, fixture, relay, and
-frontend boundaries rather than pretending to reproduce the manual evidence
-recorded above.
+Slice 3 establishes the GitHub Actions baseline around the existing
+deterministic gate. Native Rust checks and operator-controlled runtime evidence
+remain separate pre-commit and manual responsibilities.
