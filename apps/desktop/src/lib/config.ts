@@ -14,7 +14,12 @@ function readRelayUrl(value: string): string {
 }
 
 export function createStateSource(): StateSource {
-  const source = import.meta.env.VITE_TINYSCRY_SOURCE ?? 'mock';
+  // A Tauri-driven build is the real pipeline; only the browser dev loop gets
+  // the demo source, which reports itself live. `TAURI_ENV_PLATFORM` is set by
+  // the Tauri CLI and exposed by `envPrefix` in vite.config.ts.
+  const source =
+    import.meta.env.VITE_TINYSCRY_SOURCE ??
+    (import.meta.env.TAURI_ENV_PLATFORM === undefined ? 'mock' : 'relay');
   if (source === 'mock') return new MockStateSource();
   if (source === 'relay') {
     return new RelayStateSource({
