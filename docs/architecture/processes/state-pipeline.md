@@ -13,7 +13,9 @@
 MUD
  |  GMCP packages
 TinyFugue  ---- integrations/tinyfugue/tinyscry.tf
- |  newline-delimited JSON records
+ |  <epoch-seconds> <package> [JSON]
+capture.py                 (checked epoch conversion + JSON envelope)
+ |  newline-delimited adapter JSON records
 bridge.py
  |  records.parse_record   (fail-closed, bounded, counted rejections)
 normalize.py
@@ -39,12 +41,12 @@ path exercises real validation rather than bypassing it.
 
 ## Major dependencies
 
-| Hop             | Depends on                                     |
-| --------------- | ---------------------------------------------- |
-| TF -> bridge    | TinyFugue GMCP capture (**partly unverified**) |
-| bridge -> relay | `websockets` client                            |
-| relay -> HUD    | SSH port-forward, `websockets` server          |
-| HUD             | Tauri 2 webview, Svelte 5                      |
+| Hop             | Depends on                                  |
+| --------------- | ------------------------------------------- |
+| TF -> bridge    | Verified TinyFugue GMCP hook + `capture.py` |
+| bridge -> relay | `websockets` client                         |
+| relay -> HUD    | SSH port-forward, `websockets` server       |
+| HUD             | Tauri 2 webview, Svelte 5                   |
 
 ## Validation points
 
@@ -58,21 +60,23 @@ State is validated three times, and this is intentional rather than redundant:
 
 ## Failure boundaries
 
-| Failure                     | Behaviour                                               |
-| --------------------------- | ------------------------------------------------------- |
-| malformed TF record         | line skipped and counted; bridge stays up               |
-| unrecognised GMCP package   | previous state retained unchanged                       |
-| malformed `publish`         | rejected whole; stored state untouched; producer closed |
-| producer disconnects        | snapshot retained; `feed` becomes `down`                |
-| malformed `snapshot` at HUD | `protocol-error`; HUD state untouched                   |
-| unknown message `type`      | silently ignored (forwards compatibility)               |
-| relay unreachable           | `reconnecting` with bounded exponential backoff         |
+| Failure                     | Behaviour                                                         |
+| --------------------------- | ----------------------------------------------------------------- |
+| malformed TF record         | line skipped and counted; bridge stays up                         |
+| unrecognised GMCP package   | previous state retained unchanged                                 |
+| malformed `publish`         | rejected whole; stored state untouched; producer closed           |
+| relay closes producer       | socket closes; next material state reconnects before further read |
+| producer disconnects        | snapshot retained; `feed` becomes `down`                          |
+| malformed `snapshot` at HUD | `protocol-error`; HUD state untouched                             |
+| unknown message `type`      | silently ignored (forwards compatibility)                         |
+| relay unreachable           | publisher retries with bounded exponential backoff                |
 
 ## Relevant tests
 
 - `packages/protocol/test/` and `services/relay/tests/test_protocol_fixtures.py`
   (shared corpus, both languages)
-- `services/relay/tests/test_server.py` (loopback server behaviour)
+- `services/relay/tests/test_server.py` (loopback server and producer lifecycle)
+- `integrations/tinyfugue/tests/test_bridge.py` (producer close and reconnect)
 - `integrations/tinyfugue/tests/test_normalize.py` (GMCP mapping)
 - `apps/desktop/test/` (reducer and both sources)
 - `tests/e2e/relay_roundtrip.py` (producer -> relay -> subscriber)
@@ -82,19 +86,20 @@ State is validated three times, and this is intentional rather than redundant:
 Changing the hop boundaries is the expensive kind of change. Adding a field is
 cheap and follows the chain in `docs/architecture/objects/game-state.md`.
 
-The hop marked **partly unverified** is TF -> bridge: our MUD's actual GMCP
-packages have not been observed yet. Everything downstream of `normalize.py` is
-verified against fixtures, so replacing the TF capture does not require
-touching the relay or the HUD. See `integrations/tinyfugue/README.md` for the
-list of specific unknowns.
+The TF -> bridge hop was verified against TinyFugue 5.1.6-4-ga15a165
+on the VPS and a target-MUD capture. Mappings in `normalize.py` contain only
+observed `Char.Status` and `Char.Vitals` fields. Valid unrecognized packages
+remain identity-preserving. Invalid inventory JSON containing unescaped
+control characters is rejected rather than repaired.
 
 ## Verification
 
-Status: verified from `normalize.py` downstream; the TF capture hop is
-unverified by design.
+Status: verified end to end
 
-Verified against: the test suites listed above, plus a live run of the whole
-VPS-side chain - `integrations/tinyfugue/fixtures/session.jsonl` replayed into
-a loopback relay, with the rendered HUD values matching the replay output. The
-evidence, including what was _not_ verified, is tabulated in `docs/status.md`;
-that table is the canonical record, not this card.
+Verified against: the test suites listed above; the sanitized
+`integrations/tinyfugue/fixtures/real-session.jsonl`; a VPS loopback relay; a
+manual SSH local forward; and the native Windows Tauri HUD. The runtime
+exercise covered initial identity/resources, damage and recovery, target
+acquisition/damage/clearing, producer stall and exit, relay restart, and SSH
+tunnel interruption. The evidence is tabulated in `docs/status.md`; that table
+is the canonical record.

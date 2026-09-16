@@ -21,30 +21,55 @@ The canonical checkout is `~/src/tinyscry` inside WSL2. Everything except the
 native Tauri build runs there.
 
 For native Windows builds, **do not build through `\\wsl$`**. Cargo on the 9P
-filesystem is dramatically slower and file watching is unreliable. Use a
-separate checkout or a worktree on the Windows filesystem:
+filesystem is dramatically slower and file watching is unreliable. Once the
+repository has committed history, prefer a separate clone or worktree on the
+Windows filesystem.
+
+For the initial native verification, the canonical tree contained uncommitted
+bootstrap work, so a disposable, secret-excluding mirror was used instead:
 
 ```powershell
-# from Windows, against the same repository
-git clone \\wsl$\Ubuntu\home\<user>\src\tinyscry C:\src\tinyscry
-# or, if you prefer one history with two working trees:
-cd C:\src\tinyscry
-git worktree add ..\tinyscry-win
-```
-
-Then, in that Windows checkout:
-
-```powershell
-npm install
+$source = "\\wsl.localhost\<distro>\home\<user>\src\tinyscry"
+$destination = "C:\src\tinyscry-native"
+New-Item -ItemType Directory -Force $destination | Out-Null
+robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 `
+  /XD .git node_modules dist target .venv venv __pycache__ .pytest_cache `
+      .mypy_cache .ruff_cache .vite .idea `
+  /XF .env .env.* *.pem *.key id_rsa* id_ed25519* known_hosts .DS_Store Thumbs.db
+if ($LASTEXITCODE -gt 7) { exit $LASTEXITCODE }
+Set-Location $destination
+npm ci
 npm run tauri:dev
 ```
 
-Windows prerequisites: Rust with the MSVC host triple, Microsoft C++ Build
-Tools (the "Desktop development with C++" workload), and the WebView2 runtime
-(preinstalled on current Windows 11).
+The WSL tree remains authoritative. Make source edits there and rerun the copy;
+do not edit the disposable mirror.
 
-`.editorconfig` pins LF line endings so the same tree is comfortable from both
-sides. Do not enable `core.autocrlf`.
+### Windows prerequisites
+
+Tauri 2 requires Rust with the MSVC host, the Microsoft C++ toolchain and
+Windows SDK, and the WebView2 runtime. Windows 11 normally includes WebView2.
+
+Install the missing Rust toolchain from PowerShell:
+
+```powershell
+winget install --id Rustlang.Rustup --exact --source winget `
+  --accept-source-agreements --accept-package-agreements --silent
+$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
+rustup default stable
+rustup target add x86_64-pc-windows-msvc
+```
+
+If the C++ workload or WebView2 is absent, install it from an Administrator
+PowerShell:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
+  --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install --id Microsoft.EdgeWebView2Runtime --exact
+```
+
+Do not enable `core.autocrlf`; `.editorconfig` pins LF endings.
 
 ## Linux native builds
 

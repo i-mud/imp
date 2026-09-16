@@ -33,6 +33,12 @@ id_rsa*
 id_ed25519*
 known_hosts
 
+# Private capture output. Raw GMCP and its converted records are unredacted MUD
+# data; only the sanitized fixtures under integrations/tinyfugue/fixtures/ are
+# tracked.
+gmcp.raw
+records*.jsonl
+
 # Editors / OS
 .vscode/*
 !.vscode/extensions.json

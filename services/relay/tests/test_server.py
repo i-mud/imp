@@ -44,6 +44,13 @@ async def _receive_feed(connection: ClientConnection, expected_feed: str) -> dic
             return message
 
 
+async def _wait_for_producer_count(relay: RelayServer, expected: int) -> dict[str, object]:
+    async with asyncio.timeout(0.5):
+        while relay.state.health()["producer_count"] != expected:
+            await asyncio.sleep(0.01)
+    return cast(dict[str, object], relay.state.health())
+
+
 def test_subscriber_receives_hello_snapshot_then_status() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)
@@ -125,12 +132,16 @@ def test_malformed_publish_closes_producer_without_mutating_retained_state() -> 
         await relay.start()
         try:
             producer = await connect(f"ws://127.0.0.1:{relay.port}/ingest")
+            connected_health = await _wait_for_producer_count(relay, 1)
+            assert connected_health["feed"] == "stale"
             await producer.send(
                 '{"type":"publish","protocol":1,"state":{"character":{"name":"broken","hp":{"current":1}}}}'
             )
             with pytest.raises(ConnectionClosed):
                 await producer.recv()
             assert producer.close_code == POLICY_VIOLATION_CLOSE_CODE
+            disconnected_health = await _wait_for_producer_count(relay, 0)
+            assert disconnected_health["feed"] == "down"
             assert relay.state.snapshot() == original
         finally:
             await relay.close()

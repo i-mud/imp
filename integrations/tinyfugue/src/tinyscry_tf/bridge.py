@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import logging
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
@@ -31,8 +30,12 @@ class BridgeStats:
     published: int
 
 
-async def process_lines(lines: Iterable[str], publisher: StatePublisher) -> BridgeStats:
-    """Normalize a finite record stream and publish each material state transition."""
+async def process_lines(stream: TextIO, publisher: StatePublisher) -> BridgeStats:
+    """Normalize and publish records until a blocking text stream reaches EOF.
+
+    ``readline`` runs off the event-loop thread so the WebSocket client can
+    process close frames and keepalive traffic while stdin or a FIFO is idle.
+    """
 
     normalizer = Normalizer()
     received = 0
@@ -40,7 +43,10 @@ async def process_lines(lines: Iterable[str], publisher: StatePublisher) -> Brid
     published = 0
     last_published: GameState | None = None
 
-    for line in lines:
+    while True:
+        line = await asyncio.to_thread(stream.readline)
+        if line == "":
+            break
         received += 1
         parsed = parse_record(line)
         if not parsed.ok:

@@ -29,51 +29,98 @@ JSON parsing and conversion; it never executes data received from a MUD.
 
 ## Running
 
-On the VPS, start the relay then let the TF-side adapter write records to the bridge's standard input
-or to a FIFO:
+Create a private capture file before loading the hook. `fwrite()` appends to the
+file but does not set its permissions:
 
 ```sh
-uv run --project integrations/tinyfugue tinyscry-bridge < records.jsonl
-mkfifo /run/user/$UID/tinyscry-gmcp.fifo
-uv run --project integrations/tinyfugue tinyscry-bridge --fifo /run/user/$UID/tinyscry-gmcp.fifo
+install -d -m 700 "$HOME/.local/state/tinyscry"
+: >"$HOME/.local/state/tinyscry/gmcp.raw"
+chmod 600 "$HOME/.local/state/tinyscry/gmcp.raw"
 ```
 
-Replay the supplied fixture without a relay:
+In TinyFugue, load `tinyscry.tf` by absolute path:
+
+```text
+/load /absolute/path/to/integrations/tinyfugue/tinyscry.tf
+```
+
+The verified TF 5.1.6 hook appends `<epoch-seconds> <package> [JSON]` lines.
+`tinyscry-capture` checks and converts those lines to the adapter record
+contract. For a cold start, run the loopback relay and persistent pipeline in
+separate VPS terminals:
 
 ```sh
-uv run --project integrations/tinyfugue python -m tinyscry_tf.replay fixtures/session.jsonl --dry-run
+# Terminal 1
+uv run --directory services/relay tinyscry-relay
+
+# Terminal 2
+tail -n +1 -F "$HOME/.local/state/tinyscry/gmcp.raw" |
+  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-capture |
+  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-bridge
 ```
 
-`--dry-run` prints each changed, complete normalized state as protocol JSON and opens no socket.
-Use `--relay-url` and `--interval` for a paced live replay; non-loopback relay URLs also require
-`--allow-non-loopback`.
+`tail -n +1` replays the accumulated capture once so the relay receives an
+initial snapshot, then follows new records. Use `-n 0` only when deliberately
+ignoring existing state.
 
-## TinyFugue script and safe capture path
+The bridge reads stdin or a FIFO outside the asyncio event-loop thread. This is
+required: WebSocket close frames and keepalive traffic must still run while the
+input stream is idle. If the relay closes the producer socket, the old
+connection completes its close handshake. The next material state reconnects
+with bounded backoff and is sent before the bridge reads another record. Valid
+unknown packages and duplicate states remain intentional no-ops.
 
-`tinyscry.tf` documents the proposed hook for a TF build that exposes raw GMCP events. Do **not**
-use TF string interpolation to construct JSON or a shell command from GMCP. Vanilla TF has no
-verified JSON escaping API in this project, so the primary safe path is a small, build-specific TF
-hook that writes the complete raw GMCP event to a FIFO using an API that performs a direct write
-(not `/sh`, `/quote`, command substitution, or a shell). A local wrapper must then JSON-encode the
-record envelope before it reaches this bridge. Until that verified hook exists, use a capture/replay
-file generated outside TF; do not guess at quoting.
+All filenames and commands are fixed operator input. MUD data flows only
+through direct file and pipe APIs; it is never interpolated into a shell or TF
+command. To stop capture without closing TF, use
+`/undef tinyscry_capture_gmcp`.
 
-## Required real-session verification
+Convert an existing raw capture or replay adapter JSONL without a relay.
+Converted records are unredacted MUD data, so write them outside the
+repository:
 
-Everything marked `UNVERIFIED:` in code or `tinyscry.tf` is an interface placeholder validated only
-against fixtures. Before using this against a real session, capture and preserve a redacted stream,
-then confirm all of the following:
+```sh
+uv run --directory integrations/tinyfugue tinyscry-capture \
+  "$HOME/.local/state/tinyscry/gmcp.raw" \
+  --output "$HOME/.local/state/tinyscry/records.jsonl"
+uv run --directory integrations/tinyfugue python -m tinyscry_tf.replay \
+  fixtures/real-session.jsonl --dry-run
+```
 
-- Which GMCP packages this MUD actually sends and whether its package casing is stable.
-- The exact `Char.Vitals` keys and value types for current/max HP, mana, and movement.
-- Whether current and maximum values arrive together in `Char.Vitals` or in separate packages.
-- Whether `Char.Name` or `Char.Base` supplies the player name, and its exact key spelling.
-- The actual target/enemy package name, its label key, whether health is absolute or percentage,
-  and its percentage key spelling.
-- How target clearing/death is signalled (null payload, an empty object, a separate package, or
-  another explicit field).
-- The TinyFugue version and the precise GMCP hook/direct-write capability installed on the VPS.
+`--dry-run` prints each changed, complete normalized state as protocol JSON
+and opens no socket. Use `--relay-url` and `--interval` for a paced live
+replay; non-loopback relay URLs also require `--allow-non-loopback`.
 
-The default target mapping is the documented IRE `IRE.Target.Info` shape (`short_desc`, `hpperc`),
-but it is **not** evidence that this MUD emits it. Edit only the mapping table in
-`src/tinyscry_tf/normalize.py` after the verification capture is covered by tests.
+## Verified TinyFugue boundary
+
+The VPS build is TinyFugue 5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`.
+Its `GMCP` hook receives one raw positional string in the form `Package JSON`.
+Its `fwrite(filename, data)` function appends data and a newline directly to a
+fixed filename. Its `time()` function returns epoch seconds with six
+fractional digits, which `tinyscry-capture` converts to integer epoch
+milliseconds.
+
+The real capture contained 249 hook lines across 214.662 seconds. The converter
+accepted 200 records. It rejected 49 inventory events whose MUD payloads
+contained unescaped control characters inside JSON strings; it logged only
+bounded error codes and did not repair or execute the input.
+
+## Observed real-session schema
+
+The redacted fixture establishes these mappings:
+
+- `Char.Status.character_name` supplies identity.
+- `Char.Status.health`, `health_max`, `mana`, `mana_max`, `movement`, and
+  `movement_max` provide full or partial resource updates.
+- `Char.Vitals.hp`, `maxhp`, `mp`, `maxmp`, `mv`, and `maxmv` provide complete
+  resource snapshots. All observed resource values are decimal strings.
+- `Char.Status.opponent_name` supplies the target label.
+  `opponent_health` is a percentage string; every acquisition paired it with
+  `opponent_health_max` equal to `"100"`. Later damage updates supplied only
+  `opponent_health`.
+- An empty `opponent_name` with zero health fields clears the target.
+
+Every field required by the current HUD was present. The stream did not expose
+absolute target hit points; only the percentage-scale opponent fields were
+available. Room, group, and inventory packages remain deliberately unmapped,
+so valid unknown records preserve the exact previous HUD state.

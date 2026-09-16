@@ -20,7 +20,7 @@
   .target {
     display: grid;
     gap: 0.32rem;
-    padding-top: 0.45rem;
+    padding-top: 0.35rem;
     border-top: 1px solid rgba(191, 215, 235, 0.14);
   }
 

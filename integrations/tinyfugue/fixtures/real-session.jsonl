@@ -1,0 +1,14 @@
+{"at":1710000000000,"package":"Char.Group.List","payload":[]}
+{"at":1710000000100,"package":"Char.Status","payload":{"character_name":"Redacted Player","health":"3273","health_max":"3273","mana":"4189","mana_max":"4189","movement":"2147","movement_max":"2147"}}
+{"at":1710000000200,"package":"Char.Vitals","payload":{"hp":"3273","maxhp":"3273","mp":"4189","maxmp":"4189","mv":"2147","maxmv":"2147","position":"Sleep"}}
+{"at":1710000000300,"package":"Char.Vitals","payload":{"hp":"3273","maxhp":"3273","mp":"4151","maxmp":"4189","mv":"2147","maxmv":"2147","position":"Stand"}}
+{"at":1710000000400,"package":"Char.Vitals","payload":{"hp":"3273","maxhp":"3273","mp":"4151","maxmp":"4189","mv":"2141","maxmv":"2147","position":"Stand"}}
+{"at":1710000000500,"package":"Char.Status","payload":{"mana":"4189","movement":"2139"}}
+{"at":1710000000600,"package":"Char.Status","payload":{"health":"2847","mana":"3599","opponent_name":"Redacted Target","opponent_health":"81","opponent_health_max":"100","opponent_level":"80"}}
+{"at":1710000000700,"package":"Char.Vitals","payload":{"hp":"2847","maxhp":"3158","mp":"3599","maxmp":"3284","mv":"2100","maxmv":"1897","position":"Fight"}}
+{"at":1710000000800,"package":"Char.Vitals","payload":{"hp":"2199","maxhp":"3158","mp":"3599","maxmp":"3284","mv":"2100","maxmv":"1897","position":"Fight"}}
+{"at":1710000000900,"package":"Char.Status","payload":{"mana":"1831","opponent_health":"29"}}
+{"at":1710000001000,"package":"Char.Status","payload":{"mana":"1581","opponent_health":"0"}}
+{"at":1710000001100,"package":"Char.Status","payload":{"mana":"1497","opponent_name":"","opponent_health":"0","opponent_health_max":"0","opponent_level":"0"}}
+{"at":1710000001200,"package":"Char.Vitals","payload":{"hp":"822","maxhp":"3158","mp":"1459","maxmp":"3284","mv":"1810","maxmv":"2097","position":"Stand"}}
+{"at":1710000001300,"package":"Char.Status","payload":{"health":"1384","mana":"2481","movement":"2147"}}

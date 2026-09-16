@@ -14,17 +14,19 @@ Everything in the first row is the daily loop. Reasoning in
 
 ## Measured environment
 
-Observed on this machine during bootstrap:
+Observed on this machine:
 
 - WSL2: Node 24.12.0, npm 11.6.2, Python 3.14.4, uv 0.12.5, Docker 29.8.0.
-  **No** Rust toolchain, **no** `pkg-config`, **no** `webkit2gtk`, **no**
+  **No** Rust toolchain, **no** `pkg-config`, **no** `webkit2gtk`, and **no**
   passwordless sudo.
-- Windows: WebView2 runtime 152.0.4191.66 present. **No** Rust, **no** MSVC
-  Build Tools.
+- Windows 11 x64: Node 26.2.0, npm 12.0.2, Rust 1.98.1 stable with the
+  `x86_64-pc-windows-msvc` host, Visual Studio Professional 2022 with the
+  native desktop C++ workload, Windows SDK 10.0.22621.0, and WebView2 runtime
+  152.0.4191.66.
 
-Consequence: `npm run tauri:dev` cannot run here until a toolchain is
-installed. `npm run dev` (browser, mock source) works fully and is the
-recommended loop.
+The native shell was built and launched from a disposable Windows-filesystem
+mirror of the canonical WSL2 tree. `npm run dev` remains the fast frontend
+loop; `npm run tauri:dev` is the native window verification loop.
 
 ## Per-platform prerequisites
 
@@ -80,5 +82,6 @@ per platform.
 ## Verification
 
 Status: verified
-Verified against: bootstrap, on this machine, at the versions listed above.
+Verified against: Windows 11 native launch and direct window interaction at the
+versions above; Linux Rust compilation remains container-verified.
 Version numbers here go stale quickly - re-measure rather than trusting them.

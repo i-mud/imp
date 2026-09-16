@@ -29,17 +29,27 @@ class TargetMapping:
     health_percent: tuple[str, ...]
 
 
-# This is the only MUD-facing mapping table. Update it after preserving a real
-# GMCP capture in fixtures and extending tests for that capture.
+# Mappings below contain only package and field names observed in the redacted
+# real-session fixture.
 VITAL_MAPPINGS: Final = {
-    "hp": VitalKeys(current=("hp",), maximum=("maxhp",)),
-    "mana": VitalKeys(current=("mp", "mana"), maximum=("maxmp", "maxmana")),
-    "moves": VitalKeys(current=("ep", "moves"), maximum=("maxep", "maxmoves")),
+    "Char.Vitals": {
+        "hp": VitalKeys(current=("hp",), maximum=("maxhp",)),
+        "mana": VitalKeys(current=("mp",), maximum=("maxmp",)),
+        "moves": VitalKeys(current=("mv",), maximum=("maxmv",)),
+    },
+    "Char.Status": {
+        "hp": VitalKeys(current=("health",), maximum=("health_max",)),
+        "mana": VitalKeys(current=("mana",), maximum=("mana_max",)),
+        "moves": VitalKeys(current=("movement",), maximum=("movement_max",)),
+    },
 }
+NAME_MAPPINGS: Final = {"Char.Status": ("character_name",)}
 TARGET_MAPPINGS: Final = (
-    # UNVERIFIED: confirm that this MUD sends IRE.Target.Info and that its
-    # short_desc and hpperc fields mean target label and percentage health.
-    TargetMapping(package="IRE.Target.Info", name=("short_desc",), health_percent=("hpperc",)),
+    TargetMapping(
+        package="Char.Status",
+        name=("opponent_name",),
+        health_percent=("opponent_health",),
+    ),
 )
 
 
@@ -85,12 +95,19 @@ def _clamp_vital(value: int) -> int:
     return max(0, min(value, MAX_VITAL))
 
 
-def _read_vital(payload: JsonObject, keys: VitalKeys) -> Vital | None:
+def _update_vital(previous: Vital | None, payload: JsonObject, keys: VitalKeys) -> Vital | None:
     current = _integer(_first_value(payload, keys.current))
     maximum = _integer(_first_value(payload, keys.maximum))
-    if current is None or maximum is None:
-        return None
-    return Vital(current=_clamp_vital(current), max=_clamp_vital(maximum))
+    if current is None and maximum is None:
+        return previous
+    if previous is None:
+        if current is None or maximum is None:
+            return None
+        return Vital(current=_clamp_vital(current), max=_clamp_vital(maximum))
+    return Vital(
+        current=_clamp_vital(current if current is not None else previous.current),
+        max=_clamp_vital(maximum if maximum is not None else previous.max),
+    )
 
 
 def _read_percent(value: JsonValue | None) -> float | None:
@@ -111,53 +128,27 @@ def _read_percent(value: JsonValue | None) -> float | None:
     return max(0.0, min(percent, 100.0))
 
 
-def _with_vitals(state: GameState, payload: JsonObject) -> GameState:
-    if state.character is None:
-        return state
-
-    character = state.character
-    hp = _read_vital(payload, VITAL_MAPPINGS["hp"]) or character.hp
-    mana = _read_vital(payload, VITAL_MAPPINGS["mana"]) or character.mana
-    moves = _read_vital(payload, VITAL_MAPPINGS["moves"]) or character.moves
-    updated = Character(name=character.name, hp=hp, mana=mana, moves=moves)
-    candidate = GameState(character=updated, target=state.target)
-    return state if candidate == state else candidate
-
-
-def _with_name(state: GameState, payload: JsonObject) -> GameState:
-    raw_name = _first_value(payload, ("name",))
-    if not isinstance(raw_name, str):
-        return state
-    name = strip_control_characters(raw_name)
-    if not name:
-        return state
-    if state.character is None:
-        character = Character(name=name, hp=None, mana=None, moves=None)
-    else:
-        character = Character(
-            name=name,
-            hp=state.character.hp,
-            mana=state.character.mana,
-            moves=state.character.moves,
-        )
-    candidate = GameState(character=character, target=state.target)
-    return state if candidate == state else candidate
-
-
 def _with_target(state: GameState, payload: JsonValue, mapping: TargetMapping) -> GameState:
-    if payload is None:
-        candidate = GameState(character=state.character, target=None)
-        return state if candidate == state else candidate
     if not isinstance(payload, dict):
         return state
 
     raw_name = _first_value(payload, mapping.name)
-    if not isinstance(raw_name, str):
+    if raw_name is None:
+        if state.target is None:
+            return state
+        name = state.target.name
+    elif isinstance(raw_name, str):
+        name = strip_control_characters(raw_name)
+        if not name:
+            candidate = GameState(character=state.character, target=None)
+            return state if candidate == state else candidate
+    else:
         return state
-    name = strip_control_characters(raw_name)
-    if not name:
-        return state
-    health_percent = _read_percent(_first_value(payload, mapping.health_percent))
+
+    raw_health = _first_value(payload, mapping.health_percent)
+    health_percent = _read_percent(raw_health)
+    if raw_health is None and state.target is not None and name == state.target.name:
+        health_percent = state.target.health_percent
     candidate = GameState(
         character=state.character,
         target=Target(name=name, health_percent=health_percent),
@@ -165,25 +156,15 @@ def _with_target(state: GameState, payload: JsonValue, mapping: TargetMapping) -
     return state if candidate == state else candidate
 
 
-def normalize_record(previous: GameState, record: Record) -> GameState:
-    """Return a complete state after one recognized GMCP record.
-
-    Unknown packages are deliberately identity-preserving so adding server-only
-    GMCP traffic cannot perturb the HUD.
-    """
-
-    if record.package == "Char.Vitals" and isinstance(record.payload, dict):
-        return _with_vitals(previous, record.payload)
-    if record.package in {"Char.Name", "Char.Base"} and isinstance(record.payload, dict):
-        return _with_name(previous, record.payload)
-    for mapping in TARGET_MAPPINGS:
-        if record.package == mapping.package:
-            return _with_target(previous, record.payload, mapping)
-    return previous
-
-
 class Normalizer:
-    """Accumulates independently delivered GMCP packages into complete state."""
+    """Accumulates independently delivered GMCP packages into complete state.
+
+    This is the only normalization path. Identity, resources and target come in
+    separate packages, and sometimes in one, so state is accumulated per field
+    rather than derived from a single record. Unrecognized packages are
+    deliberately identity-preserving: server-only GMCP traffic cannot perturb
+    the HUD.
+    """
 
     def __init__(self) -> None:
         self._state = GameState(character=None, target=None)
@@ -206,29 +187,26 @@ class Normalizer:
         return GameState(character=character, target=self._target)
 
     def apply(self, record: Record) -> GameState:
-        if record.package == "Char.Vitals" and isinstance(record.payload, dict):
-            hp = _read_vital(record.payload, VITAL_MAPPINGS["hp"])
-            mana = _read_vital(record.payload, VITAL_MAPPINGS["mana"])
-            moves = _read_vital(record.payload, VITAL_MAPPINGS["moves"])
-            self._hp = hp or self._hp
-            self._mana = mana or self._mana
-            self._moves = moves or self._moves
-            self._state = self._rebuild_character()
-            return self._state
+        if isinstance(record.payload, dict):
+            vital_mapping = VITAL_MAPPINGS.get(record.package)
+            if vital_mapping is not None:
+                self._hp = _update_vital(self._hp, record.payload, vital_mapping["hp"])
+                self._mana = _update_vital(self._mana, record.payload, vital_mapping["mana"])
+                self._moves = _update_vital(self._moves, record.payload, vital_mapping["moves"])
 
-        if record.package in {"Char.Name", "Char.Base"} and isinstance(record.payload, dict):
-            raw_name = _first_value(record.payload, ("name",))
-            if isinstance(raw_name, str):
-                name = strip_control_characters(raw_name)
-                if name:
-                    self._name = name
-                    self._state = self._rebuild_character()
-            return self._state
+            name_mapping = NAME_MAPPINGS.get(record.package)
+            if name_mapping is not None:
+                raw_name = _first_value(record.payload, name_mapping)
+                if isinstance(raw_name, str):
+                    name = strip_control_characters(raw_name)
+                    if name:
+                        self._name = name
 
+        state = self._rebuild_character()
         for mapping in TARGET_MAPPINGS:
             if record.package == mapping.package:
-                updated = _with_target(self._rebuild_character(), record.payload, mapping)
+                updated = _with_target(state, record.payload, mapping)
                 self._target = updated.target
-                self._state = self._rebuild_character()
-                return self._state
+                break
+        self._state = self._rebuild_character()
         return self._state

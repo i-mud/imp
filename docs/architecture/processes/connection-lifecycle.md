@@ -50,6 +50,16 @@ Feed status, evaluated by the relay:
 The relay re-evaluates on a timer, so `live -> stale` is emitted without a
 publish arriving. Without that timer a dead feed would look live forever.
 
+Producer-side liveness has the same event-loop constraint. `tinyscry-bridge`
+waits for stdin or FIFO lines in a worker thread, leaving the asyncio loop free
+for the WebSocket client's receive, close-handshake, ping, and timeout tasks.
+When the relay closes `/ingest`, the client transport closes immediately
+rather than remaining in `CLOSE-WAIT`. The next material state observes the
+closed connection, disposes it, connects one replacement with bounded backoff,
+and sends that state before reading another input line. This applies
+backpressure while the relay is unavailable and prevents a second producer
+session from overlapping the first.
+
 ## HUD presentation states
 
 `freshnessOf()` in `apps/desktop/src/lib/hud/model.ts` classifies the pipeline;
@@ -76,13 +86,13 @@ current. `apps/desktop/test/model.test.ts` pins this as a regression.
 
 ## Failure boundaries
 
-| Failure                    | Behaviour                                              |
-| -------------------------- | ------------------------------------------------------ |
-| relay down at startup      | `connecting` -> `reconnecting`, backoff                |
-| SSH tunnel drops           | indistinguishable from relay down, same path           |
-| relay restarts             | new `hello`, `seq` reset, fresh snapshot               |
-| one subscriber disconnects | others unaffected                                      |
-| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data |
+| Failure                    | Behaviour                                                |
+| -------------------------- | -------------------------------------------------------- |
+| relay down at startup      | `connecting` -> `reconnecting`, backoff                  |
+| SSH tunnel drops           | indistinguishable from relay down, same path             |
+| relay restarts             | HUD reconnects; bridge reconnects on next material state |
+| one subscriber disconnects | others unaffected                                        |
+| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data   |
 
 Backoff is exponential with jitter and a cap, so a long outage does not become
 a reconnect storm when the relay returns.
@@ -93,7 +103,9 @@ a reconnect storm when the relay returns.
 - `apps/desktop/test/model.test.ts` - seq reset, reconnect display rule
 - `services/relay/tests/test_state.py` - feed transitions
 - `services/relay/tests/test_server.py` - hello/snapshot/status ordering,
-  subscriber isolation
+  subscriber isolation, producer-count cleanup
+- `integrations/tinyfugue/tests/test_bridge.py` - relay-initiated producer
+  close, clean handshake, single reconnect, subsequent delivery
 - `tests/e2e/relay_roundtrip.py` - reconnect receives the retained snapshot
 
 ## Change-impact notes

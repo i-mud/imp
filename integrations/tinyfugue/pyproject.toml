@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 tinyscry-bridge = "tinyscry_tf.bridge:main"
+tinyscry-capture = "tinyscry_tf.capture:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tinyscry_tf"]

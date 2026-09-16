@@ -7,17 +7,25 @@ from tinyscry_tf.records import parse_record
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
-def test_valid_session_records_parse() -> None:
-    results = [parse_record(line) for line in (FIXTURES / "session.jsonl").read_text().splitlines()]
+def test_sanitized_real_session_records_parse() -> None:
+    results = [parse_record(line) for line in (FIXTURES / "real-session.jsonl").read_text().splitlines()]
 
     assert all(result.ok for result in results)
     assert [result.record.package for result in results if result.record is not None] == [
-        "Char.Name",
+        "Char.Group.List",
+        "Char.Status",
         "Char.Vitals",
-        "IRE.Target.Info",
         "Char.Vitals",
-        "IRE.Target.Info",
-        "IRE.Target.Info",
+        "Char.Vitals",
+        "Char.Status",
+        "Char.Status",
+        "Char.Vitals",
+        "Char.Vitals",
+        "Char.Status",
+        "Char.Status",
+        "Char.Status",
+        "Char.Vitals",
+        "Char.Status",
     ]
 
 

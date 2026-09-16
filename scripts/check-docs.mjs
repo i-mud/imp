@@ -19,7 +19,7 @@ const repoRoot = resolve(import.meta.dirname, '..');
  * Paths the documentation deliberately names before they exist, because the
  * reader is being told to create them. Keep this list at zero where possible.
  */
-const PLANNED = new Set(['integrations/tinyfugue/fixtures/real-session.jsonl']);
+const PLANNED = new Set();
 
 const SKIP_PREFIX = ['http', 'ws:', 'wss:', 'mailto', '@', 'tinyscry_', 'dev.', '\\'];
 

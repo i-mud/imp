@@ -10,6 +10,7 @@ payload. TinyScry treats all of it as adversarial input.
 
 | Boundary                 | Enforced by                                            |
 | ------------------------ | ------------------------------------------------------ |
+| raw TF hook line         | `integrations/tinyfugue/src/tinyscry_tf/capture.py`    |
 | TF record envelope       | `integrations/tinyfugue/src/tinyscry_tf/records.py`    |
 | GMCP -> normalized state | `integrations/tinyfugue/src/tinyscry_tf/normalize.py`  |
 | producer output          | `publisher.py`, via `decode_game_state` before sending |
@@ -40,9 +41,12 @@ point a control character is a bug, and the decoder says so.
 No server-provided value is ever interpolated into a shell command, in any
 component. Concretely:
 
-- The TF integration's primary documented path is: TinyFugue writes raw GMCP to
-  a pipe, and all parsing happens in Python. TF is never asked to build a
-  command line out of server content.
+- The TF integration's documented path is: TinyFugue's `GMCP` hook appends
+  `<epoch-seconds> <package> [JSON]` to a fixed-path file with `fwrite`;
+  `tinyscry-capture` reads that file or stdin, parses each line and emits
+  checked adapter JSONL; `tinyscry-bridge` consumes it through a pipe. Every
+  parse happens in Python. TF is never asked to build a command line out of
+  server content, and the capture filename never contains MUD data.
 - `integrations/tinyfugue/src/tinyscry_tf/bridge.py` uses no `shell=True`, no
   `os.system`, and constructs no subprocess from record content.
 - The relay never executes anything, and the Tauri crate spawns no process.

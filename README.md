@@ -124,8 +124,8 @@ Endpoints: `/state` (subscribers), `/ingest` (producer), `/healthz`.
 Replay a fixture session through the real normalizer:
 
 ```bash
-npm run tf:replay -- fixtures/session.jsonl
-npm run tf:replay -- fixtures/session.jsonl --dry-run
+npm run tf:replay -- fixtures/real-session.jsonl
+npm run tf:replay -- fixtures/real-session.jsonl --dry-run
 ```
 
 `--dry-run` prints normalized states and touches no network.
@@ -152,25 +152,22 @@ The first slice uses this manual command deliberately. TinyScry stores no
 passwords and handles no private keys; SSH stays your `ssh` client and your
 agent.
 
-## How TinyFugue will feed it
+## How TinyFugue feeds it
 
-On the VPS, TinyFugue writes raw GMCP to a pipe and the Python bridge does all
-parsing - TinyFugue is never asked to build a command line out of server
-content:
+On the VPS, TinyFugue appends raw GMCP to a private capture file.
+`tinyscry-capture` validates and converts each raw event, and
+`tinyscry-bridge` publishes observed state changes:
 
 ```bash
-uv run --project integrations/tinyfugue python -m tinyscry_tf.bridge < /path/to/gmcp.pipe
+tail -n +1 -F "$HOME/.local/state/tinyscry/gmcp.raw" |
+  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-capture |
+  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-bridge
 ```
 
-The adapter interface, record format and fixtures are implemented and tested.
-The **GMCP capture hop is not yet verified against our MUD**: package names,
-key spellings and target semantics differ per MUD, and guessing them would be
-worse than leaving them marked.
-
-[`integrations/tinyfugue/README.md`](integrations/tinyfugue/README.md) lists
-exactly what must be captured from a real session. Everything downstream of
-normalization is fixture-verified, so completing that hop requires no change to
-the relay, the protocol, or the HUD.
+TinyFugue is never asked to build a command line out of server content. The
+verified hook, observed mappings, cold-start procedure, and record contract are
+documented in
+[`integrations/tinyfugue/README.md`](integrations/tinyfugue/README.md).
 
 ## Checks
 

@@ -79,7 +79,8 @@
 <style>
   .panel {
     display: grid;
-    min-height: 210px;
+    height: 100vh;
+    min-height: 0;
     overflow: hidden;
     border: 1px solid var(--panel-edge);
     border-radius: var(--radius);
@@ -136,8 +137,8 @@
   .content {
     display: grid;
     align-content: start;
-    gap: 0.56rem;
-    padding: 0.62rem 0.75rem 0.7rem;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem 0.25rem;
   }
   .character-name {
     overflow: hidden;

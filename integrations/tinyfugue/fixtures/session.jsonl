@@ -1,6 +1,0 @@
-{"at":1710000000000,"package":"Char.Name","payload":{"name":"Ariadne"}}
-{"at":1710000000100,"package":"Char.Vitals","payload":{"hp":"120","maxhp":"150","mp":"80","maxmp":"100","ep":"45","maxep":"60"}}
-{"at":1710000000200,"package":"IRE.Target.Info","payload":{"short_desc":"a cave troll","hpperc":"100%"}}
-{"at":1710000000300,"package":"Char.Vitals","payload":{"hp":"112","maxhp":"150","mp":"77","maxmp":"100","ep":"43","maxep":"60"}}
-{"at":1710000000400,"package":"IRE.Target.Info","payload":{"short_desc":"a cave troll","hpperc":"42%"}}
-{"at":1710000000500,"package":"IRE.Target.Info","payload":null}
