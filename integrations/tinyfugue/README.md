@@ -3,10 +3,10 @@
 TinyScry keeps MUD-specific data outside the desktop application:
 
 ```text
-MUD GMCP -> TinyFugue adapter record -> tinyscry-bridge -> relay ingest (loopback) -> SSH tunnel -> desktop HUD
+MUD GMCP -> TinyFugue hook -> private spool -> tinyscry-feed -> relay ingest (loopback) -> SSH tunnel -> desktop HUD
 ```
 
-The bridge connects only to `ws://127.0.0.1:8787/ingest` by default. The relay is deliberately
+`tinyscry-feed` connects only to `ws://127.0.0.1:8787/ingest` by default. The relay is deliberately
 loopback-only and has no application authentication: the SSH tunnel and the VPS loopback interface
 are the security boundary. A different host is rejected unless `--allow-non-loopback` is explicit.
 Never put a relay directly on a public interface.
@@ -27,53 +27,102 @@ The bridge rejects malformed, non-object, oversize, or unsafe records without lo
 content. It logs only a bounded rejection code and continues. The Python normalizer owns all GMCP
 JSON parsing and conversion; it never executes data received from a MUD.
 
-## Running
+## Running (normal production path)
 
-Create a private capture file before loading the hook. `fwrite()` appends to the
-file but does not set its permissions:
-
-```sh
-install -d -m 700 "$HOME/.local/state/tinyscry"
-: >"$HOME/.local/state/tinyscry/gmcp.raw"
-chmod 600 "$HOME/.local/state/tinyscry/gmcp.raw"
-```
-
-In TinyFugue, load `tinyscry.tf` by absolute path:
+Install the hook once so TinyFugue loads it automatically; see
+[`../../deploy/README.md`](../../deploy/README.md) for the full VPS systemd
+setup. In short:
 
 ```text
 /load /absolute/path/to/integrations/tinyfugue/tinyscry.tf
 ```
 
-The verified TF 5.1.6 hook appends `<epoch-seconds> <package> [JSON]` lines.
-`tinyscry-capture` checks and converts those lines to the adapter record
-contract. For a cold start, run the loopback relay and persistent pipeline in
-separate VPS terminals:
+The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
+`tinyscry-feed` creates that path as a symlink into its own private runtime
+directory and owns everything downstream of it - no manual file
+pre-creation is needed, unlike the earlier `gmcp.raw` setup:
 
 ```sh
 # Terminal 1
 uv run --directory services/relay tinyscry-relay
 
 # Terminal 2
-tail -n +1 -F "$HOME/.local/state/tinyscry/gmcp.raw" |
-  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-capture |
-  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-bridge
+uv run --directory integrations/tinyfugue tinyscry-feed
 ```
 
-`tail -n +1` replays the accumulated capture once so the relay receives an
-initial snapshot, then follows new records. Use `-n 0` only when deliberately
-ignoring existing state.
+`tinyscry-feed` replaces the earlier three-process
+`tail -F gmcp.raw | tinyscry-capture | tinyscry-bridge` pipeline for normal
+use. It:
 
-The bridge reads stdin or a FIFO outside the asyncio event-loop thread. This is
-required: WebSocket close frames and keepalive traffic must still run while the
-input stream is idle. If the relay closes the producer socket, the old
-connection completes its close handshake. The next material state reconnects
-with bounded backoff and is sent before the bridge reads another record. Valid
-unknown packages and duplicate states remain intentional no-ops.
+- acquires an exclusive runtime lock so a second accidental invocation - a
+  duplicate manual start, or a stray process left over from a crash - fails
+  immediately with a clear message instead of racing the running feed for the
+  same TinyFugue hook;
+- creates the private runtime spool and the hook's fixed-path symlink;
+- polls the spool, converts and normalizes each line with the same checked
+  parsing `tinyscry-capture` always used, and publishes only material state
+  changes, with the same bounded reconnect backoff `tinyscry-bridge` always
+  used.
+
+To stop the feed without closing TinyFugue, stop the `tinyscry-feed` process
+(or `systemctl --user stop tinyscry-feed.service` under the VPS deployment);
+the hook keeps trying to write and simply loses updates until a feed is
+running again. To stop the hook itself, use `/undef tinyscry_capture_gmcp`
+inside TinyFugue.
 
 All filenames and commands are fixed operator input. MUD data flows only
-through direct file and pipe APIs; it is never interpolated into a shell or TF
-command. To stop capture without closing TF, use
-`/undef tinyscry_capture_gmcp`.
+through direct file APIs; it is never interpolated into a shell or TF
+command.
+
+## Live feed transport: a drained spool, not a FIFO
+
+TinyFugue's `fwrite()` is `fopen(path, "a")`, one write, `fclose()` - a fresh,
+blocking open/write/close on every hook call, with no non-blocking option.
+Measured against the real TF 5.1.6-4-ga15a165 binary:
+
+| Target                                                       | Result                                                                                             |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| FIFO, no reader attached                                     | `fwrite()` blocked TinyFugue for the full call; killing the process was the only way to unblock it |
+| FIFO, a reader that stops reading once the pipe buffer fills | `fwrite()` blocked TinyFugue indefinitely                                                          |
+| Regular file, reader absent or slow                          | `fwrite()` returned immediately every time; TinyFugue never paused                                 |
+| Regular file with its directory removed                      | `fwrite()` failed and printed one error line; TinyFugue continued in the same call                 |
+
+A FIFO on the TinyFugue-facing hop can freeze the MUD client, which this
+project's fail-open requirement forbids, and TinyFugue's `fwrite()` gives no
+way to harden that: it is not TinyScry code and offers no non-blocking mode.
+The live transport is therefore a private regular file that
+`tinyscry-feed` continuously drains. Once a fully drained generation crosses
+64 KiB, the reader renames that inode to `spool.retired` and creates a fresh
+active spool instead of truncating an inode TinyFugue may already have open.
+The retired generation remains readable long enough to collect any append that
+raced the rename, then is removed after the next active generation reaches the
+rotation threshold. At most two bounded runtime generations are retained.
+
+`fopen(path, "a")` reopens the stable hook path on every call, so the next
+TinyFugue event follows the current spool generation without a TinyFugue
+restart. When the feed stops, the hook-facing symlink is removed; the systemd
+unit also removes it after abnormal service termination, so feed absence drops
+updates instead of accumulating an unbounded raw file.
+
+`tinyscry-bridge --fifo` is unrelated to this hop and unchanged: it reads
+already-normalized adapter records (not raw hook output) from a FIFO some
+other producer writes to, for cases such as feeding pre-converted records
+into a relay by hand. Its writer is always TinyScry-controlled code, not
+TinyFugue, so the blocking-writer problem above does not apply to it.
+
+## Diagnostic raw capture (opt-in)
+
+Normal operation retains raw GMCP only in the private, bounded,
+ephemeral live spool. It does not retain raw diagnostic history.
+`tinyscry-feed --diagnostic-capture` writes each raw hook line, unparsed, to a
+private, size-rotated file set
+under `~/.local/state/tinyscry/diagnostics/` (mode `0700` directory, `0600`
+files, 1 MiB per file, 5 files kept). This is a debugging aid for a specific
+session, not a default; see
+[`../../deploy/README.md`](../../deploy/README.md) for enabling it under the
+VPS systemd deployment.
+
+## Offline conversion and replay
 
 Convert an existing raw capture or replay adapter JSONL without a relay.
 Converted records are unredacted MUD data, so write them outside the
@@ -81,7 +130,7 @@ repository:
 
 ```sh
 uv run --directory integrations/tinyfugue tinyscry-capture \
-  "$HOME/.local/state/tinyscry/gmcp.raw" \
+  "$HOME/.local/state/tinyscry/diagnostics/gmcp.raw" \
   --output "$HOME/.local/state/tinyscry/records.jsonl"
 uv run --directory integrations/tinyfugue python -m tinyscry_tf.replay \
   fixtures/real-session.jsonl --dry-run

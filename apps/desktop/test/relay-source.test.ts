@@ -129,4 +129,30 @@ describe('RelayStateSource', () => {
       vi.useRealTimers();
     }
   });
+
+  it('prefers a supplied diagnostic detail over the generic reconnect message', () => {
+    const sockets: FakeWebSocket[] = [];
+    const events: SourceEvent[] = [];
+    const source = new RelayStateSource({
+      url: 'ws://127.0.0.1:8787/state',
+      reconnect: { initialDelayMs: 100, maxDelayMs: 1_000, factor: 2 },
+      webSocketFactory: (url) => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      diagnosticDetail: () => 'SSH tunnel unavailable.',
+    });
+    source.start((event) => events.push(event));
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('expected relay socket');
+    socket.emit('close', new Event('close'));
+
+    expect(events).toContainEqual({
+      kind: 'connection',
+      phase: 'reconnecting',
+      detail: 'SSH tunnel unavailable.',
+    });
+    source.stop();
+  });
 });

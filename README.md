@@ -39,6 +39,7 @@ tinyscry/
   services/relay/         Python WebSocket relay (loopback only)
   integrations/tinyfugue/ GMCP capture, normalization, publisher
   packages/protocol/      Canonical wire protocol, validation, fixtures
+  deploy/                 VPS systemd units and install documentation
   tests/e2e/              Cross-component end-to-end check
   docs/                   Architecture map, decisions, status
 ```
@@ -138,36 +139,81 @@ VITE_TINYSCRY_SOURCE=relay VITE_TINYSCRY_RELAY_URL=ws://127.0.0.1:8787/state npm
 
 ## SSH tunnel
 
-With the relay running on the VPS bound to loopback, forward it:
+TinyScry never talks SSH itself; it always uses the platform's system OpenSSH
+client, your `~/.ssh/config`, `known_hosts` and agent. It stores no password
+and handles no private key. Two modes, selected by
+`tunnel.json` in the app's config directory
+(`~/.config/dev.tinyscry.hud/tunnel.json` on Linux,
+`%APPDATA%\dev.tinyscry.hud\tunnel.json` on Windows,
+`~/Library/Application Support/dev.tinyscry.hud/tunnel.json` on macOS) -
+created with a safe default the first time TinyScry runs:
+
+```json
+{ "mode": "external", "sshTarget": "" }
+```
+
+### External mode (default)
+
+TinyScry owns no SSH process. Forward the relay yourself:
 
 ```bash
 ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
 ```
 
 Then point the HUD at `ws://127.0.0.1:8787/state` exactly as in step 5 - it
-cannot tell a tunnel from a local relay, which is what makes automated tunnel
-management a later additive change.
+cannot tell a manual tunnel from a local relay. This is the mode to keep for
+development or an unusual SSH setup.
 
-The first slice uses this manual command deliberately. TinyScry stores no
-passwords and handles no private keys; SSH stays your `ssh` client and your
-agent.
+### Managed mode
+
+Set `mode` to `"managed"` and `sshTarget` to an existing `Host` alias from
+your `~/.ssh/config` - the same alias `ssh <alias>` already connects with:
+
+```json
+{ "mode": "managed", "sshTarget": "avatar" }
+```
+
+On launch, TinyScry's Rust backend spawns and supervises exactly one child
+equivalent to:
+
+```text
+ssh -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    -L 127.0.0.1:8787:127.0.0.1:8787 -- <sshTarget>
+```
+
+directly by argv, never through a shell. Host-key verification is never
+weakened - `StrictHostKeyChecking` and `UserKnownHostsFile` are never
+overridden, so an unknown or changed host key is refused exactly as it would
+be from a terminal. `BatchMode=yes` means a setup that would prompt (an agent
+without the key loaded, a passphrase-only key) fails fast instead of hanging;
+confirm `ssh <alias>` already connects non-interactively before switching to
+managed mode.
+
+If the child exits or the connection drops, TinyScry reconnects with bounded
+backoff. If local port `8787` is already occupied, TinyScry never kills the
+owning process: it verifies whether that port already answers with TinyScry's
+relay health shape and, if so, uses it; otherwise it reports the conflict and
+does not start a child. Closing TinyScry terminates only the child it spawned.
+
+`ws://127.0.0.1:8787/state` remains the HUD's default relay URL in both modes.
 
 ## How TinyFugue feeds it
 
-On the VPS, TinyFugue appends raw GMCP to a private capture file.
-`tinyscry-capture` validates and converts each raw event, and
-`tinyscry-bridge` publishes observed state changes:
+On the VPS, TinyFugue's hook writes to a private spool that `tinyscry-feed`
+drains, checks, normalizes and publishes as one process - no unbounded raw
+capture file and no separate pipeline stages to keep alive by hand:
 
 ```bash
-tail -n +1 -F "$HOME/.local/state/tinyscry/gmcp.raw" |
-  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-capture |
-  PYTHONUNBUFFERED=1 uv run --directory integrations/tinyfugue tinyscry-bridge
+uv run --directory integrations/tinyfugue tinyscry-feed
 ```
 
 TinyFugue is never asked to build a command line out of server content. The
-verified hook, observed mappings, cold-start procedure, and record contract are
-documented in
-[`integrations/tinyfugue/README.md`](integrations/tinyfugue/README.md).
+verified hook, why the transport is a drained file rather than a FIFO, the
+observed mappings, and the record contract are documented in
+[`integrations/tinyfugue/README.md`](integrations/tinyfugue/README.md). For
+the full VPS install - systemd units, lingering, the TinyFugue hook install
+step - see [`deploy/README.md`](deploy/README.md).
 
 ## Checks
 

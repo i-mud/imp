@@ -14,9 +14,8 @@ MUD
  |  GMCP packages
 TinyFugue  ---- integrations/tinyfugue/tinyscry.tf
  |  <epoch-seconds> <package> [JSON]
-capture.py                 (checked epoch conversion + JSON envelope)
- |  newline-delimited adapter JSON records
-bridge.py
+private drained spool
+ |  tinyscry-feed: checked epoch conversion + JSON envelope
  |  records.parse_record   (fail-closed, bounded, counted rejections)
 normalize.py
  |  GameState              <-- last point where GMCP concepts exist
@@ -41,12 +40,12 @@ path exercises real validation rather than bypassing it.
 
 ## Major dependencies
 
-| Hop             | Depends on                                  |
-| --------------- | ------------------------------------------- |
-| TF -> bridge    | Verified TinyFugue GMCP hook + `capture.py` |
-| bridge -> relay | `websockets` client                         |
-| relay -> HUD    | SSH port-forward, `websockets` server       |
-| HUD             | Tauri 2 webview, Svelte 5                   |
+| Hop           | Depends on                                      |
+| ------------- | ----------------------------------------------- |
+| TF -> feed    | verified TinyFugue hook + private drained spool |
+| feed -> relay | `websockets` client                             |
+| relay -> HUD  | system OpenSSH forward, `websockets` server     |
+| HUD           | Tauri 2 webview, Svelte 5                       |
 
 ## Validation points
 
@@ -66,6 +65,9 @@ State is validated three times, and this is intentional rather than redundant:
 | unrecognised GMCP package   | previous state retained unchanged                                 |
 | malformed `publish`         | rejected whole; stored state untouched; producer closed           |
 | relay closes producer       | socket closes; next material state reconnects before further read |
+| feed process exits          | systemd restarts one lock-protected replacement                   |
+| hook spool target missing   | TinyFugue loses updates but never blocks                          |
+| managed SSH child exits     | supervisor retries; HUD remains in reconnecting presentation      |
 | producer disconnects        | snapshot retained; `feed` becomes `down`                          |
 | malformed `snapshot` at HUD | `protocol-error`; HUD state untouched                             |
 | unknown message `type`      | silently ignored (forwards compatibility)                         |
@@ -77,8 +79,10 @@ State is validated three times, and this is intentional rather than redundant:
   (shared corpus, both languages)
 - `services/relay/tests/test_server.py` (loopback server and producer lifecycle)
 - `integrations/tinyfugue/tests/test_bridge.py` (producer close and reconnect)
+- `integrations/tinyfugue/tests/test_spool.py` and `test_feed.py` (live path,
+  restart, single producer)
 - `integrations/tinyfugue/tests/test_normalize.py` (GMCP mapping)
-- `apps/desktop/test/` (reducer and both sources)
+- `apps/desktop/test/` and Rust tunnel tests (source, reducer, SSH lifecycle)
 - `tests/e2e/relay_roundtrip.py` (producer -> relay -> subscriber)
 
 ## Change-impact notes

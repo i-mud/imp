@@ -1,0 +1,103 @@
+# Managed runtime lifecycle
+
+## Why this is a process card
+
+The managed runtime crosses two machines and three independent owners. Process
+ownership must stay explicit: TinyScry owns its relay, feed, and SSH child; it
+never owns or daemonizes the operator's interactive TinyFugue session.
+
+## Ownership
+
+| Resource                                       | Owner                          | Lifecycle                                     |
+| ---------------------------------------------- | ------------------------------ | --------------------------------------------- |
+| TinyFugue session                              | operator                       | started and stopped interactively             |
+| GMCP hook                                      | TinyFugue startup config       | fixed named `/def`; repeated loads replace it |
+| live spool, conversion, normalization, publish | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`      |
+| loopback relay                                 | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`        |
+| local SSH forward                              | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process  |
+| WebSocket reconnect and public HUD state       | `RelayStateSource` / HUD model | unchanged four-state presentation             |
+
+User lingering makes the two VPS user units available after reboot without a
+root-owned service or an administrative SSH session. The feed `Wants=` the
+relay but does not `Require=` it: its existing publisher reconnect loop owns a
+relay outage.
+
+## Live path
+
+```text
+interactive TinyFugue
+  -> fixed-path fwrite hook
+  -> ~/.local/state/tinyscry/spool (symlink)
+  -> private $XDG_RUNTIME_DIR/tinyscry/spool
+  -> tinyscry-feed (check -> normalize -> publish)
+  -> tinyscry-relay on 127.0.0.1:8787
+  -> system OpenSSH local forward
+  -> RelayStateSource
+  -> existing HUD model
+```
+
+The TinyFugue-facing hop is deliberately a drained regular file, not a FIFO.
+The real TinyFugue 5.1.6 `fwrite()` performs a blocking open/write/close and has
+no non-blocking mode: no reader or a full FIFO froze the interactive client.
+A regular file returns immediately. The reader bounds raw runtime storage by
+rotating a fully drained active inode to a retired generation and creating a
+fresh active spool; it never truncates an inode that TinyFugue may already
+have open. The fixed hook symlink is removed when the feed stops and recreated
+when it starts again. Lost updates while the feed itself is unavailable are
+acceptable; blocking the MUD client is not.
+
+Normal operation persists no raw diagnostic capture. An explicit
+`--diagnostic-capture` option writes private, size-rotated files outside the
+repository.
+
+## Desktop tunnel boundary
+
+`apps/desktop/src-tauri/src/tunnel.rs` directly spawns the platform `ssh`
+client with argv, loopback forwarding, `ExitOnForwardFailure`, keepalives, and
+bounded reconnect backoff. It does not parse SSH config or handle credentials.
+The target is an existing SSH `Host` alias, so OpenSSH continues to own agent,
+`IdentityFile`, `ProxyJump`, `known_hosts`, and host verification.
+
+Port `8787` is fixed on both sides. Before spawning, managed mode distinguishes
+a TinyScry-shaped `/healthz` endpoint from an unrelated listener. It uses a
+verified existing endpoint or reports a conflict; it never kills the listener.
+Shutdown signals only the stored child handle.
+
+The Tauri command exposes only a transport diagnostic enum. `config.ts` feeds
+a human-readable detail into `RelayStateSource`; Svelte components still see
+only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
+`LIVE` presentation remains in the existing model.
+
+## Failure boundaries
+
+| Failure                                | Recovery / visible result                                      |
+| -------------------------------------- | -------------------------------------------------------------- |
+| relay process exits                    | systemd restarts it; feed publisher reconnects                 |
+| feed process exits                     | lock releases with the process; systemd starts one replacement |
+| TinyFugue absent                       | services stay healthy; relay reports feed down/stale           |
+| spool target replaced                  | next TinyFugue hook call reopens the stable path               |
+| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects         |
+| local port occupied by TinyScry relay  | use external endpoint; spawn no child                          |
+| local port occupied by another service | report conflict; spawn and kill nothing                        |
+| TinyScry closes                        | terminate and reap only its owned SSH child                    |
+
+## Source and checks
+
+- `integrations/tinyfugue/src/tinyscry_tf/feed.py` - feed orchestration
+- `integrations/tinyfugue/src/tinyscry_tf/spool.py` - private spool and producer lock
+- `integrations/tinyfugue/src/tinyscry_tf/diagnostics.py` - opt-in bounded capture
+- `integrations/tinyfugue/tinyscry.tf` - idempotent fixed-path hook
+- `deploy/systemd/` - VPS user units
+- `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership
+- `apps/desktop/src-tauri/src/tunnel_config.rs` - mode and SSH alias
+- `apps/desktop/src/lib/tunnel.ts` - transport-independent diagnostic polling
+
+Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
+`test_feed.py`, `test_diagnostics.py`, `apps/desktop/src-tauri/src/tunnel.rs`,
+and `apps/desktop/test/relay-source.test.ts`.
+
+## Verification
+
+Status: verified
+Verified against: focused Python, Rust, and frontend tests plus the managed
+runtime failure/recovery checks recorded in `docs/status.md`.

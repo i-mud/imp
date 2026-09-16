@@ -4,7 +4,7 @@
 
 The HUD's transport boundary. A `StateSource` turns "something out there" into
 a stream of `SourceEvent`s. It is the seam that keeps the UI ignorant of
-WebSockets, of the relay, and eventually of SSH.
+WebSockets, the relay, and SSH process details.
 
 ## Source
 
@@ -14,6 +14,8 @@ WebSockets, of the relay, and eventually of SSH.
 - `apps/desktop/src/lib/source/relay.ts` - `RelayStateSource`
 - `apps/desktop/src/lib/config.ts` - the only module allowed to name a concrete
   implementation
+- `apps/desktop/src/lib/tunnel.ts` - polls transport-independent diagnostics
+  exposed by the Tauri backend
 
 ## Relationships
 
@@ -39,28 +41,18 @@ Two requirements land on it:
 
 1. The app must be usable immediately without TinyFugue or the VPS, without the
    UI knowing it is being fed mock data.
-2. Automated SSH tunnel management must be addable later without touching the
-   UI or the protocol.
+2. Managed SSH diagnostics must enrich relay connection failures without
+   exposing SSH argv, PIDs, or child-process lifecycle to components.
 
-Both hold because the UI's only contract is `SourceEvent`.
+Both hold because the UI's only contract is `SourceEvent`. The Rust
+`TunnelSupervisor` runs before the webview, while `config.ts` supplies a
+synchronous diagnostic accessor to `RelayStateSource`. A relay reconnect event
+therefore carries the best known transport detail when evidence exists; the
+event kind, reducer, store, and components are unchanged.
 
-Precisely what automating the tunnel does and does not cost, verified against
-the current source rather than asserted:
-
-| Unaffected                                        | Will need editing                         |
-| ------------------------------------------------- | ----------------------------------------- |
-| `packages/protocol` - the wire format             | a new SSH process/lifecycle module        |
-| `types.ts` - `StateSource`, `SourceEvent`         | `config.ts`, the composition root         |
-| `model.ts`, `store.svelte.ts` - the reducer       | `App.svelte`, which wires source to store |
-| every component in `apps/desktop/src/components/` | Tauri capabilities, to spawn a process    |
-
-So "no UI or protocol change" holds. "Only the URL changes" would not: there
-is deliberately **no** async pre-`start()` seam today - `start()` is
-synchronous and `App.svelte` calls it immediately - so establishing a tunnel
-first means adding that lifecycle step in the composition root. That is the
-right place for it, and `config.ts` exists precisely to absorb this kind of
-wiring, but it is an edit, not a free extension. Inventing the seam now would
-be abstraction for a requirement that has no implementation yet.
+The tunnel does not introduce a second top-level state machine. The public HUD
+states still derive from relay socket phase plus feed liveness. See
+`docs/architecture/processes/managed-runtime.md`.
 
 ## Change impact
 

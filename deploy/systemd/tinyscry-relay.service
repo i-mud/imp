@@ -1,0 +1,13 @@
+[Unit]
+Description=TinyScry loopback state relay
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/tinyscry/services/relay/.venv/bin/tinyscry-relay --host 127.0.0.1 --port 8787
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

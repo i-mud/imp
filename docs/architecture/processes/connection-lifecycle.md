@@ -86,20 +86,23 @@ current. `apps/desktop/test/model.test.ts` pins this as a regression.
 
 ## Failure boundaries
 
-| Failure                    | Behaviour                                                |
-| -------------------------- | -------------------------------------------------------- |
-| relay down at startup      | `connecting` -> `reconnecting`, backoff                  |
-| SSH tunnel drops           | indistinguishable from relay down, same path             |
-| relay restarts             | HUD reconnects; bridge reconnects on next material state |
-| one subscriber disconnects | others unaffected                                        |
-| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data   |
+| Failure                    | Behaviour                                                            |
+| -------------------------- | -------------------------------------------------------------------- |
+| relay down at startup      | `connecting` -> `reconnecting`, backoff                              |
+| managed SSH tunnel drops   | same reconnect state, enriched with SSH detail when supervisor knows |
+| relay restarts             | HUD reconnects; bridge reconnects on next material state             |
+| one subscriber disconnects | others unaffected                                                    |
+| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data               |
 
 Backoff is exponential with jitter and a cap, so a long outage does not become
 a reconnect storm when the relay returns.
 
 ## Relevant tests
 
-- `apps/desktop/test/relay-source.test.ts` - phases, backoff, `stop()`
+- `apps/desktop/test/relay-source.test.ts` - phases, backoff, `stop()`,
+  diagnostic detail
+- `apps/desktop/src-tauri/src/tunnel.rs` - port classification, argv,
+  reconnect failure and owned-child shutdown
 - `apps/desktop/test/model.test.ts` - seq reset, reconnect display rule
 - `services/relay/tests/test_state.py` - feed transitions
 - `services/relay/tests/test_server.py` - hello/snapshot/status ordering,
@@ -110,13 +113,13 @@ a reconnect storm when the relay returns.
 
 ## Change-impact notes
 
-The SSH tunnel is invisible here on purpose: to the HUD it is indistinguishable
-from a local relay. Automating tunnel management adds a step before `start()`
-and changes the URL - it does not add a state to this machine. See
-`docs/architecture/objects/state-source.md` and
-`docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md`.
+The SSH supervisor is intentionally outside this state machine. Its internal
+diagnostic may refine a reconnect detail, but it does not add a `SourceEvent`
+kind or a public HUD state. See `docs/architecture/objects/state-source.md` and
+`docs/architecture/processes/managed-runtime.md`.
 
 ## Verification
 
 Status: verified
-Verified against: bootstrap test runs listed above.
+Verified against: managed-runtime tests listed above and the original
+connection-lifecycle runtime checks recorded in `docs/status.md`.

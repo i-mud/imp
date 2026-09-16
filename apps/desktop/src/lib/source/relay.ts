@@ -17,6 +17,14 @@ export interface RelaySourceOptions {
     readonly factor: number;
   };
   readonly webSocketFactory?: WebSocketFactory;
+  /**
+   * Best-known transport-level reason for the current unavailability, e.g.
+   * from a managed SSH tunnel supervisor. Called only when a socket-level
+   * event has no more specific detail of its own; a `null` return leaves the
+   * generic detail in place. This is the seam a managed tunnel enriches
+   * without this source knowing anything about SSH.
+   */
+  readonly diagnosticDetail?: () => string | null;
 }
 
 export class RelayStateSource implements StateSource {
@@ -123,7 +131,11 @@ export class RelayStateSource implements StateSource {
   private reconnect(detail: string): void {
     if (!this.running || this.reconnectTimer !== null) return;
     this.socket = null;
-    this.emit({ kind: 'connection', phase: 'reconnecting', detail });
+    this.emit({
+      kind: 'connection',
+      phase: 'reconnecting',
+      detail: this.options.diagnosticDetail?.() ?? detail,
+    });
 
     const jitter = 0.75 + Math.random() * 0.5;
     const delay = Math.min(this.nextDelayMs, this.options.reconnect.maxDelayMs) * jitter;
@@ -141,5 +153,3 @@ export class RelayStateSource implements StateSource {
     this.listener?.(event);
   }
 }
-
-// Future automated tunnel management changes only the URL supplied to this source.

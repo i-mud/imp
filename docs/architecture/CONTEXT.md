@@ -26,6 +26,7 @@ MUD -> GMCP -> TinyFugue -> TinyScry TF adapter -> relay (loopback) -> SSH tunne
 | Desktop HUD (Tauri + Svelte) | `apps/desktop/`             |
 | Relay service (Python)       | `services/relay/`           |
 | TinyFugue integration        | `integrations/tinyfugue/`   |
+| VPS systemd units, install   | `deploy/`                   |
 | Cross-component e2e check    | `tests/e2e/`                |
 | Commands, prerequisites      | `README.md`                 |
 | Platform/build strategy      | `docs/development.md`       |
@@ -37,12 +38,12 @@ Read the card for the concept you are changing, then the source it cites.
 
 ### Objects
 
-| Card                                                 | Covers                                             |
-| ---------------------------------------------------- | -------------------------------------------------- |
-| [`objects/game-state.md`](objects/game-state.md)     | the normalized state shape and who depends on it   |
-| [`objects/relay.md`](objects/relay.md)               | the relay's state ownership and endpoints          |
-| [`objects/state-source.md`](objects/state-source.md) | the HUD's transport boundary and where SSH will go |
-| [`objects/hud-model.md`](objects/hud-model.md)       | how the HUD turns events into rendered state       |
+| Card                                                 | Covers                                           |
+| ---------------------------------------------------- | ------------------------------------------------ |
+| [`objects/game-state.md`](objects/game-state.md)     | the normalized state shape and who depends on it |
+| [`objects/relay.md`](objects/relay.md)               | the relay's state ownership and endpoints        |
+| [`objects/state-source.md`](objects/state-source.md) | HUD transport boundary and tunnel diagnostics    |
+| [`objects/hud-model.md`](objects/hud-model.md)       | how the HUD turns events into rendered state     |
 
 ### Processes
 
@@ -50,6 +51,7 @@ Read the card for the concept you are changing, then the source it cites.
 | ------------------------------------------------------------------------ | --------------------------------------- |
 | [`processes/state-pipeline.md`](processes/state-pipeline.md)             | GMCP to pixels, hop by hop              |
 | [`processes/connection-lifecycle.md`](processes/connection-lifecycle.md) | connect, reconnect, stale feed, no data |
+| [`processes/managed-runtime.md`](processes/managed-runtime.md)           | VPS services, live feed, SSH ownership  |
 
 ### Boundaries
 

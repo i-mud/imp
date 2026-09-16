@@ -33,10 +33,12 @@ id_rsa*
 id_ed25519*
 known_hosts
 
-# Private capture output. Raw GMCP and its converted records are unredacted MUD
-# data; only the sanitized fixtures under integrations/tinyfugue/fixtures/ are
-# tracked.
-gmcp.raw
+# Private capture output. Raw GMCP, the live spool and diagnostic captures are
+# unredacted MUD data; only the sanitized fixtures under
+# integrations/tinyfugue/fixtures/ are tracked. gmcp.raw* also matches the
+# diagnostics directory's rotated files (gmcp.raw.1, gmcp.raw.2, ...).
+gmcp.raw*
+spool
 records*.jsonl
 
 # Editors / OS

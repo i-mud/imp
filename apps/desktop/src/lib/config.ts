@@ -1,6 +1,7 @@
 import { MockStateSource } from './source/mock.ts';
 import { RelayStateSource } from './source/relay.ts';
 import type { StateSource } from './source/types.ts';
+import { watchTunnelDiagnostics } from './tunnel.ts';
 
 const DEFAULT_RELAY_URL = 'ws://127.0.0.1:8787/state';
 
@@ -19,6 +20,7 @@ export function createStateSource(): StateSource {
     return new RelayStateSource({
       url: readRelayUrl(import.meta.env.VITE_TINYSCRY_RELAY_URL ?? DEFAULT_RELAY_URL),
       reconnect: { initialDelayMs: 500, maxDelayMs: 10_000, factor: 2 },
+      diagnosticDetail: watchTunnelDiagnostics(),
     });
   }
   throw new Error('VITE_TINYSCRY_SOURCE must be "mock" or "relay".');
