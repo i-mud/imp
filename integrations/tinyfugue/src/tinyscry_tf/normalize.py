@@ -51,6 +51,12 @@ TARGET_MAPPINGS: Final = (
         health_percent=("opponent_health",),
     ),
 )
+# AVATAR does not always emit an explicit opponent-clear record. The redacted
+# fixture contains one (empty opponent_name), but a later capture ended a fight
+# with no clear record at all, so both mechanisms are required: the explicit
+# empty opponent_name above, and this observed combat-position lifecycle.
+POSITION_MAPPINGS: Final = {"Char.Vitals": ("position",)}
+FIGHT_POSITION: Final = "Fight"
 
 
 def _is_unsafe_text_character(character: str) -> bool:
@@ -164,15 +170,23 @@ class Normalizer:
     rather than derived from a single record. Unrecognized packages are
     deliberately identity-preserving: server-only GMCP traffic cannot perturb
     the HUD.
+
+    A target restored from the private checkpoint is supplied as
+    ``seeded_target``. It carries no observed combat history, so the first
+    non-Fight position retires it instead of leaving it to survive until some
+    future fight ends. Only the feed knows that provenance; it is never
+    inferred from the target's contents.
     """
 
-    def __init__(self) -> None:
-        self._state = GameState(character=None, target=None)
+    def __init__(self, *, seeded_target: Target | None = None) -> None:
+        self._state = GameState(character=None, target=seeded_target)
         self._name: str | None = None
         self._hp: Vital | None = None
         self._mana: Vital | None = None
         self._moves: Vital | None = None
-        self._target: Target | None = None
+        self._target: Target | None = seeded_target
+        self._position: str | None = None
+        self._target_is_seeded = seeded_target is not None
 
     @property
     def state(self) -> GameState:
@@ -202,11 +216,32 @@ class Normalizer:
                     if name:
                         self._name = name
 
+            position_mapping = POSITION_MAPPINGS.get(record.package)
+            if position_mapping is not None:
+                raw_position = _first_value(record.payload, position_mapping)
+                if isinstance(raw_position, str):
+                    position = strip_control_characters(raw_position).strip()
+                    if position:
+                        # Either the target was only restored from a checkpoint
+                        # and live play is not in combat, or combat just ended.
+                        if position != FIGHT_POSITION and (
+                            self._target_is_seeded or self._position == FIGHT_POSITION
+                        ):
+                            self._target = None
+                        self._target_is_seeded = False
+                        self._position = position
+
         state = self._rebuild_character()
         for mapping in TARGET_MAPPINGS:
             if record.package == mapping.package:
                 updated = _with_target(state, record.payload, mapping)
                 self._target = updated.target
+                if isinstance(record.payload, dict) and isinstance(
+                    _first_value(record.payload, mapping.name), str
+                ):
+                    # A live opponent_name is authoritative. Health-only deltas
+                    # must never confirm a target restored from the checkpoint.
+                    self._target_is_seeded = False
                 break
         self._state = self._rebuild_character()
         return self._state

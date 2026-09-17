@@ -20,5 +20,18 @@
 ; {*} preserves that argument as data. time() returns epoch seconds with six
 ; fractional digits; tinyscry-feed performs the checked millisecond
 ; conversion and JSON envelope encoding.
-/def -ag -h"GMCP" tinyscry_capture_gmcp = \
+;
+; -F (fall-through) and an explicit priority 2 keep this hook observational.
+; TinyFugue runs the highest-priority matching hook first and stops there
+; unless that hook falls through. Operators commonly already own a generic
+; GMCP hook at the default priority 1, such as `received-gmcp`; two
+; same-priority non-fall-through hooks on one event compete, and in live
+; testing that intermittently lost whole GMCP events - some fights never
+; acquired a target while resource updates kept arriving. TinyScry's priority
+; 2 runs ahead of the operator's priority-1 handler, and -F lets the lower-
+; priority handler still run afterward. This means TinyScry observes every
+; inbound GMCP event without consuming it. Do not drop -F. Priority 2 is the
+; shipped, live-verified configuration; any priority change should be
+; re-verified against operator GMCP handlers.
+/def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp = \
     /test fwrite("~/.local/state/tinyscry/spool", strcat(time(), " ", {*}))

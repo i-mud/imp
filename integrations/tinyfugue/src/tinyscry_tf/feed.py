@@ -52,9 +52,8 @@ class StatePublisher(Protocol):
 def _seed_normalizer(initial_state: GameState | None) -> Normalizer:
     """Reconstruct Normalizer's accumulated fields from a validated checkpoint."""
 
-    normalizer = Normalizer()
     if initial_state is None:
-        return normalizer
+        return Normalizer()
 
     payload: dict[str, JsonValue] = {}
     character = initial_state.character
@@ -70,12 +69,10 @@ def _seed_normalizer(initial_state: GameState | None) -> Normalizer:
             payload["movement"] = character.moves.current
             payload["movement_max"] = character.moves.max
 
-    target = initial_state.target
-    if target is not None:
-        payload["opponent_name"] = target.name
-        if target.health_percent is not None:
-            payload["opponent_health"] = target.health_percent
-
+    # The target is handed over directly: only this path knows the target was
+    # restored rather than observed live, and the Normalizer needs that fact to
+    # retire a stale target on the first non-Fight position after a restart.
+    normalizer = Normalizer(seeded_target=initial_state.target)
     if payload:
         normalizer.apply(Record(at=0, package="Char.Status", payload=payload))
     return normalizer

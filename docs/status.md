@@ -78,6 +78,27 @@ infrastructure and remain separate from CI:
 | Shell-safety boundary     | No MUD value is evaluated as TinyFugue or shell code; the hook uses a fixed path and SSH is spawned directly by argv.                                                                                                                                                                                                                               |
 | Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                                                                                                                                                                                         |
 
+Slice 4 live evidence:
+
+- Named targets acquired and their health updated. Explicit `opponent_name:""`
+  clearing remained supported, and a `"Fight"` -> non-`"Fight"` transition
+  cleared a target when no explicit clear arrived. A target-bearing checkpoint
+  survived a feed restart during confirmed `"Fight"`, continued updating, and
+  cleared when combat ended.
+- The operator's `received-gmcp` and `tinyscry_capture_gmcp` hooks were both
+  generic priority-1 non-fall-through GMCP hooks. They intermittently lost
+  whole events: named target acquisitions reached diagnostics while the
+  production checkpoint remained `target:null`. The canonical capture hook was
+  changed to `-Fp2`; repeated live fights then acquired, updated, and cleared
+  targets correctly. Priority 2 is the shipped, live-verified configuration,
+  not the only claimed valid priority.
+- An intermittent stale character-name state was observed during repeated
+  character relogs after the GMCP hook remediation. The upgraded TinyFugue
+  binary and `GMCP_LOGIN` hooks were verified active, and subsequent repeated
+  relogs under the final canonical runtime updated identity correctly. The
+  issue could not be reproduced further, so no speculative remediation was
+  added. Re-investigate if it recurs.
+
 CI does not replace any row in this table and must not be cited as evidence for
 Windows Tauri behavior, actual OpenSSH supervision, VPS/systemd behavior,
 interactive TinyFugue, a real MUD/GMCP session, or the post-reboot identity

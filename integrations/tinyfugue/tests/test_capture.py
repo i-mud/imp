@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 
 from tinyscry_tf.capture import convert_lines, encode_record, parse_raw_gmcp
 from tinyscry_tf.records import MAX_RECORD_CHARS
@@ -44,3 +45,14 @@ def test_malformed_raw_records_are_rejected_without_stopping_conversion() -> Non
     assert stats.rejected == 4
     assert stats.written == 1
     assert output.getvalue() == '{"at":2000,"package":"Char.Vitals","payload":{"hp":"9"}}\n'
+
+
+def test_canonical_hook_observes_gmcp_without_competing_with_operator_handlers() -> None:
+    hook = (Path(__file__).resolve().parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
+    definition = next(line for line in hook.splitlines() if line.startswith("/def "))
+    flags = definition.removeprefix("/def ").split(maxsplit=1)[0]
+
+    assert "F" in flags, "hook must fall through so lower-priority operator GMCP handlers still run"
+    assert "p2" in flags, "hook must run ahead of the operator's default priority-1 handlers"
+    assert '-h"GMCP"' in definition, "hook must stay a generic GMCP hook"
+    assert 'fwrite("~/.local/state/tinyscry/spool"' in hook

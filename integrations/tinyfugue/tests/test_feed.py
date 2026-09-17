@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from tinyscry_relay.protocol import Character, GameState, Vital
+from tinyscry_relay.protocol import Character, GameState, Target, Vital
 from websockets.asyncio.server import ServerConnection, serve
 
 from tinyscry_tf.diagnostics import DiagnosticCapture
@@ -464,3 +464,65 @@ def test_checkpoint_is_private_and_rejects_malformed_state(tmp_path: Path) -> No
 
     checkpoint.write_text('{"character":{"name":""},"target":null}', encoding="utf-8")
     assert load_checkpoint(checkpoint) is None
+
+
+@pytest.mark.parametrize(
+    ("positions", "expected_target"),
+    [
+        (["Stand"], None),
+        (["Fight"], Target(name="a porcufish", health_percent=49.0)),
+        (["Fight", "Stand"], None),
+    ],
+    ids=["stale-seed-retired", "active-fight-retained", "fight-then-stand-cleared"],
+)
+def test_run_feed_retires_a_checkpoint_seeded_target_unless_live_combat_holds_it(
+    tmp_path: Path, positions: list[str], expected_target: Target | None
+) -> None:
+    """A restored target must not outlive the first live non-Fight observation."""
+
+    async def scenario() -> None:
+        checkpoint_path = tmp_path / "run" / "state.json"
+        restored = GameState(
+            character=Character(name="Musa", hp=Vital(current=3132, max=3164), mana=None, moves=None),
+            target=Target(name="a porcufish", health_percent=49.0),
+        )
+        store_checkpoint(checkpoint_path, restored)
+
+        lines = [
+            f'17000000{index:02d} Char.Vitals {{"hp":"{3130 - index}","maxhp":"3164",'
+            f'"position":"{position}"}}'
+            for index, position in enumerate(positions, start=1)
+        ]
+        source = _FakeSource([lines, []])
+
+        class _CollectingPublisher:
+            async def publish(self, state: GameState) -> None:
+                published.append(state)
+
+        published: list[GameState] = []
+        stop = asyncio.Event()
+
+        async def stop_after_drain() -> None:
+            await asyncio.sleep(0.08)
+            stop.set()
+
+        await asyncio.gather(
+            run_feed(
+                source,
+                _CollectingPublisher(),
+                poll_interval=0.01,
+                stop=stop,
+                initial_state=restored,
+                checkpoint=lambda state: store_checkpoint(checkpoint_path, state),
+            ),
+            stop_after_drain(),
+        )
+
+        assert published[-1].target == expected_target
+        final = load_checkpoint(checkpoint_path)
+        assert final is not None
+        assert final.target == expected_target
+        assert final.character is not None
+        assert final.character.hp == Vital(current=3130 - len(positions), max=3164)
+
+    asyncio.run(scenario())

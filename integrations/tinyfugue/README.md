@@ -191,6 +191,21 @@ fixed filename. `time()` returns epoch seconds with six
 fractional digits, which `tinyscry-capture` converts to integer epoch
 milliseconds.
 
+The hook is installed as `/def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp`.
+TinyFugue runs the highest-priority matching hook first and stops there unless
+that hook falls through. TinyScry's explicit priority 2 runs ahead of operators'
+default priority-1 GMCP handlers, such as `received-gmcp`; the `-F` flag lets
+those lower-priority handlers still run afterward. Operators commonly own a
+generic GMCP handler at priority 1, and two same-priority non-fall-through hooks
+on the same event compete — in live testing that intermittently lost whole GMCP
+events: some fights never acquired a target while `Char.Vitals` resource updates
+kept arriving, and the checkpoint stayed `target:null` even though bounded
+diagnostics showed a valid named acquisition. Re-installing the capture hook at
+priority 2 with `-F` made repeated live fights acquire, update and clear targets
+correctly. Do not drop `-F`. Priority 2 is the shipped, live-verified
+configuration; any priority change should be re-verified against operator
+GMCP handlers.
+
 The real capture contained 249 hook lines across 214.662 seconds. The converter
 accepted 200 records. It rejected 49 inventory events whose MUD payloads
 contained unescaped control characters inside JSON strings; it logged only
@@ -210,6 +225,18 @@ The redacted fixture establishes these mappings:
   `opponent_health_max` equal to `"100"`. Later damage updates supplied only
   `opponent_health`.
 - An empty `opponent_name` with zero health fields clears the target.
+- `Char.Vitals.position` is tracked only to end combat. AVATAR does not always
+  emit the clear record above: a later capture ended a fight with no explicit
+  clear at all, so both mechanisms are required. A `"Fight"` -> non-`"Fight"`
+  transition is treated as combat end and clears the current target. An
+  isolated non-`"Fight"` record cannot clear a live-acquired target while no
+  `"Fight"` state has been observed for it. A target restored from the
+  checkpoint is the exception: it has no observed combat history, so the first
+  non-`"Fight"` position retires it rather than letting it outlive a restart.
+- Clearing is one-way. A target is established only by a valid
+  `opponent_name`; an `opponent_health`-only record with no established target
+  creates none. TinyScry prefers showing no target over attaching a health
+  percentage to an unknown or stale name.
 
 Every field required by the current HUD was present. The stream did not expose
 absolute target hit points; only the percentage-scale opponent fields were

@@ -97,6 +97,23 @@ snapshot; later `Char.Status` messages are deltas that may omit
 operator's GMCP negotiation or connection macros. Repeated loads are safe -
 `/def` replaces the named capture macro rather than duplicating it.
 
+The hook is defined at priority 2 with fall-through (`-Fp2`) so it observes
+GMCP without consuming it. Operators commonly already own a generic GMCP
+hook at the default priority 1, such as `received-gmcp`. TinyScry's hook
+runs ahead of those priority-1 handlers via explicit priority 2, and the
+`-F` flag lets them still run afterward. Two same-priority non-fall-through
+hooks on the same event compete, which in live testing intermittently lost
+whole GMCP events - some fights never acquired a target while resource
+updates kept arriving. Do not drop `-F`, and do not change the operator's
+own GMCP hook. Priority 2 is the shipped, live-verified configuration; any
+priority change should be re-verified against operator GMCP handlers.
+A higher-priority non-fall-through GMCP hook can still prevent this priority-2
+observer from running; re-verify coexistence when operator priorities differ
+from the live-verified default-priority-1 setup.
+Confirm coexistence by listing the GMCP hooks inside TinyFugue: the
+operator's handler must remain at `-p1` and `tinyscry_capture_gmcp` must
+appear as `-Fp2`.
+
 The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
 `tinyscry-feed` owns that path as a symlink into its private runtime
 directory and replaces it on every (re)start; nothing about the hook file
