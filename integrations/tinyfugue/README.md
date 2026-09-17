@@ -29,13 +29,23 @@ JSON parsing and conversion; it never executes data received from a MUD.
 
 ## Running (normal production path)
 
-Install the hook once so TinyFugue loads it automatically; see
-[`../../deploy/README.md`](../../deploy/README.md) for the full VPS systemd
-setup. In short:
+Copy the unchanged hook to `~/.config/tinyscry/capture.tf`, then add this
+line to the startup file used by the operator's actual TinyFugue invocation:
 
 ```text
-/load /absolute/path/to/integrations/tinyfugue/tinyscry.tf
+/load ~/.config/tinyscry/capture.tf
 ```
+
+TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
+config. For example, when starting from `~/avatar/tf` with
+`tf -f./.tfrc -n`, the load belongs in `~/avatar/tf/.tfrc`, not an assumed
+`~/.tfrc`. It must run before anything in that startup path can connect or
+log in: loading it after AVATAR's initial full `Char.Status` can leave
+TinyScry without identity until the next login. The hook is additive and
+does not own or replace the operator's GMCP negotiation or connection
+macros. Installation must not automatically create or overwrite an
+operator startup file. See [`../../deploy/README.md`](../../deploy/README.md)
+for the full VPS systemd setup.
 
 The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
 `tinyscry-feed` creates that path as a symlink into its own private runtime

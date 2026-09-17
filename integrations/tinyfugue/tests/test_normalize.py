@@ -74,17 +74,64 @@ def test_partial_status_vitals_update_preserves_prior_maxima() -> None:
     )
 
 
-def test_vitals_buffered_before_observed_identity() -> None:
+def test_only_status_name_bootstraps_character_from_buffered_vitals() -> None:
     normalizer = Normalizer()
-    normalizer.apply(_record("Char.Vitals", {"hp": "12", "maxhp": "20"}))
+
+    state = normalizer.apply(
+        _record(
+            "Char.Vitals",
+            {"hp": "12", "maxhp": "20", "mp": "30", "maxmp": "40", "mv": "50", "maxmv": "60"},
+        )
+    )
+    assert state.character is None
+
+    state = normalizer.apply(_record("Char.StatusVars", {"character_name": "Character Name"}))
+    assert state.character is None
+
+    state = normalizer.apply(_record("Char.Status", {"movement": "49"}))
+    assert state.character is None
+
+    state = normalizer.apply(
+        _record(
+            "Room.Players",
+            {
+                "Redacted Player": {
+                    "name": "Redacted Player",
+                    "fullname": "(White Aura) Redacted Player is here.",
+                    "race": "Human",
+                    "spec": "unknown spec",
+                }
+            },
+        )
+    )
+    assert state.character is None
+
+    state = normalizer.apply(
+        _record(
+            "Char.Group.List",
+            [
+                {
+                    "leader": True,
+                    "name": "Redacted Player",
+                    "hp": "12",
+                    "maxhp": "20",
+                    "mp": "30",
+                    "maxmp": "40",
+                    "mv": "49",
+                    "maxmv": "60",
+                }
+            ],
+        )
+    )
+    assert state.character is None
 
     state = normalizer.apply(_record("Char.Status", {"character_name": "Redacted Player"}))
 
     assert state.character == Character(
         name="Redacted Player",
         hp=Vital(current=12, max=20),
-        mana=None,
-        moves=None,
+        mana=Vital(current=30, max=40),
+        moves=Vital(current=49, max=60),
     )
 
 

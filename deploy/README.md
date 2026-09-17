@@ -69,21 +69,32 @@ existing bounded backoff rather than failing.
 
 ## 6. Install the TinyFugue hook (on VPS)
 
-Copy the hook file and point `.tfrc` at it. Loading it more than once is
-safe - `/def` replaces a macro of the same name rather than duplicating it,
-verified by loading it three times in one TinyFugue session and confirming
-`/list tinyscry_capture_gmcp` shows exactly one macro:
+Copy the unchanged hook to TinyScry's config directory:
 
 ```bash
 mkdir -p ~/.config/tinyscry
 cp ~/tinyscry/integrations/tinyfugue/tinyscry.tf ~/.config/tinyscry/capture.tf
-grep -qxF '/load ~/.config/tinyscry/capture.tf' ~/.tfrc ||
-  echo '/load ~/.config/tinyscry/capture.tf' >> ~/.tfrc
 ```
 
-The `grep -qxF || echo` guard is what keeps a second install from appending a
-second line to `~/.tfrc`; it does not modify any other shell or TinyFugue
-startup file.
+Then add this line to the startup file used by the operator's actual
+TinyFugue invocation:
+
+```text
+/load ~/.config/tinyscry/capture.tf
+```
+
+Do not have the installer create or overwrite an operator startup file.
+TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
+config, so `~/.tfrc` is not necessarily active. For example, when starting
+from `~/avatar/tf` with `tf -f./.tfrc -n`, add the line to
+`~/avatar/tf/.tfrc`.
+
+Load the hook before anything in that startup path can connect or log in to
+the MUD. AVATAR sends the full identity-bearing `Char.Status` during login;
+loading the hook afterward can leave TinyScry without an identity until the
+next login. Loading is additive: TinyScry does not own or replace the
+operator's GMCP negotiation or connection macros. Repeated loads are safe -
+`/def` replaces the named capture macro rather than duplicating it.
 
 The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
 `tinyscry-feed` owns that path as a symlink into its private runtime
