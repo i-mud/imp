@@ -23,6 +23,24 @@ session: `tinyscry-feed` and `tinyscry-relay` returned before interactive login.
 TinyFugue intentionally did not auto-start. The feed `Wants=` the relay but
 does not `Require=` it: its existing publisher reconnect loop owns a relay outage.
 
+## Identity bootstrap
+
+The reboot discards the ephemeral normalized checkpoint by design, and AVATAR
+sends the full identity-bearing `Char.Status` only once, at character login.
+Recovery therefore depends on two operator-owned preconditions holding at that
+login, both live-verified: the capture hook is loaded by the TinyFugue startup
+file actually in use before anything connects, and that TinyFugue build's GMCP
+support includes the `GMCP_LOGIN` hook its login scripts use to negotiate
+capabilities and send `Char.Login`. The invariant is the capability, not a
+version string - public version numbering does not prove `GMCP_LOGIN` is
+compiled in - though the build verified live is `5.2.2-3-g4f0ff34`. The
+previously installed TinyFugue binary did not provide `GMCP_LOGIN`, and
+TinyScry stayed identity-less after reboot with it.
+
+TinyScry holds no workaround for a missing identity. It does not infer the
+local character from `Room.Players` or `Char.Group.List`, does not persist
+identity outside `$XDG_RUNTIME_DIR`, and sends no GMCP request of its own.
+
 ## Live path
 
 ```text
@@ -38,7 +56,7 @@ interactive TinyFugue
 ```
 
 The TinyFugue-facing hop is deliberately a drained regular file, not a FIFO.
-The real TinyFugue 5.1.6 `fwrite()` performs a blocking open/write/close and has
+TinyFugue's `fwrite()` performs a blocking open/write/close and has
 no non-blocking mode: no reader or a full FIFO froze the interactive client.
 A regular file returns immediately. The reader bounds raw runtime storage by
 rotating a fully drained active inode to a retired generation and creating a
@@ -72,17 +90,17 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 
 ## Failure boundaries
 
-| Failure                                | Recovery / visible result                                                                                                          |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| relay process exits                    | systemd restarts it; feed publisher reconnects                                                                                     |
-| feed process exits                     | lock releases with the process; systemd starts one replacement                                                                     |
-| normalized checkpoint lost at reboot   | fresh records still normalize, but without `Char.Status.character_name` TinyScry remains down; identity bootstrap is not recovered |
-| TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                               |
-| spool target replaced                  | next TinyFugue hook call reopens the stable path                                                                                   |
-| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                             |
-| local port occupied by TinyScry relay  | use external endpoint; spawn no child                                                                                              |
-| local port occupied by another service | report conflict; spawn and kill nothing                                                                                            |
-| TinyScry closes                        | terminate and reap only its owned SSH child                                                                                        |
+| Failure                                | Recovery / visible result                                                                                                                                                                                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| relay process exits                    | systemd restarts it; feed publisher reconnects                                                                                                                                                                                                       |
+| feed process exits                     | lock releases with the process; systemd starts one replacement                                                                                                                                                                                       |
+| normalized checkpoint lost at reboot   | identity is re-established at the next character login only if the capture hook was loaded by the active startup file beforehand and the TinyFugue build provides `GMCP_LOGIN` for the operator login scripts; until then TinyScry publishes nothing |
+| TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                                                                                                                                                 |
+| spool target replaced                  | next TinyFugue hook call reopens the stable path                                                                                                                                                                                                     |
+| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                                                                                                                                               |
+| local port occupied by TinyScry relay  | use external endpoint; spawn no child                                                                                                                                                                                                                |
+| local port occupied by another service | report conflict; spawn and kill nothing                                                                                                                                                                                                              |
+| TinyScry closes                        | terminate and reap only its owned SSH child                                                                                                                                                                                                          |
 
 ## Source and checks
 
@@ -103,6 +121,16 @@ and `apps/desktop/test/relay-source.test.ts`.
 
 Status: verified
 Verified against: focused Python, Rust, and frontend checks plus live VPS
-restart and reboot evidence recorded in `docs/status.md`, including checkpoint
-non-publication, relay-sequence preservation, automatic user-unit and managed
-SSH recovery, loopback relay binding, and the bounded identity-bootstrap limit.
+restart and reboot evidence recorded in `docs/status.md`.
+
+The deterministic gate and the live evidence prove different things, and neither
+substitutes for the other. The gate proves unit-level invariants: that a
+restarted feed does not publish a retained checkpoint without fresh input, and
+that the relay keeps its snapshot and advances its sequence only on new state
+(`integrations/tinyfugue/tests/test_feed.py`,
+`services/relay/tests/test_server.py`, `tests/e2e/relay_roundtrip.py`). It
+cannot observe a real VPS reboot, actual `systemd` lingering, real
+OpenSSH/network recovery, the VPS loopback listener, or the post-reboot
+AVATAR/TinyFugue identity bootstrap; those are the `Real VPS/systemd behavior`,
+`Actual OpenSSH child`, `Relay bind`, `Identity bootstrap`, and
+`TinyFugue GMCP login hook` rows of the live-evidence table in `docs/status.md`.

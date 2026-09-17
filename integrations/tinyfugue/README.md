@@ -40,12 +40,11 @@ TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
 config. For example, when starting from `~/avatar/tf` with
 `tf -f./.tfrc -n`, the load belongs in `~/avatar/tf/.tfrc`, not an assumed
 `~/.tfrc`. It must run before anything in that startup path can connect or
-log in: loading it after AVATAR's initial full `Char.Status` can leave
-TinyScry without identity until the next login. The hook is additive and
-does not own or replace the operator's GMCP negotiation or connection
-macros. Installation must not automatically create or overwrite an
-operator startup file. See [`../../deploy/README.md`](../../deploy/README.md)
-for the full VPS systemd setup.
+log in. The hook is additive and does not own or replace the operator's GMCP
+negotiation or connection macros, and TinyScry sends no GMCP of its own.
+Installation must not automatically create or overwrite an operator startup
+file. See [`../../deploy/README.md`](../../deploy/README.md) for the full VPS
+systemd setup.
 
 The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
 `tinyscry-feed` creates that path as a symlink into its own private runtime
@@ -83,6 +82,35 @@ inside TinyFugue.
 All filenames and commands are fixed operator input. MUD data flows only
 through direct file APIs; it is never interpolated into a shell or TF
 command.
+
+## Identity bootstrap prerequisite
+
+AVATAR sends the full identity-bearing `Char.Status` only once, during initial
+character login, and documents no way to request another full snapshot; later
+`Char.Status` messages are deltas that may omit `character_name`. Capture of
+that single message therefore depends on the operator's TinyFugue sequencing
+GMCP login at the right negotiation point.
+
+The invariant is a TinyFugue build whose GMCP support includes the
+`GMCP_LOGIN` hook, with operator login scripts that use it to run their GMCP
+capability negotiation and send `Char.Login`. Without `GMCP_LOGIN` the operator
+login path cannot be relied on to sequence this correctly: TinyScry keeps
+normalizing `Char.Vitals` and `Char.Status` deltas but never observes identity,
+so no state is published.
+
+State it as a capability rather than a version: the build verified live was
+`5.2.2-3-g4f0ff34`, but an upstream or distribution version number does not by
+itself prove `GMCP_LOGIN` is compiled into the binary in use. The conclusive
+signal is that login produces a full `Char.Status` carrying `character_name`
+and TinyScry publishes a snapshot and writes its checkpoint. The verified run
+observed `Char.StatusVars` immediately followed by that full `Char.Status`;
+AVATAR does not document the ordering as a guarantee, so it is an observation,
+not a protocol requirement TinyScry relies on - the normalizer accumulates
+packages in whatever order they arrive.
+
+TinyScry does not work around a missing identity: it never infers the local
+character from `Room.Players` or `Char.Group.List`, never persists identity
+across a reboot, and implements no `Char.Status` refresh request.
 
 ## Live feed transport: a drained spool, not a FIFO
 
@@ -152,10 +180,14 @@ replay; non-loopback relay URLs also require `--allow-non-loopback`.
 
 ## Verified TinyFugue boundary
 
-The VPS build is TinyFugue 5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`.
-Its `GMCP` hook receives one raw positional string in the form `Package JSON`.
-Its `fwrite(filename, data)` function appends data and a newline directly to a
-fixed filename. Its `time()` function returns epoch seconds with six
+The hook contract was established against TinyFugue 5.1.6-4-ga15a165 with
+`+gmcp` and `+GMCP`, and is unchanged on the current VPS build
+5.2.2-3-g4f0ff34, which additionally provides the `GMCP_LOGIN` hook the
+operator's login scripts need (see
+[identity bootstrap prerequisite](#identity-bootstrap-prerequisite)).
+The `GMCP` hook receives one raw positional string in the form `Package JSON`.
+`fwrite(filename, data)` appends data and a newline directly to a
+fixed filename. `time()` returns epoch seconds with six
 fractional digits, which `tinyscry-capture` converts to integer epoch
 milliseconds.
 

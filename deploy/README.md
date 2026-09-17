@@ -90,9 +90,10 @@ from `~/avatar/tf` with `tf -f./.tfrc -n`, add the line to
 `~/avatar/tf/.tfrc`.
 
 Load the hook before anything in that startup path can connect or log in to
-the MUD. AVATAR sends the full identity-bearing `Char.Status` during login;
-loading the hook afterward can leave TinyScry without an identity until the
-next login. Loading is additive: TinyScry does not own or replace the
+the MUD. AVATAR sends the full identity-bearing `Char.Status` only once, during
+initial character login, and provides no supported way to request another full
+snapshot; later `Char.Status` messages are deltas that may omit
+`character_name`. Loading is additive: TinyScry does not own or replace the
 operator's GMCP negotiation or connection macros. Repeated loads are safe -
 `/def` replaces the named capture macro rather than duplicating it.
 
@@ -102,6 +103,33 @@ directory and replaces it on every (re)start; nothing about the hook file
 changes when the feed restarts. See
 [`integrations/tinyfugue/README.md`](../integrations/tinyfugue/README.md) for
 why this is a plain drained file rather than a FIFO.
+
+## 7. Confirm the TinyFugue GMCP login prerequisite (on VPS)
+
+Because that identity message is sent once, capture depends on the operator's
+TinyFugue performing GMCP login sequencing at the right negotiation point. The
+invariant is a **build whose GMCP support includes the `GMCP_LOGIN` hook**,
+driving operator login scripts that use it to run their GMCP capability
+negotiation and send `Char.Login`. Without `GMCP_LOGIN` the operator login path
+cannot be relied on to sequence this correctly, and TinyScry then keeps
+consuming `Char.Vitals` and `Char.Status` deltas without ever observing
+`character_name`, so the HUD stays down.
+
+This is stated as a capability, not a version. The build verified live was
+TinyFugue `5.2.2-3-g4f0ff34`; an upstream or distribution version number does
+not by itself prove `GMCP_LOGIN` is compiled into the binary in use, so confirm
+the capability. The conclusive signal is on the first login after installing
+the hook: login produces a full `Char.Status` carrying `character_name`, and
+TinyScry obtains a snapshot and writes its checkpoint - visible as
+`has_snapshot: true` with a non-null `seq` on `/healthz`. In the verified run,
+`Char.StatusVars` was observed immediately followed by that full identity-bearing
+`Char.Status`; AVATAR does not document that ordering as a guarantee, so treat
+it as an observation rather than a requirement. When the signal is missing,
+[bounded diagnostic capture](#diagnostic-raw-capture-opt-in-vps) shows which
+packages did arrive.
+
+The build, the upgrade and the login scripts are operator-owned; TinyScry
+never modifies them and sends no GMCP itself.
 
 ## Verifying the deployment
 
@@ -122,13 +150,14 @@ journalctl --user -u tinyscry-relay.service -u tinyscry-feed.service -n 50
 
 ## Common failure diagnostics
 
-| Symptom                                                                  | Check                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tinyscry-feed` exits immediately with "another TinyScry feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status tinyscry-feed.service`, then stop the extra process.                       |
-| Relay reachable but no HUD data                                          | `curl http://127.0.0.1:8787/healthz` (via the SSH tunnel) and confirm a producer is attached; check `journalctl --user -u tinyscry-feed.service` for "feed started" / reconnect lines.                             |
-| TinyFugue shows an `fwrite` error line                                   | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again. |
-| Services do not survive a reboot                                         | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                              |
-| Relay bound to more than loopback                                        | Never pass `--allow-non-loopback` in the unit file; re-run step 3 from a clean copy of `deploy/systemd/tinyscry-relay.service`.                                                                                    |
+| Symptom                                                                  | Check                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tinyscry-feed` exits immediately with "another TinyScry feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status tinyscry-feed.service`, then stop the extra process.                                                 |
+| Relay reachable but no HUD data                                          | `curl http://127.0.0.1:8787/healthz` (via the SSH tunnel) and confirm a producer is attached; check `journalctl --user -u tinyscry-feed.service` for "feed started" / reconnect lines.                                                       |
+| TinyFugue shows an `fwrite` error line                                   | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                           |
+| Services do not survive a reboot                                         | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                        |
+| Relay bound to more than loopback                                        | Never pass `--allow-non-loopback` in the unit file; re-run step 3 from a clean copy of `deploy/systemd/tinyscry-relay.service`.                                                                                                              |
+| Feed consuming GMCP but relay reports `has_snapshot: false`              | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again. |
 
 ## Diagnostic raw capture (opt-in, VPS)
 
