@@ -27,8 +27,10 @@ Implemented by:
 
 Selected by:
 
-- `createStateSource()` in `config.ts`, from `VITE_TINYSCRY_SOURCE` and
-  `VITE_TINYSCRY_RELAY_URL`
+- `createStateSource()` in `config.ts`. An explicit `VITE_TINYSCRY_SOURCE` is
+  authoritative. Without it, browser/development builds default to `mock`,
+  while a Tauri build identified by `TAURI_ENV_PLATFORM` defaults to `relay`.
+  `VITE_TINYSCRY_RELAY_URL` supplies the relay URL when relay mode is selected.
 
 Consumed by:
 
@@ -75,5 +77,5 @@ states still derive from relay socket phase plus feed liveness. See
 ## Verification
 
 Status: verified
-Verified against: `apps/desktop` at bootstrap; reducer and source unit tests
-passing, HUD rendering mock vitals confirmed in a browser.
+Verified against: current `config.ts` selection logic and `vite.config.ts`
+environment exposure; HUD rendering mock vitals confirmed in a browser.

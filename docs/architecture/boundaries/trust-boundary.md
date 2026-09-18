@@ -49,20 +49,30 @@ component. Concretely:
   server content, and the capture filename never contains MUD data.
 - `integrations/tinyfugue/src/tinyscry_tf/bridge.py` uses no `shell=True`, no
   `os.system`, and constructs no subprocess from record content.
-- The relay never executes anything, and the Tauri crate spawns no process.
+- The relay executes nothing.
+- Managed mode in `apps/desktop/src-tauri/src/tunnel.rs` is the one permitted
+  desktop process-execution boundary. It constructs the system `ssh` command
+  directly with `std::process::Command`, fixed SSH options and loopback
+  forwarding arguments; no shell is involved. The operator-provided SSH alias
+  follows `--`, and no MUD-derived value reaches process argv. OpenSSH retains
+  ownership of credentials, host verification and SSH configuration.
+  `TunnelSupervisor` tracks, terminates and reaps only the child it spawned;
+  external mode owns no process, and a pre-existing listener or unrelated SSH
+  process is never killed.
 
-This is checkable rather than asserted. At bootstrap the search below returned
-exactly one hit - the comment in `bridge.py` recording the rule - and nothing
-in the Rust crate:
+This is checkable rather than asserted. Search the execution surfaces:
 
 ```bash
-grep -rnE 'shell=True|os\.system|subprocess\.|child_process|execSync|Command' \
+grep -rnE 'shell=True|os\.system|subprocess\.|child_process|execSync|Command::new|\.spawn\(' \
   services/relay/src integrations/tinyfugue/src apps/desktop/src \
   packages/protocol/src apps/desktop/src-tauri/src
 ```
 
-Re-run it rather than trusting this paragraph. A second hit means either a new
-execution path or a new comment, and both deserve a look.
+The expected process-execution hits are the managed OpenSSH
+`Command::new("ssh")` and `.spawn()` path in `tunnel.rs`; they are permitted
+because the command uses direct argv, fixed forwarding/options, and accepts no
+MUD-derived input. Any relay execution hit, shell-based execution, additional
+spawn path, or path carrying server content into argv requires investigation.
 
 If TinyFugue is ever made to invoke an external command, the content must cross
 the boundary as data on stdin or a pipe - never as an argument assembled from
@@ -79,9 +89,9 @@ TinyScry holds none.
 - `.gitignore` covers key material and `.env` files so a stray local file
   cannot be committed.
 
-Automated tunnel management, when it arrives, must delegate to the system SSH
-client and its agent. Copying private keys into the app, or persisting a
-password, is out of bounds.
+Managed tunnel mode delegates to the system SSH client and its agent. Copying
+private keys into the app, persisting a password, or weakening OpenSSH host
+verification is out of bounds.
 
 ## Logging
 
@@ -114,5 +124,6 @@ character class requires a new rejection fixture, in both languages.
 ## Verification
 
 Status: verified
-Verified against: bootstrap; 22 rejection fixtures asserted in both decoders,
-plus hostile-line tests in `integrations/tinyfugue/tests/test_records.py`.
+Verified against: current protocol rejection tests, hostile-line tests in
+`integrations/tinyfugue/tests/test_records.py`, and managed OpenSSH argv and
+ownership tests in `apps/desktop/src-tauri/src/tunnel.rs`.

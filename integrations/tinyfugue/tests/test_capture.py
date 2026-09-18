@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from io import StringIO
 from pathlib import Path
 
@@ -53,6 +54,7 @@ def test_canonical_hook_observes_gmcp_without_competing_with_operator_handlers()
     flags = definition.removeprefix("/def ").split(maxsplit=1)[0]
 
     assert "F" in flags, "hook must fall through so lower-priority operator GMCP handlers still run"
-    assert "p2" in flags, "hook must run ahead of the operator's default priority-1 handlers"
+    priority = re.search(r"p(\d+)", flags)
+    assert priority is not None and int(priority.group(1)) == 2, "hook priority must be exactly 2"
     assert '-h"GMCP"' in definition, "hook must stay a generic GMCP hook"
     assert 'fwrite("~/.local/state/tinyscry/spool"' in hook
