@@ -6,7 +6,7 @@
   text-rendering: optimizeLegibility;
 
   --panel: rgba(12, 18, 27, 0.94);
-  --panel-edge: rgba(191, 215, 235, 0.2);
+  --panel-edge: rgba(104, 133, 156, 0.2);
   --muted: #91a1b2;
   --dimmed: #6e7b88;
   --text: #ecf3fa;
@@ -17,7 +17,8 @@
   --good: #58c994;
   --warn: #e5ab54;
   --bad: #ef5b68;
-  --radius: 12px;
+  --radius: 4px;
+  --radius-compact: 20px;
 }
 
 html,

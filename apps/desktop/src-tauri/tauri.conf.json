@@ -17,12 +17,10 @@
         "title": "TinyScry",
         "width": 320,
         "height": 210,
-        "minWidth": 280,
-        "minHeight": 180,
         "alwaysOnTop": true,
         "decorations": false,
         "transparent": true,
-        "resizable": true,
+        "resizable": false,
         "skipTaskbar": true,
         "shadow": false
       }

@@ -61,7 +61,7 @@ infrastructure and remain separate from CI:
 
 | Evidence                  | Status                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows Tauri runtime     | Verified on Windows 11: launch, close, topmost, drag, resize, transparency, live WebView updates, and clean runtime console.                                                                                                                                                                                                                        |
+| Windows Tauri runtime     | Verified on Windows 11: launch, close, topmost, drag, transparency, live WebView updates, and clean runtime console. Slice 5 fixed-size and compact-resize behavior awaits native verification.                                                                                                                                                     |
 | Actual OpenSSH child      | Verified in native managed mode: its tunnel dropped during a real VPS reboot and recovered automatically without a TinyScry restart.                                                                                                                                                                                                                |
 | Real VPS/systemd behavior | Verified on a real VPS reboot: `Linger=yes` preserved the user manager; `tinyscry-feed` and `tinyscry-relay` returned before interactive login.                                                                                                                                                                                                     |
 | Interactive TinyFugue     | The fixed-path `fwrite()` blocking behavior was measured on TinyFugue 5.1.6; the hook did not block the interactive client. Build 5.2.2-3-g4f0ff34 was then used for live play and the reboot bootstrap with no observed blocking, but that measurement was not rerun on it.                                                                        |
@@ -126,10 +126,10 @@ each is the kind that comes back.
    launch compiled the Rust crate but then failed with `EBUSY` while Vite tried
    to watch a generated Cargo executable. `vite.config.ts` now ignores the
    native source tree; the next native launch succeeded.
-4. **The panel did not fill a resized native window.** At the configured
-   `320x210` viewport the panel measured 226 pixels high, clipping its bottom;
-   after expansion it left a transparent dead region below the content. The HUD
-   now fills `100vh` and uses compact spacing. Runtime measurement is exactly
+4. **The panel did not fill the `320x210` native window.** At the configured
+   viewport the panel measured 226 pixels high, clipping its bottom; after
+   expansion it left a transparent dead region below the content. The HUD now
+   fills `100vh` and uses compact spacing. Runtime measurement is exactly
    `320x210`, with the target row ending at pixel 205.
 5. **Blocking input starved the producer's event loop.** `tinyscry-bridge` read
    its input with a synchronous `for` loop, so its WebSocket client never
@@ -153,11 +153,14 @@ each is the kind that comes back.
 
 ## Current milestone
 
-Slice 3 established the GitHub Actions baseline around the existing
-deterministic gate. Current work is Slice 4, `managed-runtime-e2e`: VPS user
-units, the live feed, managed SSH ownership, and the post-reboot identity
-bootstrap. Its live verification is largely complete - reboot recovery,
-loopback binding, checkpoint restart safety, and identity bootstrap have all
-been observed on the real VPS - but Slice 4 is not finished or tagged, and
-native Rust checks and operator-controlled runtime evidence remain separate
-pre-commit and manual responsibilities.
+Slice 4 is complete and tagged `managed-runtime-e2e` at `e63f55b`. It delivered
+the VPS user units, live feed, managed SSH ownership, target lifecycle fixes,
+and post-reboot identity bootstrap recorded above.
+
+Current work is Slice 5, `hud-ui-refinement`: a frontend-only HUD refinement
+with a character/status titlebar, locally persisted expanded or compact
+presentation, and no changes to runtime, relay, protocol, or freshness
+semantics. Expanded mode uses the canonical fixed dimensions and keeps a
+neutral target region; compact mode measures its single-row content and uses
+bounded native dimensions without a target panel. Native Windows verification
+of those new dimensions remains pending.
