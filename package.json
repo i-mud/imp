@@ -21,6 +21,8 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint . && prettier --check . && node scripts/check-docs.mjs",
     "lint:fix": "eslint . --fix && prettier --write .",
+    "native:sync": "bash scripts/sync-native.sh",
+    "native:watch": "bash scripts/watch-native-mirror.sh",
     "relay": "uv run --directory services/relay tinyscry-relay",
     "relay:test": "uv run --directory services/relay pytest",
     "relay:lint": "uv run --directory services/relay ruff check . && uv run --directory services/relay ruff format --check . && uv run --directory services/relay mypy src tests",
