@@ -41,19 +41,25 @@ faking that is a large amount of fragile machinery to avoid one checkout.
 
 ## Working across WSL2 and Windows
 
-The canonical checkout is `~/src/tinyscry` in WSL2. For native Windows builds,
-use a checkout or `git worktree` on the Windows filesystem rather than building
-through `\\wsl$` - the 9P filesystem makes Cargo builds dramatically slower and
-file watching unreliable.
+The canonical checkout is `~/src/tinyscry` in WSL2. The native Windows tree at
+`C:\src\tinyscry-native` is a disposable execution mirror, not a second Git
+checkout and never a source of truth.
 
-`.editorconfig` pins LF endings so the same tree is usable from both sides.
+Use `npm run native:sync` for a one-shot mirror refresh or
+`npm run native:watch` while editing in WSL2. Run `npm run tauri:dev` from the
+Windows mirror so Cargo, WebView2, and file watching stay on the native
+filesystem. Git and GitHub authentication are not required in the mirror.
+
+`.editorconfig` pins LF endings so the same source remains usable from both
+sides.
 
 ## Deliberate portability constraints
 
 These exist so the HUD does not become Windows-only by accident:
 
-- Always-on-top is configured declaratively in `tauri.conf.json`, not through
-  per-platform native calls.
+- Always-on-top and non-maximizable behavior are configured declaratively in
+  `tauri.conf.json`, not through per-platform native calls. TinyScry-owned size
+  changes still use the normal window API while manual resizing remains off.
 - Transparency and `backdrop-filter` are treated as enhancements. The panel
   must stay fully legible without them, which is why its base colour is opaque
   enough on its own. Never make essential information depend on a compositor
@@ -62,6 +68,9 @@ These exist so the HUD does not become Windows-only by accident:
   Windows needs it for touch and pen input.
 - `macOSPrivateApi: true` is required for transparent backgrounds on macOS;
   it has no effect elsewhere.
+- Alert sound is a bundled frontend asset. Native notifications use the
+  supported Tauri notification plugin rather than shell commands or a custom
+  platform bridge.
 
 ## Verifying the Rust crate without a full toolchain
 
@@ -73,15 +82,22 @@ per platform.
 ## Change impact
 
 - Adding a Tauri plugin adds a Rust dependency and usually a capability entry
-  in `apps/desktop/src-tauri/capabilities/`. It also adds per-platform system
-  requirements - check all three before merging.
+  in `apps/desktop/src-tauri/capabilities/`. The notification plugin is limited
+  to permission check, permission request, and notify capabilities. It also
+  adds per-platform system requirements - check all three before merging.
 - Adding a native command means the browser dev path loses that feature;
   guard it the way `apps/desktop/src/lib/window.ts` does, so `npm run dev`
   keeps working.
+- Window behavior that depends on the host window manager, including
+  drag-region double-click maximization, requires native acceptance and must
+  not be claimed from deterministic CI alone.
 
 ## Verification
 
 Status: verified
 Verified against: Windows 11 native launch and direct window interaction at the
-versions above; Linux Rust compilation remains container-verified.
+versions above; Linux Rust compilation remains container-verified. Slice 6
+native acceptance covered non-maximizable drag-region behavior, settings
+presentation and restoration, bundled low-HP sound, native notification
+delivery, and target-driven expanded sizing.
 Version numbers here go stale quickly - re-measure rather than trusting them.

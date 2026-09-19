@@ -52,3 +52,12 @@ button {
 *[data-tauri-drag-region] {
   app-region: drag;
 }
+
+/* Interactive controls inside draggable HUD regions must remain clickable. */
+.settings,
+.settings *,
+.settings-panel,
+.settings-panel *,
+button.close {
+  app-region: no-drag;
+}
