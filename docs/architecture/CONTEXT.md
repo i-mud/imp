@@ -38,12 +38,13 @@ Read the card for the concept you are changing, then the source it cites.
 
 ### Objects
 
-| Card                                                 | Covers                                           |
-| ---------------------------------------------------- | ------------------------------------------------ |
-| [`objects/game-state.md`](objects/game-state.md)     | the normalized state shape and who depends on it |
-| [`objects/relay.md`](objects/relay.md)               | the relay's state ownership and endpoints        |
-| [`objects/state-source.md`](objects/state-source.md) | HUD transport boundary and tunnel diagnostics    |
-| [`objects/hud-model.md`](objects/hud-model.md)       | how the HUD turns events into rendered state     |
+| Card                                                     | Covers                                           |
+| -------------------------------------------------------- | ------------------------------------------------ |
+| [`objects/game-state.md`](objects/game-state.md)         | the normalized state shape and who depends on it |
+| [`objects/relay.md`](objects/relay.md)                   | the relay's state ownership and endpoints        |
+| [`objects/state-source.md`](objects/state-source.md)     | HUD transport boundary and tunnel diagnostics    |
+| [`objects/hud-model.md`](objects/hud-model.md)           | how the HUD turns events into rendered state     |
+| [`objects/desktop-alerts.md`](objects/desktop-alerts.md) | desktop-local alert evaluation and effects       |
 
 ### Processes
 
@@ -86,6 +87,8 @@ about to contradict it.
    authentication by design.
 4. A rejected protocol frame never mutates state, in any component.
 5. No server-provided value is ever concatenated into a shell command.
+6. Desktop alerts consume normalized `GameState` plus the existing desktop
+   freshness model; they do not publish state or create an outbound MUD path.
 
 ## Maintaining this map
 

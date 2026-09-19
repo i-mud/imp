@@ -1,9 +1,18 @@
 <script lang="ts">
   import CompactVital from './CompactVital.svelte';
   import SettingsMenu from './SettingsMenu.svelte';
+  import SettingsPanel from './SettingsPanel.svelte';
   import StatusIndicator from './StatusIndicator.svelte';
   import TargetPanel from './TargetPanel.svelte';
   import VitalBar from './VitalBar.svelte';
+  import { dispatchLowHpAlert } from '../lib/alerts/effects.ts';
+  import {
+    INITIAL_LOW_HP_ALERT_STATE,
+    evaluateLowHpAlert,
+    type LowHpAlertState,
+  } from '../lib/alerts/evaluator.ts';
+  import { DESKTOP_ALERT_EFFECTS } from '../lib/alerts/native.ts';
+  import { loadAlertSettings, saveAlertSettings, type AlertSettings } from '../lib/alerts/settings.ts';
   import { freshnessOf, type HudFreshness, type HudModel } from '../lib/hud/model.ts';
   import {
     loadDisplayMode,
@@ -12,21 +21,33 @@
     statusLabelOf,
     type DisplayMode,
   } from '../lib/hud/presentation.ts';
-  import { closeWindow, compactWindowSize, EXPANDED_WINDOW_SIZE, resizeHudWindow } from '../lib/window.ts';
+  import {
+    closeWindow,
+    compactWindowSize,
+    expandedWindowSize,
+    EXPANDED_SETTINGS_WINDOW_SIZE,
+    resizeHudWindow,
+    settingsWindowSize,
+  } from '../lib/window.ts';
 
   let { model }: { model: HudModel } = $props();
   let displayMode = $state(loadDisplayMode());
+  let alertSettings = $state(loadAlertSettings());
 
   let panel = $state<HTMLElement>();
   let compactRow = $state<HTMLElement>();
   let compactMenu = $state<HTMLDivElement>();
-  let compactMenuOpen = $state(false);
+  let settingsOpen = $state(false);
+  const lowHpAlertMemory: { current: LowHpAlertState } = {
+    current: INITIAL_LOW_HP_ALERT_STATE,
+  };
 
   const freshness = $derived(freshnessOf(model));
   const isFresh = $derived(freshness === 'fresh' && model.hasData);
   const status = $derived(statusIndicatorOf(model));
   const statusLabel = $derived(statusLabelOf(model));
   const character = $derived(model.state.character);
+  const target = $derived(model.state.target);
   const characterName = $derived(character?.name ?? 'TinyScry');
   const showMana = $derived(character?.mana?.max !== 0);
 
@@ -38,18 +59,46 @@
   };
 
   function setDisplayMode(mode: DisplayMode): void {
+    settingsOpen = false;
     displayMode = mode;
     saveDisplayMode(mode);
   }
 
+  function setAlertSettings(settings: AlertSettings): void {
+    alertSettings = settings;
+    saveAlertSettings(settings);
+  }
+
+  $effect(() => {
+    const hp = character?.hp ?? null;
+    const evaluation = evaluateLowHpAlert(lowHpAlertMemory.current, {
+      enabled: alertSettings.lowHpEnabled,
+      thresholdPercent: alertSettings.lowHpThresholdPercent,
+      fresh: isFresh,
+      subjectKey: character?.name ?? null,
+      currentHp: hp?.current ?? null,
+      maxHp: hp?.max ?? null,
+    });
+    lowHpAlertMemory.current = evaluation.state;
+
+    if (evaluation.triggered && evaluation.hpPercent !== null && character !== null) {
+      void dispatchLowHpAlert(
+        { characterName: character.name, hpPercent: evaluation.hpPercent },
+        alertSettings,
+        DESKTOP_ALERT_EFFECTS,
+      );
+    }
+  });
+
   $effect(() => {
     if (displayMode === 'expanded') {
-      resizeHudWindow(EXPANDED_WINDOW_SIZE);
+      resizeHudWindow(settingsOpen ? EXPANDED_SETTINGS_WINDOW_SIZE : expandedWindowSize(target !== null));
       return;
     }
+
     const row = compactRow;
     const hudPanel = panel;
-    const menu = compactMenuOpen ? compactMenu : undefined;
+    const menu = settingsOpen ? compactMenu : undefined;
     if (row === undefined || hudPanel === undefined) return;
 
     const resize = () => {
@@ -60,7 +109,13 @@
       const bottom = Math.max(rowBounds.bottom, menuBounds?.bottom ?? rowBounds.bottom);
       const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
       const frameHeight = hudPanel.offsetHeight - hudPanel.clientHeight;
-      resizeHudWindow(compactWindowSize(right - left + frameWidth, bottom - rowBounds.top + frameHeight));
+      const contentWidth = right - left + frameWidth;
+      const contentHeight = bottom - rowBounds.top + frameHeight;
+      resizeHudWindow(
+        settingsOpen
+          ? settingsWindowSize(contentWidth, contentHeight)
+          : compactWindowSize(contentWidth, contentHeight),
+      );
     };
     const frame = requestAnimationFrame(resize);
     const observer = new ResizeObserver(resize);
@@ -95,10 +150,12 @@
         </div>
         <div class="compact-controls">
           <SettingsMenu
+            bind:open={settingsOpen}
             bind:popover={compactMenu}
             mode={displayMode}
+            {alertSettings}
             onmodechange={setDisplayMode}
-            onopenchange={(open) => (compactMenuOpen = open)}
+            onalertsettingschange={setAlertSettings}
           />
           <button
             class="close"
@@ -123,7 +180,13 @@
           <StatusIndicator {status} label={statusLabel} />
           <span>{characterName}</span>
         </div>
-        <SettingsMenu mode={displayMode} onmodechange={setDisplayMode} />
+        <SettingsMenu
+          bind:open={settingsOpen}
+          mode={displayMode}
+          {alertSettings}
+          onmodechange={setDisplayMode}
+          onalertsettingschange={setAlertSettings}
+        />
         <button
           class="close"
           aria-label="Close TinyScry"
@@ -134,7 +197,16 @@
         >
       </header>
 
-      {#if isFresh && character !== null}
+      {#if settingsOpen}
+        <div class="settings-body" role="dialog" aria-label="TinyScry settings">
+          <SettingsPanel
+            mode={displayMode}
+            {alertSettings}
+            onmodechange={setDisplayMode}
+            onalertsettingschange={setAlertSettings}
+          />
+        </div>
+      {:else if isFresh && character !== null}
         <section class="content">
           <div class="vitals">
             <VitalBar label="HP" vital={character.hp} color="var(--hp)" />
@@ -143,11 +215,9 @@
             {/if}
             <VitalBar label="MV" vital={character.moves} color="var(--moves)" />
           </div>
-          <div class="target-slot">
-            {#if model.state.target !== null}
-              <TargetPanel target={model.state.target} />
-            {/if}
-          </div>
+          {#if target !== null}
+            <TargetPanel {target} />
+          {/if}
         </section>
       {:else if character !== null}
         <section class="content last-known">
@@ -158,11 +228,9 @@
             {/if}
             <VitalBar label="MV" vital={character.moves} color="var(--moves)" />
           </div>
-          <div class="target-slot">
-            {#if model.state.target !== null}
-              <TargetPanel target={model.state.target} />
-            {/if}
-          </div>
+          {#if target !== null}
+            <TargetPanel {target} />
+          {/if}
         </section>
       {:else if model.phase === 'connected'}
         <section class="empty-state">
@@ -194,6 +262,10 @@
     border-radius: var(--radius);
     background: var(--panel);
     backdrop-filter: blur(14px);
+  }
+
+  .hud:not(.compact) .panel {
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .offline {
@@ -250,6 +322,12 @@
     color: #fff;
   }
 
+  .settings-body {
+    min-height: 0;
+    overflow: hidden;
+    padding: 0.4rem 0.65rem 0.5rem;
+  }
+
   .content {
     display: grid;
     align-content: start;
@@ -260,10 +338,6 @@
   .vitals {
     display: grid;
     gap: 0.45rem;
-  }
-
-  .target-slot {
-    min-height: 2.25rem;
   }
 
   .empty-state {

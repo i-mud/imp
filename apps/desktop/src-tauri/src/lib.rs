@@ -19,6 +19,7 @@ fn tunnel_status(supervisor: tauri::State<'_, Arc<TunnelSupervisor>>) -> TunnelS
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![tunnel_status])
         .setup(|app| {
             let config_path = app.path().app_config_dir()?.join("tunnel.json");

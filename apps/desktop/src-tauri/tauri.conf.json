@@ -21,6 +21,7 @@
         "decorations": false,
         "transparent": true,
         "resizable": false,
+        "maximizable": false,
         "skipTaskbar": true,
         "shadow": false
       }
