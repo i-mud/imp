@@ -6,6 +6,12 @@ session ending, without a root-owned service and without exposing anything
 beyond loopback. Everything below runs **on the VPS** unless labelled
 otherwise.
 
+Loopback prevents remote network access but is not same-user isolation. Any
+local OS user or process in the VPS network namespace can reach the relay, and
+TinyScry provides no per-user endpoint authentication. Deploy only on a
+single-user VPS or where every host-local user/process is mutually trusted;
+untrusted multi-user hosts are unsupported.
+
 ## 1. Sync the repository (in WSL/repo)
 
 The `tinyscry-tinyfugue` package depends on `tinyscry-relay` by relative path
@@ -30,11 +36,15 @@ authoritative.
 cd ~/tinyscry
 uv sync --project services/relay
 uv sync --project integrations/tinyfugue
+mkdir -p ~/.local/bin
+ln -sfn \
+  "$HOME/tinyscry/integrations/tinyfugue/.venv/bin/tinyscry-action-consumer" \
+  "$HOME/.local/bin/tinyscry-action-consumer"
 ```
 
-This is the same `uv sync` step documented in the root
-[`README.md`](../README.md); it creates `.venv/` under each project, which is
-where the unit files point.
+The project-local environments back the systemd units. The fixed
+`~/.local/bin/tinyscry-action-consumer` link is the only helper path invoked by
+the TinyFugue hook; action text is pipe data and never argv.
 
 ## 3. Install the systemd user units (on VPS)
 
@@ -94,25 +104,20 @@ the MUD. AVATAR sends the full identity-bearing `Char.Status` only once, during
 initial character login, and provides no supported way to request another full
 snapshot; later `Char.Status` messages are deltas that may omit
 `character_name`. Loading is additive: TinyScry does not own or replace the
-operator's GMCP negotiation or connection macros. Repeated loads are safe -
-`/def` replaces the named capture macro rather than duplicating it.
+operator's GMCP negotiation or connection macros. Repeated loads replace the
+named TinyScry definitions rather than duplicating them.
+The `GMCP`, `CONNECT`, `GMCP_LOGIN`, and `WORLD` hooks are defined at priority 2
+with fall-through (`-Fp2`) so they observe without consuming operator events.
+TinyScry runs ahead of default priority-1 handlers such as `received-gmcp`; the
+`-F` flag lets those handlers run afterward. Two same-priority
+non-fall-through GMCP hooks previously lost whole events intermittently. Do
+not drop `-F` and do not change the operator's own hooks. A higher-priority
+non-fall-through hook can still prevent TinyScry from running, so re-verify
+coexistence when operator priorities differ.
 
-The hook is defined at priority 2 with fall-through (`-Fp2`) so it observes
-GMCP without consuming it. Operators commonly already own a generic GMCP
-hook at the default priority 1, such as `received-gmcp`. TinyScry's hook
-runs ahead of those priority-1 handlers via explicit priority 2, and the
-`-F` flag lets them still run afterward. Two same-priority non-fall-through
-hooks on the same event compete, which in live testing intermittently lost
-whole GMCP events - some fights never acquired a target while resource
-updates kept arriving. Do not drop `-F`, and do not change the operator's
-own GMCP hook. Priority 2 is the shipped, live-verified configuration; any
-priority change should be re-verified against operator GMCP handlers.
-A higher-priority non-fall-through GMCP hook can still prevent this priority-2
-observer from running; re-verify coexistence when operator priorities differ
-from the live-verified default-priority-1 setup.
-Confirm coexistence by listing the GMCP hooks inside TinyFugue: the
-operator's handler must remain at `-p1` and `tinyscry_capture_gmcp` must
-appear as `-Fp2`.
+Confirm the GMCP definitions inside TinyFugue: the operator's handler should
+remain at its existing priority and `tinyscry_capture_gmcp` must appear as
+`-Fp2`.
 
 The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
 `tinyscry-feed` owns that path as a symlink into its private runtime
@@ -158,10 +163,11 @@ ss -ltnp | grep 8787
 # Both services are active
 systemctl --user is-active tinyscry-relay.service tinyscry-feed.service
 
-# The feed created the runtime spool and the hook symlink
-ls -l ~/.local/state/tinyscry/spool   # -> symlink into $XDG_RUNTIME_DIR/tinyscry/spool
+# The feed created the runtime spool, hook symlink, and private context marker
+ls -l ~/.local/state/tinyscry/spool
+stat -c '%a %n' ~/.local/state/tinyscry/context   # 600 after a world selection
 
-# Recent lifecycle logs, never raw GMCP
+# Recent lifecycle logs, never raw GMCP or action text
 journalctl --user -u tinyscry-relay.service -u tinyscry-feed.service -n 50
 ```
 
@@ -173,7 +179,7 @@ journalctl --user -u tinyscry-relay.service -u tinyscry-feed.service -n 50
 | Relay reachable but no HUD data                                          | `curl http://127.0.0.1:8787/healthz` (via the SSH tunnel) and confirm a producer is attached; check `journalctl --user -u tinyscry-feed.service` for "feed started" / reconnect lines.                                                       |
 | TinyFugue shows an `fwrite` error line                                   | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                           |
 | Services do not survive a reboot                                         | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                        |
-| Relay bound to more than loopback                                        | Never pass `--allow-non-loopback` in the unit file; re-run step 3 from a clean copy of `deploy/systemd/tinyscry-relay.service`.                                                                                                              |
+| Relay bound to more than loopback                                        | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                               |
 | Feed consuming GMCP but relay reports `has_snapshot: false`              | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again. |
 
 ## Diagnostic raw capture (opt-in, VPS)

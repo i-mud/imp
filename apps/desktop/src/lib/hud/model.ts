@@ -4,6 +4,7 @@ import {
   type GameState,
   type ProtocolError,
   type RelayInfo,
+  type StateContext,
 } from '@tinyscry/protocol';
 
 import type { ConnectionPhase, SourceEvent } from '../source/types.ts';
@@ -13,6 +14,7 @@ export interface HudModel {
   readonly detail: string | null;
   readonly relay: RelayInfo | null;
   readonly feed: FeedStatus | null;
+  readonly context: StateContext | null;
   readonly state: GameState;
   readonly lastSeq: number;
   readonly lastUpdateAt: number | null;
@@ -25,6 +27,7 @@ export const INITIAL_MODEL: HudModel = {
   detail: null,
   relay: null,
   feed: null,
+  context: null,
   state: EMPTY_STATE,
   lastSeq: -1,
   lastUpdateAt: null,
@@ -65,21 +68,29 @@ export function applyEvent(model: HudModel, event: SourceEvent): HudModel {
         ...model,
         phase: event.phase,
         detail: event.detail,
+        context: event.phase === 'connected' ? model.context : null,
         lastSeq: -1,
         hasData: event.phase === 'connected' ? model.hasData : false,
       };
     case 'hello':
       return { ...model, relay: event.relay, lastSeq: -1 };
-    case 'snapshot':
+    case 'snapshot': {
       if (event.seq <= model.lastSeq) return model;
+      const contextChanged =
+        model.context?.session !== event.context?.session ||
+        model.context?.foreground !== event.context?.foreground ||
+        model.context?.connection !== event.context?.connection;
       return {
         ...model,
+        feed: contextChanged ? 'stale' : model.feed,
+        context: event.context,
         state: event.state,
         lastSeq: event.seq,
         lastUpdateAt: event.at,
         lastError: null,
         hasData: true,
       };
+    }
     case 'feed':
       return { ...model, feed: event.status, detail: event.detail };
     case 'protocol-error':

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-import re
 from io import StringIO
-from pathlib import Path
 
 from tinyscry_tf.capture import convert_lines, encode_record, parse_raw_gmcp
+from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, decode_tf_token, parse_tf_event
 from tinyscry_tf.records import MAX_RECORD_CHARS
 
 
-def test_actual_tinyfugue_line_becomes_adapter_record() -> None:
-    parsed = parse_raw_gmcp('1789502552.922742 Core.Test {"value":"text; slash-command remains data"}\n')
+def test_versioned_gmcp_event_becomes_adapter_record() -> None:
+    parsed = parse_raw_gmcp(
+        "TS2 G 123_46_45 7 Avatar_32_World 1789502552.922742 "
+        'Core.Test {"value":"text; slash-command remains data"}\n'
+    )
 
     assert parsed.ok
     assert parsed.record is not None
@@ -21,40 +23,39 @@ def test_actual_tinyfugue_line_becomes_adapter_record() -> None:
     )
 
 
-def test_package_without_payload_becomes_json_null() -> None:
-    parsed = parse_raw_gmcp("1789502552.922742 Core.Ping\n")
+def test_event_parser_distinguishes_gmcp_reset_selection_and_no_world() -> None:
+    gmcp = parse_tf_event("TS2 G s1 3 Avatar 1 Char.Ping")
+    reset = parse_tf_event("TS2 R s1 4 Avatar 2")
+    selected = parse_tf_event("TS2 S s1 8 4 Avatar 3")
+    no_world = parse_tf_event("TS2 S s1 9 0 - 4")
 
-    assert parsed.ok
-    assert parsed.record is not None
-    assert parsed.record.payload is None
+    assert isinstance(gmcp.event, GmcpEvent)
+    assert isinstance(reset.event, ResetEvent)
+    assert isinstance(selected.event, SelectEvent) and selected.event.context is not None
+    assert isinstance(no_world.event, SelectEvent) and no_world.event.context is None
 
 
-def test_malformed_raw_records_are_rejected_without_stopping_conversion() -> None:
-    oversized = f"1 Core.Test {('x' * MAX_RECORD_CHARS)}"
+def test_textencode_tokens_decode_strictly() -> None:
+    assert decode_tf_token("Avatar_32_World_95_2") == "Avatar World_2"
+    assert decode_tf_token("bad_under_score") is None
+    assert decode_tf_token("_10_") is None
+
+
+def test_malformed_events_are_rejected_without_stopping_conversion() -> None:
+    oversized = f"TS2 G s1 1 Avatar 1 Core.Test {('x' * (MAX_RECORD_CHARS + 600))}"
     lines = [
-        "not-a-time Core.Test {}\n",
-        "1 Core.Test {broken}\n",
-        "1 Bad\x07 {}\n",
+        "1700000000 Char.Status {}\n",
+        "TS3 G s1 1 Avatar 1 Core.Test {}\n",
+        "TS2 G bad/session 1 Avatar 1 Core.Test {}\n",
+        "TS2 G s1 1 Avatar 1 Core.Test {broken}\n",
         oversized,
-        '2 Char.Vitals {"hp":"9"}\n',
+        'TS2 G s1 1 Avatar 2 Char.Vitals {"hp":"9"}\n',
     ]
     output = StringIO()
 
     stats = convert_lines(lines, output)
 
-    assert stats.received == 5
-    assert stats.rejected == 4
+    assert stats.received == 6
+    assert stats.rejected == 5
     assert stats.written == 1
     assert output.getvalue() == '{"at":2000,"package":"Char.Vitals","payload":{"hp":"9"}}\n'
-
-
-def test_canonical_hook_observes_gmcp_without_competing_with_operator_handlers() -> None:
-    hook = (Path(__file__).resolve().parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
-    definition = next(line for line in hook.splitlines() if line.startswith("/def "))
-    flags = definition.removeprefix("/def ").split(maxsplit=1)[0]
-
-    assert "F" in flags, "hook must fall through so lower-priority operator GMCP handlers still run"
-    priority = re.search(r"p(\d+)", flags)
-    assert priority is not None and int(priority.group(1)) == 2, "hook priority must be exactly 2"
-    assert '-h"GMCP"' in definition, "hook must stay a generic GMCP hook"
-    assert 'fwrite("~/.local/state/tinyscry/spool"' in hook

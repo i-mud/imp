@@ -63,6 +63,7 @@ export class MockStateSource implements StateSource {
         protocol: PROTOCOL_VERSION,
         seq: 0,
         at: Date.now(),
+        context: null,
         state: {
           character: { name: 'Aria', hp: { current: -1, max: MAX_HP }, mana: null, moves: null },
           target: null,
@@ -116,6 +117,7 @@ export class MockStateSource implements StateSource {
         protocol: PROTOCOL_VERSION,
         seq: this.sequence++,
         at: Date.now(),
+        context: null,
         state,
       }),
     );
@@ -153,6 +155,7 @@ export class MockStateSource implements StateSource {
           kind: 'snapshot',
           seq: decoded.value.seq,
           at: decoded.value.at,
+          context: decoded.value.context,
           state: decoded.value.state,
         });
         break;

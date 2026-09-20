@@ -1,0 +1,6 @@
+{
+  "description": "TinyFugue helper acknowledges one dispatch",
+  "direction": "client",
+  "expect": "accept",
+  "frame": "{\"type\":\"consumer-result\",\"protocol\":2,\"id\":\"abc123\",\"status\":\"forwarded\"}"
+}

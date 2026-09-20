@@ -2,5 +2,5 @@
   "description": "feed healthy, detail omitted",
   "direction": "server",
   "expect": "accept",
-  "frame": "{\"type\":\"status\",\"protocol\":1,\"at\":1758000000800,\"feed\":\"live\"}"
+  "frame": "{\"type\":\"status\",\"protocol\":2,\"at\":1758000000800,\"feed\":\"live\"}"
 }

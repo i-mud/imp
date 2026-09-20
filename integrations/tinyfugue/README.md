@@ -6,31 +6,50 @@ TinyScry keeps MUD-specific data outside the desktop application:
 MUD GMCP -> TinyFugue hook -> private spool -> tinyscry-feed -> relay ingest (loopback) -> SSH tunnel -> desktop HUD
 ```
 
-`tinyscry-feed` connects only to `ws://127.0.0.1:8787/ingest` by default. The relay is deliberately
-loopback-only and has no application authentication: the SSH tunnel and the VPS loopback interface
-are the security boundary. A different host is rejected unless `--allow-non-loopback` is explicit.
-Never put a relay directly on a public interface.
+`tinyscry-feed` and `tinyscry-action-consumer` accept loopback relay URLs only.
+Loopback prevents remote network access; it does not enforce OS-user ownership.
+Any process in the VPS network namespace, including another local user, can
+reach ingest and action-consumer endpoints. The forwarded workstation listener
+has the same property for state and action endpoints. Browser `Origin` checks
+are defense-in-depth against cross-site requests, not authentication. TinyScry
+provides no per-user endpoint authentication. Supported deployment therefore
+requires a single-user workstation and VPS, or mutual trust among every
+host-local user and process; an untrusted multi-user host is out of scope.
+There is no non-loopback override.
 
-## Adapter record contract
+## Versioned spool event contract
 
-The TF-facing adapter emits exactly one UTF-8 JSON object per line:
+The TF-facing hook emits one UTF-8 `TS2` event per line:
 
-```json
-{ "at": 1710000000000, "package": "Char.Vitals", "payload": { "hp": "120", "maxhp": "150" } }
+```text
+TS2 G <session> <connection> <world-token> <epoch-seconds> <package> [JSON]
+TS2 R <session> <connection> <world-token> <epoch-seconds>
+TS2 S <session> <foreground> <connection> <world-token-or-> <epoch-seconds>
 ```
 
-- `at` is a non-negative epoch-millisecond integer.
-- `package` is the GMCP package name, with no control characters.
-- `payload` is the parsed JSON value sent by the MUD; it is not a stringified JSON fragment.
+- `session` is stable for one TinyFugue process.
+- `foreground` increases when the selected world changes.
+- `connection` increases whenever a world connection is reset or reconnects.
+- `world-token` is TinyFugue `textencode.tf` data, not executable TF source.
+- `G` carries GMCP, `R` resets only that world's accumulated state, and `S`
+  selects the only world whose state may be published. `-` means no selection.
 
-The bridge rejects malformed, non-object, oversize, or unsafe records without logging their raw
-content. It logs only a bounded rejection code and continues. The Python normalizer owns all GMCP
-JSON parsing and conversion; it never executes data received from a MUD.
+The parser rejects malformed versions, fields, encodings, timestamps, JSON, and
+oversize records without logging raw content. Each world has an independent
+normalizer and checkpoint entry. Background-world GMCP updates only that
+world's cache; it cannot overwrite the foreground snapshot. A changed session
+clears every prior world.
+
+The normalized runtime checkpoint is versioned, session-bound, per-world, and
+ephemeral under `$XDG_RUNTIME_DIR/tinyscry/state.json`. It is never raw GMCP or
+durable session history. The exact active context is also written atomically as
+`TSCTX 2 <session> <foreground> <connection>` to the private `0600`
+`~/.local/state/tinyscry/context` marker.
 
 ## Running (normal production path)
 
-Copy the unchanged hook to `~/.config/tinyscry/capture.tf`, then add this
-line to the startup file used by the operator's actual TinyFugue invocation:
+Copy the unchanged hook to `~/.config/tinyscry/capture.tf`, then add this line
+to the startup file used by the operator's actual TinyFugue invocation:
 
 ```text
 /load ~/.config/tinyscry/capture.tf
@@ -39,17 +58,15 @@ line to the startup file used by the operator's actual TinyFugue invocation:
 TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
 config. For example, when starting from `~/avatar/tf` with
 `tf -f./.tfrc -n`, the load belongs in `~/avatar/tf/.tfrc`, not an assumed
-`~/.tfrc`. It must run before anything in that startup path can connect or
-log in. The hook is additive and does not own or replace the operator's GMCP
-negotiation or connection macros, and TinyScry sends no GMCP of its own.
-Installation must not automatically create or overwrite an operator startup
-file. See [`../../deploy/README.md`](../../deploy/README.md) for the full VPS
-systemd setup.
+`~/.tfrc`. Load it before any world connects or logs in. The hook is additive:
+it does not replace the operator's GMCP negotiation or connection macros and
+sends no GMCP of its own. Installation must not create or overwrite an
+operator startup file. See [`../../deploy/README.md`](../../deploy/README.md)
+for the VPS systemd setup.
 
 The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
-`tinyscry-feed` creates that path as a symlink into its own private runtime
-directory and owns everything downstream of it - no manual file
-pre-creation is needed, unlike the earlier `gmcp.raw` setup:
+`tinyscry-feed` creates that path as a symlink into its private runtime
+directory and owns everything downstream:
 
 ```sh
 # Terminal 1
@@ -59,29 +76,36 @@ uv run --directory services/relay tinyscry-relay
 uv run --directory integrations/tinyfugue tinyscry-feed
 ```
 
-`tinyscry-feed` replaces the earlier three-process
-`tail -F gmcp.raw | tinyscry-capture | tinyscry-bridge` pipeline for normal
-use. It:
+`tinyscry-feed` acquires the single-producer lock, creates the private drained
+spool, parses versioned events, keeps normalization isolated per world, and
+publishes only the selected exact context. A newer delivery cancels an older
+pending publish so reconnect backoff cannot replay stale foreground state. On a
+publisher reconnect it sends `select` again before any `publish`.
 
-- acquires an exclusive runtime lock so a second accidental invocation - a
-  duplicate manual start, or a stray process left over from a crash - fails
-  immediately with a clear message instead of racing the running feed for the
-  same TinyFugue hook;
-- creates the private runtime spool and the hook's fixed-path symlink;
-- polls the spool, converts and normalizes each line with the same checked
-  parsing `tinyscry-capture` always used, and publishes only material state
-  changes, with the same bounded reconnect backoff `tinyscry-bridge` always
-  used.
+The TF hook starts an asynchronous `tinyscry-action-consumer` for the selected
+connection. It registers only while the feed's private context marker matches
+and reconnects after an idle relay restart only while that marker remains
+exact. While idle, it writes no probe bytes: it polls its stdout descriptor only
+for terminal reader-loss events and exits without a result or reconnect when
+TinyFugue closes the quote pipe. Each registration accepts at most one dispatch.
+Action text arrives as WebSocket data, is converted to a `textencode.tf` token,
+and is written as one fixed `/tinyscry_send <session> <foreground> <connection>
+<world-token> <encoded-data>` line. After that write and flush the helper reports
+`forwarded` and exits, closing the shell-quote pipe instead of waiting for
+another action. At execution, `/tinyscry_send` rechecks the current TF session,
+foreground generation, selected and quote-pinned world, and that world's
+connection generation before calling `send()` and starting one replacement
+helper. A stale line fails that same fence and cannot start a helper for its
+obsolete context. The raw command never appears in shell argv or evaluated TF
+source. `forwarded` does not mean that the local fence passed, `send()`
+succeeded, the MUD socket received the command, or the MUD executed it. A pipe
+failure closes the consumer so the relay reports `unknown`, and neither side
+retries the dispatch.
 
-To stop the feed without closing TinyFugue, stop the `tinyscry-feed` process
-(or `systemctl --user stop tinyscry-feed.service` under the VPS deployment);
-the hook keeps trying to write and simply loses updates until a feed is
-running again. To stop the hook itself, use `/undef tinyscry_capture_gmcp`
-inside TinyFugue.
-
-All filenames and commands are fixed operator input. MUD data flows only
-through direct file APIs; it is never interpolated into a shell or TF
-command.
+To stop the feed without closing TinyFugue, stop `tinyscry-feed` (or
+`systemctl --user stop tinyscry-feed.service`). The hook keeps trying the fixed
+spool path and loses updates rather than blocking. Reloading or exiting
+TinyFugue removes its session-local hook state.
 
 ## Identity bootstrap prerequisite
 
@@ -175,41 +199,276 @@ uv run --directory integrations/tinyfugue python -m tinyscry_tf.replay \
 ```
 
 `--dry-run` prints each changed, complete normalized state as protocol JSON
-and opens no socket. Use `--relay-url` and `--interval` for a paced live
-replay; non-loopback relay URLs also require `--allow-non-loopback`.
+and opens no socket. A live replay URL must remain loopback and may use
+`--interval` for pacing.
+
+Network replay is display-only: every replayed state is selected with a null
+context, so it cannot authorize an outbound action.
+
+## Nondisruptive live verification
+
+These checks observe context selection without sending an outbound action or
+changing operator login/GMCP macros:
+
+1. Install the updated `capture.tf`, start or restart the relay and feed, then
+   `/load ~/.config/tinyscry/capture.tf` before connecting worlds.
+2. Select one connected world normally. Check
+   `stat -c '%a %n' ~/.local/state/tinyscry/context`; it must be mode `600`.
+   `cat ~/.local/state/tinyscry/context` must show exactly one newline-terminated
+   `TSCTX 2` record.
+3. Record `curl -s http://127.0.0.1:8787/healthz` and the HUD identity/vitals.
+   Normal foreground GMCP should move the feed to `live`.
+4. Switch to another already-connected world without disconnecting either one.
+   The marker's foreground generation must increase and the HUD must show only
+   the selected world's cached or subsequent state. Background activity must
+   not overwrite it.
+5. Reconnect the selected world. Its connection generation must increase, the
+   selected snapshot must reset rather than reuse the old generation, and only
+   fresh GMCP for the new generation may restore `live`.
+6. Switch back and forth once more, then inspect
+   `$XDG_RUNTIME_DIR/tinyscry/state.json`: it must be version 2, carry the
+   current session, and keep separate world entries.
+
+Stop if any tuple regresses, if a background world appears in the HUD, or if
+TinyFugue pauses. Do not open `/action` during this checklist. A real outbound
+command is a separate, explicit operator acceptance check because even a
+read-only-looking MUD command is an external effect.
+
+### Connectionless outbound acceptance check
+
+Status: **live-verified** in a fresh operator process on TinyFugue
+`5.2.2-3-g4f0ff34`, pinned to
+`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`. The recorded run used only
+connectionless echo worlds: it verifies the local bridge, synchronous fences,
+and helper lifecycle, not real MUD-server execution.
+
+This procedure uses only TinyFugue connectionless echo worlds. No world has a
+host or port, so no MUD can receive the test data. On the VPS, load the shipped
+hook and create two local echo worlds:
+
+```text
+/load ~/.config/tinyscry/capture.tf
+/addworld -e TinyScryA
+/addworld -e TinyScryB
+/world TinyScryA
+```
+
+Start the normal relay, feed, SSH forward, and desktop development runtime with
+`VITE_TINYSCRY_SOURCE=relay`. In the desktop browser's developer console, use
+the production factory and sink; do not construct an `/action` frame or open a
+WebSocket by hand:
+
+```js
+const { createActionSink } = await import('/src/lib/config.ts');
+const sink = createActionSink(); // RelayActionSink in relay mode
+const send = (context, command) => sink.send(context, command);
+```
+
+Copy the exact `session`, `foreground`, and `connection` values from the
+newline-terminated `~/.local/state/tinyscry/context` marker into a JavaScript
+context object. Use a unique literal command containing every parser-sensitive
+form:
+
+```js
+const literal = '/#7 say "100% ready"; /look';
+await send(contextA, literal);
+```
+
+Before sending actions, establish A and B once, record both connection
+generations, and switch A -> B -> A. In each echo world, invoke
+`/tinyscry_capture_gmcp Core.Ping {}` once. Both established worlds must retain
+their connection generations; the select and synthetic GMCP events must remain
+valid, and neither operation may trigger a reset. This is the live-only check
+that each dynamic generation lookup and all dependent commands execute in one
+`/eval` scope.
+
+Perform and record every check:
+
+1. **Exact-current context, literal data, and one-shot replacement.** With
+   `TinyScryA` selected, the result is `forwarded` and exactly one literal
+   `/#7 say "100% ready"; /look` line appears in `TinyScryA`. Nothing appears in
+   `TinyScryB`. Immediately type a visible command at the TinyFugue keyboard;
+   input must remain responsive. Then send a second uniquely tagged literal and
+   verify it also appears exactly once in A, proving the first helper exited and
+   its guarded replacement registered. This traverses `RelayActionSink`,
+   `/action`, the broker, `/action-consumer`, the Python helper, quote-pinned
+   stdout, `/tinyscry_send`, `textdecode()`, and `send()`. `forwarded` itself
+   still proves only the bridge write.
+   This is also the live-only check that the dynamic per-world connection
+   lookup and the full fence execute in one `/eval` scope; deterministic tests
+   enforce source shape but do not execute TinyFugue's scope semantics.
+2. **SEND-hook bypass.** Before repeating the exact-current send, install a
+   harmless temporary counter:
+
+   ```text
+   /set tinyscry_accept_send_hooks=0
+   /def -i -h"SEND *" tinyscry_accept_send_hook = \
+       /test tinyscry_accept_send_hooks := tinyscry_accept_send_hooks + 1
+   ```
+
+   The literal line must still appear exactly once and the counter must remain
+   zero, proving the final `send()` neither invokes nor transforms through a
+   `SEND` hook. Remove it afterward with
+   `/undef tinyscry_accept_send_hook`.
+
+3. **Foreground race fence.** Save `contextA`, then freeze the running feed
+   process without stopping its service or running feed shutdown cleanup. In a
+   VPS shell, obtain and validate the user service's current main PID, suspend
+   it, and install a cleanup trap before changing TinyFugue:
+
+   ```sh
+   feed_pid="$(systemctl --user show --property MainPID --value tinyscry-feed.service)"
+   test "${feed_pid:-0}" -gt 0 && kill -0 "$feed_pid"
+   trap 'kill -CONT "$feed_pid" 2>/dev/null || true' EXIT INT TERM
+   kill -STOP "$feed_pid"
+   systemctl --user show --property ActiveState,SubState,MainPID tinyscry-feed.service
+   ps -o pid=,stat=,cmd= -p "$feed_pid"
+   ```
+
+   Do not proceed unless the nonzero-PID and `kill -0` validation succeeds.
+
+   Confirm the service process still exists and is stopped by signal, while the
+   relay active context, context marker, and registered A helper still represent
+   `contextA`. Leave TinyFugue running and interactive. Run
+   `/world TinyScryB`, but do not resume the feed yet. Immediately call
+   `send(contextA, literal)` through the production sink. The result must be
+   `forwarded`, proving the helper wrote and flushed the fixed bridge line, and
+   neither echo world may show the literal line. That zero-echo result then
+   proves the synchronous `/tinyscry_send` fence rejected the command because
+   TinyFugue's live foreground/world generation no longer matches; it must never
+   retarget to B.
+
+   Resume the same process and remove the trap:
+
+   ```sh
+   kill -CONT "$feed_pid" && trap - EXIT INT TERM
+   ```
+
+   Wait for normal spool processing to catch up, then verify the marker and
+   relay converge on B and the feed resumes publishing.
+
+4. **Active connection-generation fence.** Select A, save its exact current
+   context/generation, and repeat the same `MainPID` validation, `SIGSTOP`, and
+   cleanup-trap sequence above. Confirm the relay, marker, and registered helper
+   still retain the old A generation. While the feed remains frozen, run
+   `/tinyscry_reset_world TinyScryA` to advance A's local connection generation
+   using the connectionless mechanism. Before `SIGCONT`, call
+   `send(contextA, literal)` with the old retained context. The result must be
+   `forwarded`, proving the fixed bridge was reached, while no echo line may
+   appear because `/tinyscry_send` sees a different current local connection
+   generation. Resume the feed, remove the trap, allow queued spool processing
+   to catch up, and verify the marker and relay converge on A's new generation.
+
+   For either fence probe, always send `SIGCONT` even if any assertion or command
+   fails. Verify the feed processes new input afterward and never leave the
+   service process suspended. Do not use `systemctl --user stop`/`start` for
+   these fence proofs: orderly shutdown removes the marker and helper, so a
+   rejected action would not exercise `/tinyscry_send`.
+
+5. **Quote pinning.** With an exact-current A context, submit a uniquely tagged
+   action and immediately switch to B. Accepted work may appear once in its
+   quote-pinned A world or be suppressed by the synchronous fence; it must never
+   appear in B.
+6. **Idle relay restart.** While no state event is arriving, restart
+   `tinyscry-relay.service`. The publisher must reconnect and reassert the
+   retained selection, which remains `stale` until genuine state is published;
+   the consumer must re-register. No earlier literal may reappear. A new unique
+   action must then produce exactly one new A echo line.
+7. **Helper loss.** Identify and terminate only the helper process whose argv
+   carries this test session/context. An action during the loss is rejected or
+   `unknown` and produces no line. Switch away and back to start a current
+   helper, then send one new unique action. It appears exactly once; the lost
+   action is never retried or duplicated.
+8. **Idle shutdown.** With a current helper registered and no action in flight,
+   run `/quit -y`. TinyFugue must exit promptly without waiting in `do_wait`.
+   Confirm no TinyFugue process remains with an action-helper descendant. This
+   proves closing the quote-pipe reader terminates the idle helper and its shell
+   intermediary without requiring another action or relay failure.
+
+Record the TinyFugue build, the two connectionless world definitions, before
+and after context tuples, action results, hook counter, per-world echo output,
+relay restart health, helper-loss result, `/quit -y` completion, and the
+post-quit process check. Only that evidence can change the status above.
+Automated tests and the structural macro contract are not TinyFugue execution.
+
+#### Recorded acceptance evidence
+
+The live run established the following:
+
+- Two exact-current actions each returned `forwarded`, appeared exactly once
+  in `TinyScryA`, left TinyFugue immediately interactive, and caused the
+  one-shot helper to exit and be replaced for the same exact context. This also
+  executed the corrected `tinyscry_send` `/eval` scope.
+- With the feed suspended on published A, a local A -> B transition advanced
+  only the foreground generation. An action using the stale published A
+  context returned `forwarded` but appeared in neither world; its stale helper
+  exited without replacement.
+- With the feed suspended on published B connection generation 102, a local
+  `/tinyscry_reset_world TinyScryB` advanced B to 122. An action carrying 102
+  returned `forwarded` but appeared nowhere, and its stale helper exited
+  without replacement. After feed resume, the marker converged to 122.
+- In a fresh process, A -> B -> A changed only the foreground generation:
+  A remained at connection 7, B at connection 8, and the serial remained 8.
+  `/tinyscry_capture_gmcp Core.Ping {}` in each echo world preserved those
+  values, and the feed reported no malformed select or GMCP events. This
+  executes the corrected `tinyscry_select_world` and
+  `tinyscry_capture_gmcp` `/eval` scopes.
+- An action accepted for current B followed by an immediate switch to A never
+  appeared in A. The B-side outcome was not observed: the contract permits
+  delivery only to quote-pinned B or synchronous suppression if the foreground
+  transition wins. The helper subsequently converged to current A.
+- An idle current A helper survived a relay restart. The relay returned with a
+  stale retained snapshot and one producer; a new action appeared exactly once,
+  no earlier action replayed, TinyFugue stayed interactive, and a replacement
+  helper appeared.
+- After the current consumer was killed, an action returned
+  `rejected` with `no matching TinyFugue consumer` and did not execute. A
+  legitimate B -> A transition created a new helper; a fresh action then
+  appeared exactly once, and the rejected action never appeared later.
+- `/quit -y` exited promptly with an idle helper. No TinyFugue process,
+  consumer, or wrapper shell remained, live-verifying terminal reader-loss
+  handling and closure of the prior `pclose()`/`do_wait()` hang.
+
+Relay `forwarded` means the action was written and flushed to the fixed
+TinyFugue bridge. The synchronous TinyFugue fences may still suppress that line,
+and neither `forwarded` nor connectionless echo proves MUD-server execution.
+`tfwrite: bad handle` messages observed in the connectionless worlds were a
+probe-world artifact; they did not prevent direct or TinyScry send delivery.
+
+### Optional real-MUD acceptance
+
+This is a separate operator-controlled external-effect test. If performed, use
+an explicitly approved harmless command, treat `forwarded` only as a successful
+bridge write, independently observe the MUD response, and never retry an
+`unknown` result. It is not required for the connectionless acceptance above.
 
 ## Verified TinyFugue boundary
 
-The hook contract was established against TinyFugue 5.1.6-4-ga15a165 with
-`+gmcp` and `+GMCP`, and is unchanged on the current VPS build
-5.2.2-3-g4f0ff34, which additionally provides the `GMCP_LOGIN` hook the
-operator's login scripts need (see
+The base hook contract was established against TinyFugue
+5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The current VPS build
+5.2.2-3-g4f0ff34 additionally provides the `GMCP_LOGIN` hook the operator's
+login scripts need (see
 [identity bootstrap prerequisite](#identity-bootstrap-prerequisite)).
-The `GMCP` hook receives one raw positional string in the form `Package JSON`.
-`fwrite(filename, data)` appends data and a newline directly to a
-fixed filename. `time()` returns epoch seconds with six
-fractional digits, which `tinyscry-capture` converts to integer epoch
-milliseconds.
+`GMCP`, `CONNECT`, `GMCP_LOGIN`, and `WORLD` supply the package/world events
+used by the versioned hook. `fwrite(filename, data)` appends data and a newline
+to a fixed filename; `time()` supplies epoch seconds with six fractional
+digits.
 
-The hook is installed as `/def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp`.
-TinyFugue runs the highest-priority matching hook first and stops there unless
-that hook falls through. TinyScry's explicit priority 2 runs ahead of operators'
-default priority-1 GMCP handlers, such as `received-gmcp`; the `-F` flag lets
-those lower-priority handlers still run afterward. Operators commonly own a
-generic GMCP handler at priority 1, and two same-priority non-fall-through hooks
-on the same event compete — in live testing that intermittently lost whole GMCP
-events: some fights never acquired a target while `Char.Vitals` resource updates
-kept arriving, and the checkpoint stayed `target:null` even though bounded
-diagnostics showed a valid named acquisition. Re-installing the capture hook at
-priority 2 with `-F` made repeated live fights acquire, update and clear targets
-correctly. Do not drop `-F`. Priority 2 is the shipped, live-verified
-configuration; any priority change should be re-verified against operator
-GMCP handlers.
+All TinyScry hooks use explicit priority 2 and `-F`. TinyFugue runs the
+highest-priority matching hook first and stops unless it falls through. The
+priority runs ahead of operator priority-1 handlers such as `received-gmcp`;
+`-F` lets those handlers still run. Two same-priority non-fall-through GMCP
+hooks previously lost complete events intermittently. Re-installing
+`tinyscry_capture_gmcp` at priority 2 with `-F` made repeated live fights
+acquire, update, and clear targets correctly. Do not drop `-F`; any priority
+change needs live re-verification.
 
-The real capture contained 249 hook lines across 214.662 seconds. The converter
-accepted 200 records. It rejected 49 inventory events whose MUD payloads
-contained unescaped control characters inside JSON strings; it logged only
-bounded error codes and did not repair or execute the input.
+The prior real capture included valid HUD records and malformed inventory
+events whose MUD payloads contained unescaped controls inside JSON strings.
+The converter logged only bounded error codes and did not repair or execute
+the input. That evidence covers the GMCP parsing boundary, not the new
+context/action runtime; use the checklist above before recording the latter as
+live-verified.
 
 ## Observed real-session schema
 

@@ -1,0 +1,6 @@
+{
+  "description": "relay reports explicit action disposition",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"action-result\",\"protocol\":2,\"status\":\"unknown\",\"detail\":\"consumer disconnected\"}"
+}

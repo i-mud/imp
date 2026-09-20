@@ -1,0 +1,6 @@
+{
+  "description": "producer selects one foreground context",
+  "direction": "client",
+  "expect": "accept",
+  "frame": "{\"type\":\"select\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":2,\"connection\":3},\"state\":{\"character\":null,\"target\":null}}"
+}

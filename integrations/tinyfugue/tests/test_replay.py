@@ -4,11 +4,19 @@ import asyncio
 import json
 from pathlib import Path
 
-from tinyscry_relay.protocol import decode_game_state
+from tinyscry_relay.protocol import GameState, StateContext, decode_game_state
 
 from tinyscry_tf.replay import replay_lines
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
+
+
+class _CollectingPublisher:
+    def __init__(self) -> None:
+        self.selections: list[tuple[StateContext | None, GameState]] = []
+
+    async def select(self, context: None, state: GameState) -> None:
+        self.selections.append((context, state))
 
 
 def test_real_session_dry_run_produces_observed_state_transitions() -> None:
@@ -43,3 +51,16 @@ def test_dry_run_malformed_fixture_counts_rejections_without_states() -> None:
     assert stats.rejected == 6
     assert stats.states == 0
     assert output == []
+
+
+def test_network_replay_selects_only_non_actionable_null_context() -> None:
+    async def scenario() -> None:
+        publisher = _CollectingPublisher()
+        with (FIXTURES / "real-session.jsonl").open(encoding="utf-8") as stream:
+            stats = await replay_lines(stream, interval=0, publisher=publisher, write_state=lambda _: None)
+
+        assert stats.states == len(publisher.selections)
+        assert publisher.selections
+        assert all(context is None for context, _ in publisher.selections)
+
+    asyncio.run(scenario())

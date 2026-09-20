@@ -4,5 +4,5 @@
   "expect": "reject",
   "code": "invalid_field",
   "path": "state",
-  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":\"broken\"}"
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":1,\"at\":1,\"context\":null,\"state\":\"broken\"}"
 }

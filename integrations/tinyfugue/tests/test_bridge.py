@@ -3,9 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from io import StringIO
 from typing import cast
 
+from tinyscry_relay.protocol import GameState, StateContext
 from websockets.asyncio.server import ServerConnection, serve
+
+from tinyscry_tf.bridge import process_lines
 
 
 def _record(at: int, payload: dict[str, str]) -> bytes:
@@ -80,5 +84,33 @@ def test_bridge_reconnects_after_relay_closes_producer() -> None:
             assert len(frames) == 2
             assert frames[0]["state"] != frames[1]["state"]
             assert not server.connections
+
+    asyncio.run(scenario())
+
+
+def test_offline_bridge_state_never_selects_an_actionable_context() -> None:
+    class Publisher:
+        def __init__(self) -> None:
+            self.operations: list[tuple[str, StateContext | None, GameState]] = []
+
+        async def select(self, context: StateContext | None, state: GameState) -> None:
+            self.operations.append(("select", context, state))
+
+        async def publish(self, context: StateContext, state: GameState) -> None:
+            self.operations.append(("publish", context, state))
+
+    async def scenario() -> None:
+        publisher = Publisher()
+        stream = StringIO(
+            '{"at":1710000000000,"package":"Char.Status",'
+            '"payload":{"character_name":"Offline","health":"10","health_max":"20"}}\n'
+            '{"at":1710000000100,"package":"Char.Status","payload":{"health":"9"}}\n'
+        )
+
+        stats = await process_lines(stream, publisher)
+
+        assert stats.published == 2
+        assert [kind for kind, _, _ in publisher.operations] == ["select", "select"]
+        assert all(context is None for _, context, _ in publisher.operations)
 
     asyncio.run(scenario())

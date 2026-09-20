@@ -4,5 +4,5 @@
   "expect": "reject",
   "code": "invalid_field",
   "path": "state.target.healthPercent",
-  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":null,\"target\":{\"name\":\"Troll\",\"healthPercent\":140}}}"
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":1,\"at\":1,\"context\":null,\"state\":{\"character\":null,\"target\":{\"name\":\"Troll\",\"healthPercent\":140}}}"
 }

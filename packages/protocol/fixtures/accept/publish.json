@@ -1,6 +1,6 @@
 {
-  "description": "producer publishing normalized state to the relay",
+  "description": "producer publishing normalized state to the selected context",
   "direction": "client",
   "expect": "accept",
-  "frame": "{\"type\":\"publish\",\"protocol\":1,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":842,\"max\":1000},\"mana\":{\"current\":371,\"max\":500},\"moves\":{\"current\":189,\"max\":200}},\"target\":{\"name\":\"Ancient Troll\",\"healthPercent\":72}}}"
+  "frame": "{\"type\":\"publish\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":1,\"connection\":1},\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":842,\"max\":1000},\"mana\":{\"current\":371,\"max\":500},\"moves\":{\"current\":189,\"max\":200}},\"target\":{\"name\":\"Ancient Troll\",\"healthPercent\":72}}}"
 }

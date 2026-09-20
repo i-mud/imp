@@ -33,7 +33,7 @@ Validated by:
 
 Carried by:
 
-- `snapshot` and `publish` messages
+- context-bound `select`, `publish`, and `snapshot` messages
 
 Consumed by:
 
@@ -89,5 +89,5 @@ pass `npm run check`.
 ## Verification
 
 Status: verified
-Verified against: `packages/protocol` at bootstrap; 44 TypeScript protocol
-tests passing over a 10-accept / 22-reject corpus.
+Verified against: TypeScript protocol tests and both-language conformance over
+the shared accept/reject fixture corpus.

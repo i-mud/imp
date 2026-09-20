@@ -1,4 +1,4 @@
-# 0001 - The relay binds to loopback and SSH is the only security boundary
+# 0001 - The relay binds to loopback and remote access uses SSH
 
 Status: accepted
 Date: 2026-09-15
@@ -20,23 +20,30 @@ access is an SSH port-forward that the operator already has to trust:
 ssh -N -L <local-port>:127.0.0.1:<relay-port> <user>@<vps>
 ```
 
-The relay implements no authentication of its own.
+The relay implements no per-user authentication of its own.
 
 ## Rationale
 
 Adding a bespoke auth scheme to the relay would mean inventing credential
-storage, rotation and transport security for a service whose entire audience is
-one operator who already holds SSH access to the same host. That is more attack
-surface and more code defending a boundary SSH already defends properly.
+storage, rotation and transport security. The supported deployment instead
+places every host-local process inside the trust boundary and uses the
+operator's existing authenticated SSH channel for remote access.
 
-Loopback-only also means the relay's threat model is "a local process on the
-VPS", not "the internet", which is what justifies the relay having no
-authentication at all.
+Loopback prevents remote network access, but TCP loopback does not enforce UID
+or same-user ownership. Any process in the VPS network namespace can reach the
+relay, including one owned by another local OS user. The workstation side of an
+SSH forward has the same host-local property. Browser `Origin` checks are
+defense-in-depth against cross-site requests, not authentication.
+
+TinyScry therefore supports a single-user workstation and VPS, or hosts where
+all local users and processes are mutually trusted. An untrusted multi-user
+host is outside the supported trust boundary.
 
 ## Consequences
 
-- A non-loopback bind must be an explicit, logged opt-in - see
-  `services/relay/src/tinyscry_relay/config.py`.
+- A non-loopback bind is rejected. There is no override flag.
+- TinyScry has no per-user authentication on the VPS listener or workstation
+  forward; loopback must never be described as same-user isolation.
 - The relay must never grow authentication as a way to make public exposure
   acceptable. If public exposure is ever genuinely needed, that is a new
   decision record, not a patch to this one.

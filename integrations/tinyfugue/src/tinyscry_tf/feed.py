@@ -1,16 +1,4 @@
-"""Live feed: drain TinyFugue's private spool, normalize GMCP, publish to relay.
-
-The spool reader and relay publisher are deliberately decoupled. A relay outage
-must not stop the feed from draining/bounding TinyFugue's raw runtime spool, and
-SIGTERM must not wait for RelayPublisher's reconnect loop. At most one pending
-normalized state is queued while a publish is in flight; newer state replaces
-that pending state so outage memory remains bounded.
-
-A private normalized checkpoint in $XDG_RUNTIME_DIR lets a supervised feed
-restart recover identity/vitals even after old raw spool generations have been
-retired. The checkpoint contains only TinyScry's validated GameState, never raw
-GMCP, and disappears with the user's runtime directory.
-"""
+"""Drain versioned TinyFugue events, isolate per-world state, and publish the foreground."""
 
 from __future__ import annotations
 
@@ -20,15 +8,18 @@ import json
 import logging
 import os
 import signal
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Protocol
 
-from tinyscry_relay.protocol import GameState, decode_game_state
+from tinyscry_relay.protocol import GameState, StateContext, decode_game_state
 
-from tinyscry_tf.capture import parse_raw_gmcp
+from tinyscry_tf.context import write_context_marker
 from tinyscry_tf.diagnostics import DiagnosticCapture
+from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, parse_tf_event
 from tinyscry_tf.normalize import Normalizer
 from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
 from tinyscry_tf.records import JsonValue, Record
@@ -37,6 +28,7 @@ from tinyscry_tf.spool import ProducerAlreadyRunning, RuntimeLayout, SpoolReader
 LOGGER = logging.getLogger(__name__)
 DEFAULT_POLL_INTERVAL_SECONDS = 0.2
 _CHECKPOINT_MODE = 0o600
+EMPTY_STATE = GameState(character=None, target=None)
 
 
 class SpoolSource(Protocol):
@@ -46,15 +38,32 @@ class SpoolSource(Protocol):
 
 
 class StatePublisher(Protocol):
-    async def publish(self, state: GameState) -> None: ...
+    async def select(self, context: StateContext | None, state: GameState) -> None: ...
+
+    async def publish(self, context: StateContext, state: GameState) -> None: ...
+
+
+@dataclass(frozen=True)
+class WorldCheckpoint:
+    connection: int
+    state: GameState
+
+
+@dataclass(frozen=True)
+class FeedCheckpoint:
+    session: str
+    worlds: dict[str, WorldCheckpoint]
+
+
+@dataclass
+class _WorldRuntime:
+    connection: int
+    normalizer: Normalizer
 
 
 def _seed_normalizer(initial_state: GameState | None) -> Normalizer:
-    """Reconstruct Normalizer's accumulated fields from a validated checkpoint."""
-
     if initial_state is None:
         return Normalizer()
-
     payload: dict[str, JsonValue] = {}
     character = initial_state.character
     if character is not None:
@@ -68,19 +77,13 @@ def _seed_normalizer(initial_state: GameState | None) -> Normalizer:
         if character.moves is not None:
             payload["movement"] = character.moves.current
             payload["movement_max"] = character.moves.max
-
-    # The target is handed over directly: only this path knows the target was
-    # restored rather than observed live, and the Normalizer needs that fact to
-    # retire a stale target on the first non-Fight position after a restart.
     normalizer = Normalizer(seeded_target=initial_state.target)
     if payload:
         normalizer.apply(Record(at=0, package="Char.Status", payload=payload))
     return normalizer
 
 
-def load_checkpoint(path: Path) -> GameState | None:
-    """Load a private normalized runtime checkpoint; fail closed if malformed."""
-
+def load_checkpoint(path: Path) -> FeedCheckpoint | None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -88,25 +91,50 @@ def load_checkpoint(path: Path) -> GameState | None:
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
         LOGGER.warning("ignored unreadable TinyScry runtime checkpoint")
         return None
-
-    decoded = decode_game_state(raw)
-    if not decoded.ok or decoded.value is None:
-        code = decoded.error.code if decoded.error is not None else "invalid_state"
-        LOGGER.warning("ignored invalid TinyScry runtime checkpoint (%s)", code)
+    if not isinstance(raw, dict) or raw.get("version") != 2 or not isinstance(raw.get("session"), str):
+        LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
         return None
-    return decoded.value
+    session = raw["session"]
+    if not session or len(session) > 128 or not session.replace("_", "a").isalnum():
+        LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+        return None
+    raw_worlds = raw.get("worlds")
+    if not isinstance(raw_worlds, dict):
+        LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+        return None
+    worlds: dict[str, WorldCheckpoint] = {}
+    for world, value in raw_worlds.items():
+        if not isinstance(world, str) or not world or len(world) > 128 or not isinstance(value, dict):
+            LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+            return None
+        connection = value.get("connection")
+        if isinstance(connection, bool) or not isinstance(connection, int) or connection < 1:
+            LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+            return None
+        decoded = decode_game_state(value.get("state"))
+        if not decoded.ok or decoded.value is None:
+            LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+            return None
+        worlds[world] = WorldCheckpoint(connection, decoded.value)
+    return FeedCheckpoint(session, worlds)
 
 
-def store_checkpoint(path: Path, state: GameState) -> None:
-    """Atomically replace the normalized runtime checkpoint with mode 0600."""
-
+def store_checkpoint(path: Path, checkpoint: FeedCheckpoint) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     staged = path.with_name(f".{path.name}.{os.getpid()}")
+    payload = {
+        "version": 2,
+        "session": checkpoint.session,
+        "worlds": {
+            world: {"connection": item.connection, "state": state_to_wire(item.state)}
+            for world, item in checkpoint.worlds.items()
+        },
+    }
     fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _CHECKPOINT_MODE)
     try:
         os.fchmod(fd, _CHECKPOINT_MODE)
         with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
-            json.dump(state_to_wire(state), handle, separators=(",", ":"))
+            json.dump(payload, handle, separators=(",", ":"))
             handle.write("\n")
             handle.flush()
             os.fsync(fd)
@@ -115,28 +143,36 @@ def store_checkpoint(path: Path, state: GameState) -> None:
     os.replace(staged, path)
 
 
-def _offer_latest(queue: asyncio.Queue[GameState], state: GameState) -> None:
-    """Keep at most one not-yet-started publish while another may be blocked."""
+def _checkpoint(session: str, worlds: dict[str, _WorldRuntime]) -> FeedCheckpoint:
+    return FeedCheckpoint(
+        session,
+        {
+            world: WorldCheckpoint(runtime.connection, runtime.normalizer.state)
+            for world, runtime in worlds.items()
+        },
+    )
 
-    if queue.full():
-        with suppress(asyncio.QueueEmpty):
-            queue.get_nowait()
-            queue.task_done()
-    queue.put_nowait(state)
 
-
-async def _publish_worker(
-    queue: asyncio.Queue[GameState],
-    publisher: StatePublisher,
+async def _replace_delivery(
+    previous: asyncio.Task[None] | None,
+    operation: Callable[[], Coroutine[object, object, None]],
     published_count: list[int],
-) -> None:
-    while True:
-        state = await queue.get()
-        try:
-            await publisher.publish(state)
-            published_count[0] += 1
-        finally:
-            queue.task_done()
+) -> asyncio.Task[None]:
+    if previous is not None:
+        if not previous.done():
+            previous.cancel()
+        with suppress(asyncio.CancelledError):
+            await previous
+
+    async def deliver() -> None:
+        await operation()
+        published_count[0] += 1
+
+    current = asyncio.create_task(deliver())
+    await asyncio.sleep(0)
+    if current.done():
+        await current
+    return current
 
 
 async def run_feed(
@@ -146,17 +182,20 @@ async def run_feed(
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
     diagnostics: DiagnosticCapture | None = None,
     stop: asyncio.Event | None = None,
-    initial_state: GameState | None = None,
-    checkpoint: Callable[[GameState], None] | None = None,
+    initial_checkpoint: FeedCheckpoint | None = None,
+    checkpoint: Callable[[FeedCheckpoint], None] | None = None,
+    context_marker: Callable[[StateContext | None], None] | None = None,
 ) -> None:
-    """Drain continuously; publish asynchronously so relay outages cannot stall it."""
-
-    normalizer = _seed_normalizer(initial_state)
-    last_queued = initial_state
+    session = initial_checkpoint.session if initial_checkpoint is not None else None
+    worlds = {
+        world: _WorldRuntime(item.connection, _seed_normalizer(item.state))
+        for world, item in (initial_checkpoint.worlds.items() if initial_checkpoint is not None else ())
+    }
+    selected_context: StateContext | None = None
+    selected_world: str | None = None
     received = rejected = 0
     published_count = [0]
-    publish_queue: asyncio.Queue[GameState] = asyncio.Queue(maxsize=1)
-    publish_task = asyncio.create_task(_publish_worker(publish_queue, publisher, published_count))
+    delivery: asyncio.Task[None] | None = None
 
     try:
         while stop is None or not stop.is_set():
@@ -164,25 +203,81 @@ async def run_feed(
                 received += 1
                 if diagnostics is not None:
                     diagnostics.write(line)
-
-                parsed = parse_raw_gmcp(line)
-                if not parsed.ok:
+                parsed = parse_tf_event(line)
+                if not parsed.ok or parsed.event is None:
                     rejected += 1
-                    LOGGER.warning("skipped malformed raw GMCP record %d (%s)", received, parsed.error)
+                    LOGGER.warning("skipped malformed TinyFugue event %d (%s)", received, parsed.error)
                     continue
-                assert parsed.record is not None
+                event = parsed.event
+                if event.session != session:
+                    session = event.session
+                    worlds.clear()
+                    selected_context = None
+                    selected_world = None
+                    if context_marker is not None:
+                        context_marker(None)
 
-                previous = normalizer.state
-                state = normalizer.apply(parsed.record)
-                if state == previous:
-                    continue
+                if isinstance(event, SelectEvent):
+                    selected_context = event.context
+                    selected_world = event.world
+                    if context_marker is not None:
+                        context_marker(selected_context)
+                    if event.world is None:
+                        state = EMPTY_STATE
+                    else:
+                        runtime = worlds.get(event.world)
+                        if runtime is None or runtime.connection != event.connection:
+                            runtime = _WorldRuntime(event.connection, Normalizer())
+                            worlds[event.world] = runtime
+                        state = runtime.normalizer.state
+                    delivery = await _replace_delivery(
+                        delivery,
+                        partial(publisher.select, selected_context, state),
+                        published_count,
+                    )
 
-                if checkpoint is not None:
-                    checkpoint(state)
+                elif isinstance(event, ResetEvent):
+                    existing = worlds.get(event.world)
+                    if existing is not None and event.connection < existing.connection:
+                        continue
+                    runtime = _WorldRuntime(event.connection, Normalizer())
+                    worlds[event.world] = runtime
+                    if selected_world == event.world and selected_context is not None:
+                        selected_context = StateContext(
+                            event.session, selected_context.foreground, event.connection
+                        )
+                        if context_marker is not None:
+                            context_marker(selected_context)
+                        delivery = await _replace_delivery(
+                            delivery,
+                            partial(publisher.select, selected_context, EMPTY_STATE),
+                            published_count,
+                        )
 
-                if state != last_queued:
-                    _offer_latest(publish_queue, state)
-                    last_queued = state
+                elif isinstance(event, GmcpEvent):
+                    runtime = worlds.get(event.world)
+                    if runtime is not None and event.connection < runtime.connection:
+                        continue
+                    if runtime is None or runtime.connection != event.connection:
+                        runtime = _WorldRuntime(event.connection, Normalizer())
+                        worlds[event.world] = runtime
+                    previous = runtime.normalizer.state
+                    state = runtime.normalizer.apply(event.record)
+                    if (
+                        state != previous
+                        and selected_world == event.world
+                        and selected_context is not None
+                        and selected_context.connection == event.connection
+                    ):
+                        current_context = selected_context
+                        delivery = await _replace_delivery(
+                            delivery,
+                            partial(publisher.publish, current_context, state),
+                            published_count,
+                        )
+
+                if checkpoint is not None and session is not None:
+                    checkpoint(_checkpoint(session, worlds))
 
             if stop is None:
                 await asyncio.sleep(poll_interval)
@@ -190,9 +285,10 @@ async def run_feed(
                 with suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=poll_interval)
     finally:
-        publish_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await publish_task
+        if delivery is not None:
+            delivery.cancel()
+            with suppress(asyncio.CancelledError):
+                await delivery
         LOGGER.info(
             "feed stopped: received=%d rejected=%d published=%d dropped=%d",
             received,
@@ -203,17 +299,12 @@ async def run_feed(
 
 
 def _arguments() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Drain TinyFugue's GMCP spool and publish to the relay")
-    parser.add_argument("--relay-url", default=DEFAULT_RELAY_URL, help="relay ingest WebSocket URL")
-    parser.add_argument(
-        "--allow-non-loopback",
-        action="store_true",
-        help="explicitly permit a relay URL outside the loopback and SSH boundary",
-    )
+    parser = argparse.ArgumentParser(description="Drain TinyFugue's event spool and publish to the relay")
+    parser.add_argument("--relay-url", default=DEFAULT_RELAY_URL, help="loopback relay ingest WebSocket URL")
     parser.add_argument(
         "--diagnostic-capture",
         action="store_true",
-        help="opt-in: persist raw GMCP lines to a bounded, private diagnostics directory",
+        help="opt-in: persist raw TinyFugue event lines to bounded private diagnostics",
     )
     parser.add_argument(
         "--poll-interval",
@@ -230,8 +321,8 @@ async def _serve(
     publisher: RelayPublisher,
     poll_interval: float,
     diagnostics: DiagnosticCapture | None,
-    initial_state: GameState | None,
-    checkpoint_path: Path,
+    initial_checkpoint: FeedCheckpoint | None,
+    layout: RuntimeLayout,
 ) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -245,10 +336,12 @@ async def _serve(
             poll_interval=poll_interval,
             diagnostics=diagnostics,
             stop=stop,
-            initial_state=initial_state,
-            checkpoint=lambda state: store_checkpoint(checkpoint_path, state),
+            initial_checkpoint=initial_checkpoint,
+            checkpoint=lambda value: store_checkpoint(layout.checkpoint, value),
+            context_marker=lambda value: write_context_marker(layout.context, value),
         )
     finally:
+        write_context_marker(layout.context, None)
         await publisher.close()
 
 
@@ -266,25 +359,18 @@ def main() -> None:
 
     reader = SpoolReader(layout)
     diagnostics = DiagnosticCapture(layout.diagnostics) if args.diagnostic_capture else None
-    publisher = RelayPublisher(url=args.relay_url, allow_non_loopback=args.allow_non_loopback)
+    publisher = RelayPublisher(url=args.relay_url)
     try:
+        write_context_marker(layout.context, None)
         reader.open()
-        initial_state = load_checkpoint(layout.checkpoint)
+        initial_checkpoint = load_checkpoint(layout.checkpoint)
         if diagnostics is not None:
             diagnostics.open()
             LOGGER.info("diagnostic raw capture enabled at %s", layout.diagnostics)
         LOGGER.info("feed started: spool=%s lock=%s", layout.spool, layout.lock)
-        asyncio.run(
-            _serve(
-                reader,
-                publisher,
-                args.poll_interval,
-                diagnostics,
-                initial_state,
-                layout.checkpoint,
-            )
-        )
+        asyncio.run(_serve(reader, publisher, args.poll_interval, diagnostics, initial_checkpoint, layout))
     finally:
+        write_context_marker(layout.context, None)
         reader.close()
         if diagnostics is not None:
             diagnostics.close()

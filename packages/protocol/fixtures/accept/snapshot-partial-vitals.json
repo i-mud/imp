@@ -2,5 +2,5 @@
   "description": "mana and moves unknown; absent keys mean null",
   "direction": "server",
   "expect": "accept",
-  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1758000000200,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":10,\"max\":100}},\"target\":null}}"
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":1,\"at\":1758000000200,\"context\":{\"session\":\"s1\",\"foreground\":1,\"connection\":1},\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":10,\"max\":100}},\"target\":null}}"
 }

@@ -1,0 +1,6 @@
+{
+  "description": "relay confirms action consumer eligibility",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"consumer-ready\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":2,\"connection\":3}}"
+}

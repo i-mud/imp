@@ -1,22 +1,20 @@
-"""Convert TinyFugue's direct GMCP hook output into adapter JSONL."""
+"""Convert versioned TinyFugue GMCP events into adapter JSONL."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TextIO
 
-from tinyscry_tf.records import MAX_EPOCH_MS, MAX_RECORD_CHARS, ParseResult, parse_record
+from tinyscry_tf.events import GmcpEvent, parse_tf_event
+from tinyscry_tf.records import ParseResult
 
 LOGGER = logging.getLogger(__name__)
-_TIMESTAMP = re.compile(r"^[0-9]{1,13}(?:\.[0-9]{1,6})?$")
 
 
 @dataclass(frozen=True)
@@ -26,49 +24,15 @@ class CaptureStats:
     written: int
 
 
-def _invalid(error: str) -> ParseResult:
-    return ParseResult(record=None, error=error)
-
-
-def _reject_json_constant(_value: str) -> object:
-    raise ValueError("non-standard JSON constant")
-
-
 def parse_raw_gmcp(line: str) -> ParseResult:
-    """Parse ``<epoch-seconds> <package> [JSON]`` emitted by the TF hook."""
-    raw = line.removesuffix("\n").removesuffix("\r")
-    if len(raw) > MAX_RECORD_CHARS:
-        return _invalid("raw_record_too_large")
+    """Parse one ``TS2 G`` spool event and return its checked GMCP record."""
 
-    timestamp_text, separator, event = raw.partition(" ")
-    if not separator or not event or _TIMESTAMP.fullmatch(timestamp_text) is None:
-        return _invalid("invalid_raw_event")
-
-    try:
-        at = int(Decimal(timestamp_text) * 1000)
-    except (InvalidOperation, ValueError):
-        return _invalid("invalid_raw_timestamp")
-    if not 0 <= at <= MAX_EPOCH_MS:
-        return _invalid("invalid_raw_timestamp")
-
-    package, payload_separator, payload_text = event.partition(" ")
-    if not package:
-        return _invalid("invalid_raw_event")
-
-    if payload_separator:
-        try:
-            payload: object = json.loads(payload_text, parse_constant=_reject_json_constant)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return _invalid("invalid_raw_json")
-    else:
-        payload = None
-
-    envelope = json.dumps(
-        {"at": at, "package": package, "payload": payload},
-        ensure_ascii=True,
-        separators=(",", ":"),
-    )
-    return parse_record(envelope)
+    parsed = parse_tf_event(line)
+    if not parsed.ok:
+        return ParseResult(record=None, error=parsed.error)
+    if not isinstance(parsed.event, GmcpEvent):
+        return ParseResult(record=None, error="not_gmcp_event")
+    return ParseResult(record=parsed.event.record, error=None)
 
 
 def encode_record(parsed: ParseResult) -> str:

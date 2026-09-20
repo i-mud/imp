@@ -1,37 +1,90 @@
-; TinyScry GMCP capture hook for TinyFugue 5.1.6-4-ga15a165.
+; TinyScry context-aware capture and action bridge for TinyFugue 5.2.2-3-g4f0ff34.
 ;
-; `tinyscry-feed` owns ~/.local/state/tinyscry/spool and keeps it a symlink
-; into its private runtime directory, replaced on every feed (re)start; this
-; file itself never needs to change. Verified: /def with a fixed macro name
-; replaces rather than duplicates a prior definition, so loading this file
-; more than once - a second /load, or a .tfrc sourced twice - is safe and
-; leaves exactly one hook registered.
-;
-; fwrite() reopens and closes the target on every call (fopen "a" + fclose),
-; so it always follows the current symlink target; no TinyFugue restart is
-; needed after the feed restarts. If the feed is down, has not started yet,
-; or the target directory is missing, fwrite() reports one error line and
-; continues - measured: TinyFugue never blocks on this write, unlike a FIFO
-; with no reader (measured 5.97s hang) or a slow reader (measured indefinite
-; hang once the pipe filled). Losing hook lines while the feed is
-; unavailable is expected; TinyFugue must never be.
-;
-; This build passes a GMCP hook one raw argument in the form "Package JSON".
-; {*} preserves that argument as data. time() returns epoch seconds with six
-; fractional digits; tinyscry-feed performs the checked millisecond
-; conversion and JSON envelope encoding.
-;
-; -F (fall-through) and an explicit priority 2 keep this hook observational.
-; TinyFugue runs the highest-priority matching hook first and stops there
-; unless that hook falls through. Operators commonly already own a generic
-; GMCP hook at the default priority 1, such as `received-gmcp`; two
-; same-priority non-fall-through hooks on one event compete, and in live
-; testing that intermittently lost whole GMCP events - some fights never
-; acquired a target while resource updates kept arriving. TinyScry's priority
-; 2 runs ahead of the operator's priority-1 handler, and -F lets the lower-
-; priority handler still run afterward. This means TinyScry observes every
-; inbound GMCP event without consuming it. Do not drop -F. Priority 2 is the
-; shipped, live-verified configuration; any priority change should be
-; re-verified against operator GMCP handlers.
+; The spool path and helper command are fixed operator configuration. GMCP data
+; is written only as data to the private spool; it never reaches a shell argv.
+; Action text returns from the helper as a textencode.tf token and is decoded
+; only inside the fixed /tinyscry_send macro. send() deliberately bypasses SEND
+; hooks. /quote is asynchronous, uses -dexec, and blank -w pins the world that
+; was current when the helper started.
+
+/require textencode.tf
+
+/if (!isvar("tinyscry_session")) \
+    /test tinyscry_session := textencode(strcat(getpid(), ".", time()))%; \
+/endif
+/if (!isvar("tinyscry_connection_serial")) /set tinyscry_connection_serial=0%; /endif
+/if (!isvar("tinyscry_foreground")) /set tinyscry_foreground=0%; /endif
+/if (!isvar("tinyscry_selected_world")) /set tinyscry_selected_world=%; /endif
+
+; /eval creates a nested local scope. Any /let inside /eval and every dependent
+; command must remain in that same expansion.
+/def -i tinyscry_send = \
+    /let _expected_session=%{1}%; \
+    /let _expected_foreground=%{2}%; \
+    /let _expected_connection=%{3}%; \
+    /let _expected_world=%{4}%; \
+    /let _pinned_world=$[textencode(world_info())]%; \
+    /eval \
+        /if (_expected_session =~ tinyscry_session & \
+            _expected_foreground = tinyscry_foreground & \
+            _expected_connection =~ %%{tinyscry_connection_%{_pinned_world}} & \
+            _expected_world =~ tinyscry_selected_world & \
+            _expected_world =~ _pinned_world) \
+            /test send(textdecode({5}))%%; \
+            /tinyscry_start_consumer %{_expected_connection} %{_expected_world}%%; \
+        /endif
+
+/def -i tinyscry_start_consumer = \
+    /quote -0 -dexec -w !~/.local/bin/tinyscry-action-consumer --session %{tinyscry_session} \
+        --foreground %{tinyscry_foreground} --connection %{1} --world %{2} 2>/dev/null
+
+/def -i tinyscry_reset_world = \
+    /let _world=$[textencode({1})]%; \
+    /test tinyscry_connection_serial := tinyscry_connection_serial + 1%; \
+    /eval /set tinyscry_connection_%{_world}=%{tinyscry_connection_serial}%; \
+    /test fwrite("~/.local/state/tinyscry/spool", \
+        strcat("TS2 R ", tinyscry_session, " ", tinyscry_connection_serial, " ", _world, " ", time()))%; \
+    /if (_world =~ tinyscry_selected_world) \
+        /test fwrite("~/.local/state/tinyscry/spool", \
+            strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " ", \
+                tinyscry_connection_serial, " ", _world, " ", time()))%; \
+        /tinyscry_start_consumer %{tinyscry_connection_serial} %{_world}%; \
+    /endif
+
+/def -i tinyscry_select_world = \
+    /let _world=$[textencode({1})]%; \
+    /if (_world !~ tinyscry_selected_world) \
+        /test tinyscry_foreground := tinyscry_foreground + 1%; \
+        /set tinyscry_selected_world=%{_world}%; \
+    /endif%; \
+    /if (strlen(_world) = 0) \
+        /test fwrite("~/.local/state/tinyscry/spool", \
+            strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " 0 - ", time()))%; \
+    /else \
+        /eval \
+            /let _connection=%%{tinyscry_connection_%{_world}}%%; \
+            /if (!strlen(_connection)) \
+                /tinyscry_reset_world %{1}%%; \
+                /let _connection=%%{tinyscry_connection_%{_world}}%%; \
+            /endif%%; \
+            /test fwrite("~/.local/state/tinyscry/spool", \
+                strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " ", \
+                    _connection, " ", _world, " ", time()))%%; \
+            /tinyscry_start_consumer %%{_connection} %{_world}%; \
+    /endif
+
+/def -Fp2 -ag -h"CONNECT" tinyscry_capture_connect = /tinyscry_reset_world %{1}
+/def -Fp2 -ag -h"GMCP_LOGIN" tinyscry_capture_gmcp_login = /tinyscry_reset_world %{1}
+/def -Fp2 -ag -h"WORLD" tinyscry_capture_world = /tinyscry_select_world %{1}
+
 /def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp = \
-    /test fwrite("~/.local/state/tinyscry/spool", strcat(time(), " ", {*}))
+    /let _world_name=$[world_info()]%; \
+    /let _world=$[textencode(_world_name)]%; \
+    /eval \
+        /let _connection=%%{tinyscry_connection_%{_world}}%%; \
+        /if (!strlen(_connection)) \
+            /tinyscry_reset_world %{_world_name}%%; \
+            /let _connection=%%{tinyscry_connection_%{_world}}%%; \
+        /endif%%; \
+        /test fwrite("~/.local/state/tinyscry/spool", \
+            strcat("TS2 G ", tinyscry_session, " ", _connection, " ", _world, " ", time(), " ", {*}))

@@ -8,13 +8,17 @@ import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Protocol, TextIO
 
 from tinyscry_relay.protocol import GameState, decode_game_state
 
 from tinyscry_tf.normalize import Normalizer
 from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
 from tinyscry_tf.records import parse_record
+
+
+class StatePublisher(Protocol):
+    async def select(self, context: None, state: GameState) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ async def replay_lines(
     lines: Iterable[str],
     *,
     interval: float,
-    publisher: RelayPublisher | None,
+    publisher: StatePublisher | None,
     write_state: Callable[[str], None],
 ) -> ReplayStats:
     """Replay finite input, outputting or publishing only complete state changes."""
@@ -68,7 +72,7 @@ async def replay_lines(
         if publisher is None:
             write_state(_state_json(state))
         else:
-            await publisher.publish(state)
+            await publisher.select(None, state)
         previous = state
         states += 1
 
@@ -92,14 +96,13 @@ def _arguments() -> argparse.ArgumentParser:
         action="store_true",
         help="print normalized states without opening a network socket",
     )
-    parser.add_argument("--allow-non-loopback", action="store_true")
     return parser
 
 
 async def _run(args: argparse.Namespace, output: TextIO) -> ReplayStats:
     publisher: RelayPublisher | None = None
     if not args.dry_run:
-        publisher = RelayPublisher(url=args.relay_url, allow_non_loopback=args.allow_non_loopback)
+        publisher = RelayPublisher(url=args.relay_url)
 
     try:
         with args.fixture.open(encoding="utf-8") as stream:

@@ -41,9 +41,10 @@ function createSource(sockets: FakeWebSocket[]): RelayStateSource {
 
 const snapshotFrame = JSON.stringify({
   type: 'snapshot',
-  protocol: 1,
+  protocol: 2,
   seq: 1,
   at: 100,
+  context: { session: 'session1', foreground: 1, connection: 1 },
   state: {
     character: { name: 'Aria', hp: { current: 90, max: 100 }, mana: null, moves: null },
     target: null,
@@ -66,6 +67,7 @@ describe('RelayStateSource', () => {
       kind: 'snapshot',
       seq: 1,
       at: 100,
+      context: { session: 'session1', foreground: 1, connection: 1 },
       state: {
         character: { name: 'Aria', hp: { current: 90, max: 100 }, mana: null, moves: null },
         target: null,
@@ -88,6 +90,53 @@ describe('RelayStateSource', () => {
     source.stop();
   });
 
+  it('closes a socket after a protocol violation', () => {
+    const sockets: FakeWebSocket[] = [];
+    const source = createSource(sockets);
+    source.start(() => undefined);
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('expected relay socket');
+
+    socket.emit('message', new MessageEvent('message', { data: '{"type":"snapshot"}' }));
+
+    expect(socket.closed).toBe(true);
+    source.stop();
+  });
+
+  it('closes and reconnects after a binary frame without applying state', () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const sockets: FakeWebSocket[] = [];
+      const events: SourceEvent[] = [];
+      const source = createSource(sockets);
+      source.start((event) => events.push(event));
+      const socket = sockets[0];
+      if (socket === undefined) throw new Error('expected relay socket');
+
+      socket.emit('message', new MessageEvent('message', { data: new ArrayBuffer(1) }));
+
+      expect(socket.closed).toBe(true);
+      expect(events).toContainEqual({
+        kind: 'protocol-error',
+        error: {
+          code: 'invalid_field',
+          path: '<frame>',
+          message: 'expected a text WebSocket frame',
+        },
+      });
+      expect(events.some((event) => event.kind === 'snapshot')).toBe(false);
+
+      socket.emit('close', new Event('close'));
+      vi.advanceTimersByTime(100);
+      expect(sockets).toHaveLength(2);
+      source.stop();
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('silently ignores unknown message types', () => {
     const sockets: FakeWebSocket[] = [];
     const events: SourceEvent[] = [];
@@ -96,9 +145,10 @@ describe('RelayStateSource', () => {
     const socket = sockets[0];
     if (socket === undefined) throw new Error('expected relay socket');
     const beforeFrame = events.length;
-    socket.emit('message', new MessageEvent('message', { data: '{"type":"future","protocol":1,"at":1}' }));
+    socket.emit('message', new MessageEvent('message', { data: '{"type":"future","protocol":2,"at":1}' }));
 
     expect(events).toHaveLength(beforeFrame);
+    expect(socket.closed).toBe(false);
     source.stop();
   });
 

@@ -55,6 +55,7 @@ class RuntimeLayout:
     hook_spool: Path
     diagnostics: Path
     checkpoint: Path
+    context: Path
 
     @classmethod
     def resolve(cls, runtime_dir: Path | None = None, state_dir: Path | None = None) -> RuntimeLayout:
@@ -74,6 +75,7 @@ class RuntimeLayout:
             # runtime directory so a feed restart can recover identity/vitals
             # without turning it into durable session history.
             checkpoint=runtime / "state.json",
+            context=state / "context",
         )
 
     @property
@@ -147,6 +149,8 @@ class SpoolReader:
 
         self._layout.runtime_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self._layout.runtime_dir, RUNTIME_DIR_MODE)
+        self._layout.context.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self._layout.context.parent, RUNTIME_DIR_MODE)
 
         # Recover a generation left by a crash before opening the active file.
         self._open_retired_if_present()

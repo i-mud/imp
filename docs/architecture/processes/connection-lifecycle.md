@@ -34,31 +34,34 @@ reconnecting --- backoff, retry ----> connecting
 disconnected
 ```
 
-On `connected` the relay sends `hello`, then the retained `snapshot` if it has
-one, then `status`. The HUD resets its `seq` high-water mark on `hello` and on
-every connection transition, because the relay's counter restarts with its
-process.
+On `connected` the relay sends `hello`, then the retained context-bearing
+`snapshot` if it has one, then `status`. The HUD resets its `seq` high-water
+mark on `hello` and on every connection transition, because the relay's counter
+restarts with its process. A non-connected phase also clears the actionable
+context, so stale displayed values cannot authorize an action.
 
 Feed status, evaluated by the relay:
 
-| Condition                                          | `feed`  |
-| -------------------------------------------------- | ------- |
-| no producer connected                              | `down`  |
-| producer connected, no publish in the stale window | `stale` |
-| otherwise                                          | `live`  |
+| Condition                                                     | `feed`  |
+| ------------------------------------------------------------- | ------- |
+| no producer connected                                         | `down`  |
+| producer connected, selection has no matching-context publish | `stale` |
+| matching-context publish arrived within the stale window      | `live`  |
 
 The relay re-evaluates on a timer, so `live -> stale` is emitted without a
 publish arriving. Without that timer a dead feed would look live forever.
 
-Producer-side liveness has the same event-loop constraint. `tinyscry-bridge`
-waits for stdin or FIFO lines in a worker thread, leaving the asyncio loop free
-for the WebSocket client's receive, close-handshake, ping, and timeout tasks.
-When the relay closes `/ingest`, the client transport closes immediately
-rather than remaining in `CLOSE-WAIT`. The next material state observes the
-closed connection, disposes it, connects one replacement with bounded backoff,
-and sends that state before reading another input line. This applies
-backpressure while the relay is unavailable and prevents a second producer
-session from overlapping the first.
+Producer-side liveness has the same event-loop constraint. `RelayPublisher`
+owns one long-lived reconnect task, so an idle `/ingest` disconnect is detected
+without waiting for another GMCP or normalized-state event. It disposes the
+closed transport, connects one replacement with bounded backoff, and reasserts
+only the latest retained `select(context, state)`. It never replays a retained
+`publish`, and no action state is retained or replayed.
+
+That recovered selection is `stale`; freshness returns only after a genuine new
+matching-context publish. If the latest retained selection has `context: null`,
+the publisher reasserts it as non-actionable. One reconnect owner prevents a
+second producer session from overlapping the first.
 
 ## HUD presentation states
 
@@ -86,13 +89,13 @@ current. `apps/desktop/test/model.test.ts` pins this as a regression.
 
 ## Failure boundaries
 
-| Failure                    | Behaviour                                                            |
-| -------------------------- | -------------------------------------------------------------------- |
-| relay down at startup      | `connecting` -> `reconnecting`, backoff                              |
-| managed SSH tunnel drops   | same reconnect state, enriched with SSH detail when supervisor knows |
-| relay restarts             | HUD reconnects; bridge reconnects on next material state             |
-| one subscriber disconnects | others unaffected                                                    |
-| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data               |
+| Failure                    | Behaviour                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| relay down at startup      | `connecting` -> `reconnecting`, bounded backoff                                 |
+| managed SSH tunnel drops   | same reconnect state, enriched with SSH detail when supervisor knows            |
+| relay restarts             | HUD reconnects; publisher reconnects while idle and restores selection as stale |
+| one subscriber disconnects | others unaffected                                                               |
+| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data                          |
 
 Backoff is exponential with jitter and a cap, so a long outage does not become
 a reconnect storm when the relay returns.
@@ -107,8 +110,10 @@ a reconnect storm when the relay returns.
 - `services/relay/tests/test_state.py` - feed transitions
 - `services/relay/tests/test_server.py` - hello/snapshot/status ordering,
   subscriber isolation, producer-count cleanup
+- `integrations/tinyfugue/tests/test_publisher.py` - idle disconnect detection,
+  latest-selection reassertion, null-context recovery, and reconnect ownership
 - `integrations/tinyfugue/tests/test_bridge.py` - relay-initiated producer
-  close, clean handshake, single reconnect, subsequent delivery
+  close, clean handshake, and subsequent delivery
 - `tests/e2e/relay_roundtrip.py` - reconnect receives the retained snapshot
 
 ## Change-impact notes

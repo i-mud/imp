@@ -14,7 +14,7 @@ a running TinyFugue session on a remote VPS and renders them in a compact
 frameless window on the operator's desktop.
 
 ```
-MUD -> GMCP -> TinyFugue -> TinyScry TF adapter -> relay (loopback) -> SSH tunnel -> desktop HUD
+MUD <-> GMCP <-> TinyFugue <-> TinyScry TF adapter <-> relay (loopback) <-> SSH tunnel <-> desktop
 ```
 
 ## Where things live
@@ -76,6 +76,7 @@ about to contradict it.
 | [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework          |
 | [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                          |
 | [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds           |
+| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context        |
 
 ## Invariants worth knowing before you edit
 
@@ -83,12 +84,16 @@ about to contradict it.
    `apps/desktop/src/lib/config.ts` names them.
 2. No GMCP concept exists downstream of
    `integrations/tinyfugue/src/tinyscry_tf/normalize.py`.
-3. The relay binds `127.0.0.1` unless explicitly overridden, and has no
-   authentication by design.
+3. The relay binds loopback only, cannot be opted into a public bind, and has
+   no authentication by design.
 4. A rejected protocol frame never mutates state, in any component.
 5. No server-provided value is ever concatenated into a shell command.
-6. Desktop alerts consume normalized `GameState` plus the existing desktop
-   freshness model; they do not publish state or create an outbound MUD path.
+6. State and actions are bound to an exact TinyFugue session, foreground
+   generation, and connection generation.
+7. Desktop `StateSource` and `ActionSink` are separate boundaries; adding
+   outbound control must not make state observation bidirectional.
+8. Desktop alerts consume normalized `GameState` plus the existing desktop
+   freshness model; they do not publish state or trigger outbound actions.
 
 ## Maintaining this map
 

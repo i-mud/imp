@@ -1,11 +1,17 @@
-import type { FeedStatus, GameState, ProtocolError, RelayInfo } from '@tinyscry/protocol';
+import type { FeedStatus, GameState, ProtocolError, RelayInfo, StateContext } from '@tinyscry/protocol';
 
 export type ConnectionPhase = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 export type SourceEvent =
   | { readonly kind: 'connection'; readonly phase: ConnectionPhase; readonly detail: string | null }
   | { readonly kind: 'hello'; readonly relay: RelayInfo }
-  | { readonly kind: 'snapshot'; readonly seq: number; readonly at: number; readonly state: GameState }
+  | {
+      readonly kind: 'snapshot';
+      readonly seq: number;
+      readonly at: number;
+      readonly context: StateContext | null;
+      readonly state: GameState;
+    }
   | { readonly kind: 'feed'; readonly status: FeedStatus; readonly detail: string | null }
   | { readonly kind: 'protocol-error'; readonly error: ProtocolError };
 

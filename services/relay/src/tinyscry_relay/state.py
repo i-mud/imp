@@ -7,13 +7,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypedDict
 
-from .protocol import FeedStatus, GameState
+from .protocol import FeedStatus, GameState, StateContext
 
 
 @dataclass(frozen=True)
 class Snapshot:
     seq: int
     at: int
+    context: StateContext | None
     state: GameState
 
 
@@ -25,7 +26,7 @@ class HealthPayload(TypedDict):
 
 
 class RelayState:
-    """Retains the last valid snapshot independently of producer sockets."""
+    """Retains only the selected TinyFugue context and its current state."""
 
     def __init__(self, stale_after: float = 10.0, clock: Callable[[], float] = time.time) -> None:
         if stale_after <= 0:
@@ -41,9 +42,22 @@ class RelayState:
     def stale_after(self) -> float:
         return self._stale_after
 
-    def apply_publish(self, state: GameState, now: float) -> Snapshot:
+    @property
+    def active_context(self) -> StateContext | None:
+        return self._snapshot.context if self._snapshot is not None else None
+
+    def apply_select(self, context: StateContext | None, state: GameState, now: float) -> Snapshot:
         self._seq += 1
-        snapshot = Snapshot(seq=self._seq, at=int(now * 1000), state=state)
+        snapshot = Snapshot(self._seq, int(now * 1000), context, state)
+        self._snapshot = snapshot
+        self._last_publish_at = None
+        return snapshot
+
+    def apply_publish(self, context: StateContext, state: GameState, now: float) -> Snapshot | None:
+        if context != self.active_context:
+            return None
+        self._seq += 1
+        snapshot = Snapshot(self._seq, int(now * 1000), context, state)
         self._snapshot = snapshot
         self._last_publish_at = now
         return snapshot

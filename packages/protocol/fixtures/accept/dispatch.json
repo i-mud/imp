@@ -1,0 +1,6 @@
+{
+  "description": "relay dispatches one action to the matching helper",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"dispatch\",\"protocol\":2,\"id\":\"abc123\",\"context\":{\"session\":\"s1\",\"foreground\":2,\"connection\":3},\"command\":\"north\"}"
+}

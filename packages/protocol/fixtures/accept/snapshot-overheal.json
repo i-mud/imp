@@ -2,5 +2,5 @@
   "description": "current above max is legitimate and must be preserved",
   "direction": "server",
   "expect": "accept",
-  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":3,\"at\":1758000000500,\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":1200,\"max\":1000},\"mana\":null,\"moves\":null},\"target\":null}}"
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":3,\"at\":1758000000500,\"context\":{\"session\":\"s1\",\"foreground\":1,\"connection\":1},\"state\":{\"character\":{\"name\":\"Example\",\"hp\":{\"current\":1200,\"max\":1000},\"mana\":null,\"moves\":null},\"target\":null}}"
 }

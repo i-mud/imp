@@ -4,5 +4,5 @@
   "expect": "reject",
   "code": "invalid_field",
   "path": "feed",
-  "frame": "{\"type\":\"status\",\"protocol\":1,\"at\":1,\"feed\":\"flaky\"}"
+  "frame": "{\"type\":\"status\",\"protocol\":2,\"at\":1,\"feed\":\"flaky\"}"
 }

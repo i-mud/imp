@@ -1,13 +1,23 @@
-"""Authenticated-by-loopback publisher for the relay ingest socket."""
+"""Loopback-only publisher for the relay ingest socket."""
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Final
 from urllib.parse import urlsplit
 
-from tinyscry_relay.protocol import Character, GameState, Target, Vital, decode_game_state, encode_publish
+from tinyscry_relay.protocol import (
+    Character,
+    GameState,
+    StateContext,
+    Target,
+    Vital,
+    decode_game_state,
+    encode_publish,
+    encode_select,
+)
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
@@ -16,22 +26,18 @@ _INITIAL_BACKOFF_SECONDS: Final = 0.25
 _MAX_BACKOFF_SECONDS: Final = 10.0
 
 
-def _is_loopback(host: str | None) -> bool:
-    return host in {"127.0.0.1", "::1", "localhost"}
-
-
-def _validate_relay_url(url: str, allow_non_loopback: bool) -> None:
+def _validate_relay_url(url: str) -> None:
     parsed = urlsplit(url)
-    if parsed.scheme != "ws" or parsed.path != "/ingest" or not parsed.hostname:
-        raise ValueError("relay URL must be a ws:// host with the /ingest path")
-    if not allow_non_loopback and not _is_loopback(parsed.hostname):
-        raise ValueError("a non-loopback relay target requires --allow-non-loopback")
+    if (
+        parsed.scheme != "ws"
+        or parsed.path != "/ingest"
+        or parsed.hostname not in {"127.0.0.1", "::1", "localhost"}
+    ):
+        raise ValueError("relay URL must be a loopback ws:// URL with the /ingest path")
 
 
 def _vital_to_wire(vital: Vital | None) -> dict[str, int] | None:
-    if vital is None:
-        return None
-    return {"current": vital.current, "max": vital.max}
+    return None if vital is None else {"current": vital.current, "max": vital.max}
 
 
 def _character_to_wire(character: Character | None) -> dict[str, object] | None:
@@ -46,58 +52,199 @@ def _character_to_wire(character: Character | None) -> dict[str, object] | None:
 
 
 def _target_to_wire(target: Target | None) -> dict[str, object] | None:
-    if target is None:
-        return None
-    return {"name": target.name, "healthPercent": target.health_percent}
+    return None if target is None else {"name": target.name, "healthPercent": target.health_percent}
 
 
 def state_to_wire(state: GameState) -> dict[str, object]:
-    """Create the protocol's JSON field spelling without trusting our caller."""
-
     return {"character": _character_to_wire(state.character), "target": _target_to_wire(state.target)}
+
+
+def _validated(state: GameState) -> GameState:
+    decoded = decode_game_state(state_to_wire(state))
+    if not decoded.ok:
+        error = decoded.error
+        assert error is not None
+        raise ValueError(f"normalized state rejected: {error.code} at {error.path}")
+    assert decoded.value is not None
+    return decoded.value
 
 
 @dataclass
 class RelayPublisher:
-    """Maintains one ingest connection and retries transient transport failures."""
+    """Keeps ingest connected and reasserts only the retained selection after reconnect."""
 
     url: str = DEFAULT_RELAY_URL
-    allow_non_loopback: bool = False
     _connection: ClientConnection | None = field(default=None, init=False, repr=False)
+    _selected_context: StateContext | None = field(default=None, init=False, repr=False)
+    _selected_state: GameState | None = field(default=None, init=False, repr=False)
+    _selection_revision: int = field(default=0, init=False, repr=False)
+    _connection_revision: int = field(default=-1, init=False, repr=False)
+    _condition: asyncio.Condition = field(default_factory=asyncio.Condition, init=False, repr=False)
+    _reconnect_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _closed: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        _validate_relay_url(self.url, self.allow_non_loopback)
+        _validate_relay_url(self.url)
 
-    async def publish(self, state: GameState) -> None:
-        """Validate and publish a complete state, retrying until the relay returns."""
+    async def select(self, context: StateContext | None, state: GameState) -> None:
+        checked = _validated(state)
+        async with self._condition:
+            if self._closed:
+                raise RuntimeError("publisher is closed")
+            self._selected_context = context
+            self._selected_state = checked
+            self._selection_revision += 1
+            revision = self._selection_revision
+        await self._send_selection(revision)
 
-        decoded = decode_game_state(state_to_wire(state))
-        if not decoded.ok:
-            error = decoded.error
-            assert error is not None
-            raise ValueError(f"normalized state rejected: {error.code} at {error.path}")
-        assert decoded.value is not None
-        frame = encode_publish(decoded.value)
+    async def publish(self, context: StateContext, state: GameState) -> None:
+        checked = _validated(state)
+        async with self._condition:
+            if self._closed:
+                raise RuntimeError("publisher is closed")
+            if context != self._selected_context:
+                raise ValueError("publish context is not the publisher's selected context")
+            self._selected_state = checked
+            self._selection_revision += 1
+            revision = self._selection_revision
+        await self._send_publish(context, checked, revision)
 
-        backoff = _INITIAL_BACKOFF_SECONDS
+    async def _send_selection(self, requested_revision: int) -> None:
         while True:
+            connection = await self._connection_for_send()
+            async with self._condition:
+                if connection is not self._connection:
+                    continue
+                if self._connection_revision >= requested_revision:
+                    return
+                revision = self._selection_revision
+                context = self._selected_context
+                state = self._selected_state
+                assert state is not None
             try:
-                if self._connection is None:
-                    self._connection = await connect(self.url, proxy=None)
-                await self._connection.send(frame)
-                return
+                await connection.send(encode_select(context, state))
             except (ConnectionClosed, OSError, WebSocketException):
-                await self._drop_connection()
+                await self._discard_connection(connection)
+                continue
+            async with self._condition:
+                if connection is not self._connection:
+                    continue
+                if revision == self._selection_revision:
+                    self._connection_revision = revision
+                    if revision >= requested_revision:
+                        return
+                else:
+                    self._connection_revision = -1
+
+    async def _send_publish(
+        self,
+        context: StateContext,
+        state: GameState,
+        revision: int,
+    ) -> None:
+        frame = encode_publish(context, state)
+        while True:
+            connection = await self._connection_for_send()
+            async with self._condition:
+                if revision != self._selection_revision or context != self._selected_context:
+                    raise ValueError("publisher selection changed before publish completed")
+            try:
+                await connection.send(frame)
+            except (ConnectionClosed, OSError, WebSocketException):
+                await self._discard_connection(connection)
+                continue
+            async with self._condition:
+                if connection is not self._connection:
+                    continue
+                if revision == self._selection_revision:
+                    self._connection_revision = revision
+                    return
+                self._connection_revision = -1
+                current_revision = self._selection_revision
+            await self._send_selection(current_revision)
+            return
+
+    async def _connection_for_send(self) -> ClientConnection:
+        async with self._condition:
+            if self._closed:
+                raise RuntimeError("publisher is closed")
+            if self._reconnect_task is None:
+                self._reconnect_task = asyncio.create_task(self._connection_loop())
+            while self._connection is None and not self._closed:
+                await self._condition.wait()
+            if self._closed:
+                raise RuntimeError("publisher is closed")
+            assert self._connection is not None
+            return self._connection
+
+    async def _connection_loop(self) -> None:
+        connection: ClientConnection | None = None
+        backoff = _INITIAL_BACKOFF_SECONDS
+        try:
+            while True:
+                async with self._condition:
+                    if self._closed:
+                        return
+                try:
+                    connection = await connect(self.url, proxy=None)
+                    if not await self._activate_connection(connection):
+                        return
+                    backoff = _INITIAL_BACKOFF_SECONDS
+                    await connection.wait_closed()
+                except (ConnectionClosed, OSError, WebSocketException):
+                    pass
+                finally:
+                    if connection is not None:
+                        await self._discard_connection(connection)
+                        connection = None
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
+        finally:
+            async with self._condition:
+                if self._reconnect_task is asyncio.current_task():
+                    self._reconnect_task = None
+                self._condition.notify_all()
+
+    async def _activate_connection(self, connection: ClientConnection) -> bool:
+        while True:
+            async with self._condition:
+                if self._closed:
+                    return False
+                revision = self._selection_revision
+                context = self._selected_context
+                state = self._selected_state
+                assert state is not None
+            await connection.send(encode_select(context, state))
+            async with self._condition:
+                if revision != self._selection_revision:
+                    continue
+                self._connection = connection
+                self._connection_revision = revision
+                self._condition.notify_all()
+                return True
+
+    async def _discard_connection(self, connection: ClientConnection) -> None:
+        async with self._condition:
+            if self._connection is connection:
+                self._connection = None
+                self._connection_revision = -1
+                self._condition.notify_all()
+        try:
+            await connection.close()
+        except (ConnectionClosed, OSError, WebSocketException):
+            pass
 
     async def close(self) -> None:
-        await self._drop_connection()
-
-    async def _drop_connection(self) -> None:
-        connection, self._connection = self._connection, None
-        if connection is not None:
-            try:
-                await connection.close()
-            except (ConnectionClosed, OSError, WebSocketException):
-                pass
+        async with self._condition:
+            if self._closed:
+                return
+            self._closed = True
+            self._selection_revision += 1
+            task = self._reconnect_task
+            self._connection = None
+            self._connection_revision = -1
+            self._condition.notify_all()
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
