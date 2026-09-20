@@ -8,7 +8,7 @@ import sys
 
 from websockets.asyncio.client import ClientConnection, connect
 
-from tinyscry_relay.protocol import Character, GameState, Vital, encode_publish
+from tinyscry_relay.protocol import Character, GameState, StateContext, Vital, encode_publish, encode_select
 from tinyscry_relay.server import RelayServer
 
 
@@ -27,14 +27,16 @@ async def _run() -> None:
     try:
         url = f"ws://127.0.0.1:{relay.port}"
         state = GameState(character=Character("Roundtrip", Vital(42, 50), None, None), target=None)
+        context = StateContext("session1", 1, 1)
         async with connect(f"{url}/state") as subscriber, connect(f"{url}/ingest") as producer:
-            await producer.send(encode_publish(state))
+            await producer.send(encode_select(context, state))
+            await producer.send(encode_publish(context, state))
             snapshot = await _receive_snapshot(subscriber)
             assert snapshot["state"]["character"]["name"] == "Roundtrip"
             print("PASS: subscriber received published relay state")
         async with connect(f"{url}/state") as reconnected_subscriber:
             retained = await _receive_snapshot(reconnected_subscriber)
-            assert retained["seq"] == 1
+            assert retained["seq"] == 2
             assert retained["state"]["character"]["hp"] == {"current": 42, "max": 50}
             print("PASS: reconnecting subscriber received retained snapshot")
     finally:

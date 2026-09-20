@@ -84,14 +84,16 @@ export class RelayStateSource implements StateSource {
       this.emit({ kind: 'connection', phase: 'connected', detail: null });
     });
     socket.addEventListener('message', (event) => {
-      if (
-        !this.running ||
-        this.socket !== socket ||
-        !(event instanceof MessageEvent) ||
-        typeof event.data !== 'string'
-      )
+      if (!this.running || this.socket !== socket || !(event instanceof MessageEvent)) return;
+      if (typeof event.data !== 'string') {
+        this.emit({
+          kind: 'protocol-error',
+          error: { code: 'invalid_field', path: '<frame>', message: 'expected a text WebSocket frame' },
+        });
+        socket.close();
         return;
-      this.handleFrame(event.data);
+      }
+      this.handleFrame(socket, event.data);
     });
     socket.addEventListener('error', () => {
       if (this.socket === socket) this.reconnect('Relay connection failed.');
@@ -101,11 +103,12 @@ export class RelayStateSource implements StateSource {
     });
   }
 
-  private handleFrame(frame: string): void {
+  private handleFrame(socket: WebSocketLike, frame: string): void {
     const decoded = decodeServerMessage(frame);
     if (!decoded.ok) {
       if (decoded.error.code !== 'unknown_type') {
         this.emit({ kind: 'protocol-error', error: decoded.error });
+        socket.close();
       }
       return;
     }
@@ -119,6 +122,7 @@ export class RelayStateSource implements StateSource {
           kind: 'snapshot',
           seq: decoded.value.seq,
           at: decoded.value.at,
+          context: decoded.value.context,
           state: decoded.value.state,
         });
         break;

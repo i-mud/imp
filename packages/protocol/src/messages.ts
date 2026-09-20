@@ -1,47 +1,36 @@
 import type { GameState } from './state.ts';
 
-/**
- * Wire protocol version.
- *
- * Bumped only for breaking changes. Additive, ignorable fields keep the same
- * version: decoders ignore unknown object keys and unknown message types, so
- * a newer relay can talk to an older HUD as long as the required fields of
- * `hello` and `snapshot` are unchanged.
- */
-export const PROTOCOL_VERSION = 1;
+/** Breaking v2 cutover: state and actions are bound to a TinyFugue context. */
+export const PROTOCOL_VERSION = 2;
 
 export interface RelayInfo {
   readonly name: string;
   readonly version: string;
 }
 
-/**
- * Liveness of the upstream game feed, which is independent of socket
- * liveness: the HUD can hold a healthy relay connection while TinyFugue is
- * gone. Distinguishing the two is what lets the HUD show "no data" instead of
- * stale vitals.
- */
-export type FeedStatus = 'live' | 'stale' | 'down';
+/** Opaque desktop-visible identity for one foreground TinyFugue connection. */
+export interface StateContext {
+  readonly session: string;
+  readonly foreground: number;
+  readonly connection: number;
+}
 
-/** First frame the relay sends on every subscriber connection. */
+export type FeedStatus = 'live' | 'stale' | 'down';
+export type ActionStatus = 'forwarded' | 'rejected' | 'unknown';
+
 export interface HelloMessage {
   readonly type: 'hello';
   readonly protocol: number;
-  /** Relay wall clock in epoch milliseconds. */
   readonly at: number;
   readonly relay: RelayInfo;
 }
 
-/**
- * Complete current state. The relay never sends partial updates, which is why
- * a rejected frame can never leave the HUD holding half-applied state.
- */
 export interface SnapshotMessage {
   readonly type: 'snapshot';
   readonly protocol: number;
-  /** Monotonic per-relay-process counter, used to drop out-of-order frames. */
   readonly seq: number;
   readonly at: number;
+  readonly context: StateContext | null;
   readonly state: GameState;
 }
 
@@ -53,14 +42,68 @@ export interface StatusMessage {
   readonly detail: string | null;
 }
 
-/** Relay -> HUD. */
-export type ServerMessage = HelloMessage | SnapshotMessage | StatusMessage;
-
-/** Producer -> relay, on the ingest endpoint. */
-export interface PublishMessage {
-  readonly type: 'publish';
+export interface ActionResultMessage {
+  readonly type: 'action-result';
   readonly protocol: number;
+  readonly status: ActionStatus;
+  readonly detail: string | null;
+}
+
+export interface ConsumerReadyMessage {
+  readonly type: 'consumer-ready';
+  readonly protocol: number;
+  readonly context: StateContext;
+}
+
+export interface DispatchMessage {
+  readonly type: 'dispatch';
+  readonly protocol: number;
+  readonly id: string;
+  readonly context: StateContext;
+  readonly command: string;
+}
+
+export type ServerMessage =
+  | HelloMessage
+  | SnapshotMessage
+  | StatusMessage
+  | ActionResultMessage
+  | ConsumerReadyMessage
+  | DispatchMessage;
+
+export interface SelectMessage {
+  readonly type: 'select';
+  readonly protocol: number;
+  readonly context: StateContext | null;
   readonly state: GameState;
 }
 
-export type ClientMessage = PublishMessage;
+export interface PublishMessage {
+  readonly type: 'publish';
+  readonly protocol: number;
+  readonly context: StateContext;
+  readonly state: GameState;
+}
+
+export interface ActionMessage {
+  readonly type: 'action';
+  readonly protocol: number;
+  readonly context: StateContext;
+  readonly command: string;
+}
+
+export interface ConsumerMessage {
+  readonly type: 'consumer';
+  readonly protocol: number;
+  readonly context: StateContext;
+}
+
+export interface ConsumerResultMessage {
+  readonly type: 'consumer-result';
+  readonly protocol: number;
+  readonly id: string;
+  readonly status: 'forwarded' | 'rejected';
+}
+
+export type ClientMessage =
+  SelectMessage | PublishMessage | ActionMessage | ConsumerMessage | ConsumerResultMessage;

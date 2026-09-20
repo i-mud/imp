@@ -6,10 +6,24 @@ from typing import cast
 
 import pytest
 from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus
+from websockets.typing import Origin
 
-from tinyscry_relay.protocol import Character, GameState, Vital, encode_publish
+from tinyscry_relay.protocol import (
+    Character,
+    GameState,
+    StateContext,
+    Vital,
+    encode_action,
+    encode_consumer,
+    encode_consumer_result,
+    encode_publish,
+    encode_select,
+)
 from tinyscry_relay.server import POLICY_VIOLATION_CLOSE_CODE, RelayServer
+
+CONTEXT = StateContext("session1", 1, 1)
+OTHER_CONTEXT = StateContext("session1", 2, 1)
 
 
 def _state(name: str = "Ada") -> GameState:
@@ -17,13 +31,9 @@ def _state(name: str = "Ada") -> GameState:
 
 
 def _character_name(message: dict[str, object]) -> str:
-    state = message["state"]
-    assert isinstance(state, dict)
-    character = state["character"]
-    assert isinstance(character, dict)
-    name = character["name"]
-    assert isinstance(name, str)
-    return name
+    state = cast(dict[str, object], message["state"])
+    character = cast(dict[str, object], state["character"])
+    return cast(str, character["name"])
 
 
 async def _receive_type(connection: ClientConnection, expected_type: str) -> dict[str, object]:
@@ -35,113 +45,69 @@ async def _receive_type(connection: ClientConnection, expected_type: str) -> dic
             return message
 
 
-async def _receive_feed(connection: ClientConnection, expected_feed: str) -> dict[str, object]:
-    while True:
-        frame = await connection.recv()
-        assert isinstance(frame, str)
-        message = cast(dict[str, object], json.loads(frame))
-        if message["type"] == "status" and message["feed"] == expected_feed:
-            return message
+async def _select(relay: RelayServer, context: StateContext | None = CONTEXT) -> None:
+    async with connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer:
+        await producer.send(encode_select(context, _state("Selected")))
 
 
-async def _wait_for_producer_count(relay: RelayServer, expected: int) -> dict[str, object]:
-    async with asyncio.timeout(0.5):
-        while relay.state.health()["producer_count"] != expected:
-            await asyncio.sleep(0.01)
-    return cast(dict[str, object], relay.state.health())
-
-
-def test_subscriber_receives_hello_snapshot_then_status() -> None:
+def test_subscriber_receives_contextual_retained_snapshot() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)
-        relay.state.apply_publish(_state(), now=1.0)
+        relay.state.apply_select(CONTEXT, _state(), now=1.0)
         await relay.start()
         try:
             async with connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
                 hello = json.loads(await subscriber.recv())
                 snapshot = json.loads(await subscriber.recv())
                 status = json.loads(await subscriber.recv())
-                assert [hello["type"], snapshot["type"], status["type"]] == ["hello", "snapshot", "status"]
-                assert snapshot["state"]["character"]["name"] == "Ada"
+                assert [hello["type"], snapshot["type"], status["type"]] == [
+                    "hello",
+                    "snapshot",
+                    "status",
+                ]
+                assert snapshot["context"] == {
+                    "session": "session1",
+                    "foreground": 1,
+                    "connection": 1,
+                }
+                assert _character_name(snapshot) == "Ada"
         finally:
             await relay.close()
 
     asyncio.run(scenario())
 
 
-def test_late_subscriber_receives_retained_snapshot() -> None:
+def test_publish_broadcasts_only_for_selected_context() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)
-        relay.state.apply_publish(_state("Retained"), now=1.0)
-        await relay.start()
-        try:
-            async with connect(f"ws://127.0.0.1:{relay.port}/state") as late_subscriber:
-                snapshot = await _receive_type(late_subscriber, "snapshot")
-                assert snapshot["seq"] == 1
-                assert _character_name(snapshot) == "Retained"
-        finally:
-            await relay.close()
-
-    asyncio.run(scenario())
-
-
-def test_publish_broadcasts_to_multiple_subscribers() -> None:
-    async def scenario() -> None:
-        relay = RelayServer(port=0)
-        await relay.start()
-        try:
-            async with (
-                connect(f"ws://127.0.0.1:{relay.port}/state") as first,
-                connect(f"ws://127.0.0.1:{relay.port}/state") as second,
-                connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer,
-            ):
-                await producer.send(encode_publish(_state("Broadcast")))
-                first_snapshot = await _receive_type(first, "snapshot")
-                second_snapshot = await _receive_type(second, "snapshot")
-                assert first_snapshot["state"] == second_snapshot["state"]
-                assert _character_name(first_snapshot) == "Broadcast"
-        finally:
-            await relay.close()
-
-    asyncio.run(scenario())
-
-
-def test_staleness_watcher_broadcasts_live_to_stale_transition() -> None:
-    async def scenario() -> None:
-        relay = RelayServer(port=0, stale_after=0.02)
         await relay.start()
         try:
             async with (
                 connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber,
                 connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer,
             ):
-                await producer.send(encode_publish(_state()))
-                await _receive_type(subscriber, "snapshot")
-                status = await asyncio.wait_for(_receive_feed(subscriber, "stale"), timeout=0.5)
-                assert status["feed"] == "stale"
+                await producer.send(encode_select(CONTEXT, _state("Selected")))
+                assert _character_name(await _receive_type(subscriber, "snapshot")) == "Selected"
+                await producer.send(encode_publish(OTHER_CONTEXT, _state("Wrong")))
+                await producer.send(encode_publish(CONTEXT, _state("Current")))
+                assert _character_name(await _receive_type(subscriber, "snapshot")) == "Current"
         finally:
             await relay.close()
 
     asyncio.run(scenario())
 
 
-def test_malformed_publish_closes_producer_without_mutating_retained_state() -> None:
+def test_malformed_ingest_frame_closes_without_mutating_state() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)
-        original = relay.state.apply_publish(_state("Original"), now=1.0)
+        original = relay.state.apply_select(CONTEXT, _state("Original"), now=1.0)
         await relay.start()
         try:
             producer = await connect(f"ws://127.0.0.1:{relay.port}/ingest")
-            connected_health = await _wait_for_producer_count(relay, 1)
-            assert connected_health["feed"] == "stale"
-            await producer.send(
-                '{"type":"publish","protocol":1,"state":{"character":{"name":"broken","hp":{"current":1}}}}'
-            )
+            await producer.send('{"type":"publish","protocol":2,"context":null,"state":{}}')
             with pytest.raises(ConnectionClosed):
                 await producer.recv()
             assert producer.close_code == POLICY_VIOLATION_CLOSE_CODE
-            disconnected_health = await _wait_for_producer_count(relay, 0)
-            assert disconnected_health["feed"] == "down"
             assert relay.state.snapshot() == original
         finally:
             await relay.close()
@@ -174,21 +140,196 @@ def test_healthz_returns_json_status() -> None:
     asyncio.run(scenario())
 
 
-def test_disconnect_of_one_subscriber_does_not_stop_other_delivery() -> None:
+@pytest.mark.parametrize("path", ["/state", "/action"])
+@pytest.mark.parametrize("origin", [Origin("http://localhost:1420"), Origin("http://tauri.localhost")])
+def test_browser_endpoints_accept_trusted_origins(path: str, origin: Origin) -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)
         await relay.start()
         try:
-            first = await connect(f"ws://127.0.0.1:{relay.port}/state")
-            second = await connect(f"ws://127.0.0.1:{relay.port}/state")
-            try:
-                await first.close()
-                async with connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer:
-                    await producer.send(encode_publish(_state("Survivor")))
-                    snapshot = await _receive_type(second, "snapshot")
-                    assert _character_name(snapshot) == "Survivor"
-            finally:
-                await second.close()
+            connection = await connect(f"ws://127.0.0.1:{relay.port}{path}", origin=origin)
+            await connection.close()
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("path", ["/state", "/action", "/ingest", "/action-consumer"])
+@pytest.mark.parametrize("origin", [Origin("null"), Origin("https://evil.example")])
+def test_untrusted_origins_are_rejected(path: str, origin: Origin) -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            with pytest.raises(InvalidStatus) as error:
+                await connect(f"ws://127.0.0.1:{relay.port}{path}", origin=origin)
+            assert error.value.response.status_code == 403
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_privileged_endpoints_reject_even_trusted_browser_origin() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            for path in ("/ingest", "/action-consumer"):
+                with pytest.raises(InvalidStatus) as error:
+                    await connect(
+                        f"ws://127.0.0.1:{relay.port}{path}", origin=Origin("http://localhost:1420")
+                    )
+                assert error.value.response.status_code == 403
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_action_is_forwarded_once_and_registration_closes() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            await _select(relay)
+            async with connect(f"ws://127.0.0.1:{relay.port}/action-consumer") as consumer:
+                await consumer.send(encode_consumer(CONTEXT))
+                ready = await _receive_type(consumer, "consumer-ready")
+                assert ready["context"]["foreground"] == 1  # type: ignore[index]
+                async with connect(f"ws://127.0.0.1:{relay.port}/action") as action:
+                    await action.send(encode_action(CONTEXT, "say hello"))
+                    dispatch = await _receive_type(consumer, "dispatch")
+                    assert dispatch["command"] == "say hello"
+                    await consumer.send(encode_consumer_result(cast(str, dispatch["id"]), "forwarded"))
+                    result = await _receive_type(action, "action-result")
+                    assert result == {
+                        "type": "action-result",
+                        "protocol": 2,
+                        "status": "forwarded",
+                        "detail": None,
+                    }
+                await asyncio.wait_for(consumer.wait_closed(), timeout=1)
+                async with connect(f"ws://127.0.0.1:{relay.port}/action") as later:
+                    await later.send(encode_action(CONTEXT, "look"))
+                    assert (await _receive_type(later, "action-result"))["status"] == "rejected"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_action_rejects_without_matching_consumer() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            await _select(relay)
+            async with connect(f"ws://127.0.0.1:{relay.port}/action") as action:
+                await action.send(encode_action(CONTEXT, "look"))
+                result = await _receive_type(action, "action-result")
+                assert result["status"] == "rejected"
+                assert result["detail"] == "no matching TinyFugue consumer"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_action_rejects_wrong_context_and_busy_second_request() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            await _select(relay)
+            async with connect(f"ws://127.0.0.1:{relay.port}/action-consumer") as consumer:
+                await consumer.send(encode_consumer(CONTEXT))
+                await _receive_type(consumer, "consumer-ready")
+
+                async with connect(f"ws://127.0.0.1:{relay.port}/action") as wrong:
+                    await wrong.send(encode_action(OTHER_CONTEXT, "look"))
+                    assert (await _receive_type(wrong, "action-result"))["status"] == "rejected"
+
+                async with (
+                    connect(f"ws://127.0.0.1:{relay.port}/action") as first,
+                    connect(f"ws://127.0.0.1:{relay.port}/action") as second,
+                ):
+                    await first.send(encode_action(CONTEXT, "first"))
+                    dispatch = await _receive_type(consumer, "dispatch")
+                    await second.send(encode_action(CONTEXT, "second"))
+                    assert (await _receive_type(second, "action-result"))["status"] == "rejected"
+                    await consumer.send(encode_consumer_result(cast(str, dispatch["id"]), "forwarded"))
+                    assert (await _receive_type(first, "action-result"))["status"] == "forwarded"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_stale_consumer_disconnect_does_not_unregister_new_consumer() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            await _select(relay, CONTEXT)
+            old_consumer = await connect(f"ws://127.0.0.1:{relay.port}/action-consumer")
+            await old_consumer.send(encode_consumer(CONTEXT))
+            await _receive_type(old_consumer, "consumer-ready")
+
+            await _select(relay, OTHER_CONTEXT)
+            async with connect(f"ws://127.0.0.1:{relay.port}/action-consumer") as new_consumer:
+                await new_consumer.send(encode_consumer(OTHER_CONTEXT))
+                await _receive_type(new_consumer, "consumer-ready")
+                await old_consumer.close()
+                await asyncio.sleep(0)
+
+                async with connect(f"ws://127.0.0.1:{relay.port}/action") as action:
+                    await action.send(encode_action(OTHER_CONTEXT, "east"))
+                    dispatch = await _receive_type(new_consumer, "dispatch")
+                    await new_consumer.send(encode_consumer_result(cast(str, dispatch["id"]), "forwarded"))
+                    assert (await _receive_type(action, "action-result"))["status"] == "forwarded"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_consumer_disconnect_after_dispatch_reports_unknown() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            await _select(relay)
+            consumer = await connect(f"ws://127.0.0.1:{relay.port}/action-consumer")
+            await consumer.send(encode_consumer(CONTEXT))
+            await _receive_type(consumer, "consumer-ready")
+            async with connect(f"ws://127.0.0.1:{relay.port}/action") as action:
+                await action.send(encode_action(CONTEXT, "north"))
+                await _receive_type(consumer, "dispatch")
+                await consumer.close()
+                result = await _receive_type(action, "action-result")
+                assert result["status"] == "unknown"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_action_command_with_newline_is_rejected_at_protocol_boundary() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            await _select(relay)
+            action = await connect(f"ws://127.0.0.1:{relay.port}/action")
+            await action.send(
+                '{"type":"action","protocol":2,"context":{"session":"session1",'
+                '"foreground":1,"connection":1},"command":"look\\nnorth"}'
+            )
+            with pytest.raises(ConnectionClosed):
+                await action.recv()
+            assert action.close_code == POLICY_VIOLATION_CLOSE_CODE
         finally:
             await relay.close()
 

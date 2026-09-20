@@ -5,7 +5,7 @@ import { describeError } from '../src/result.ts';
 import { EMPTY_STATE, vitalFraction } from '../src/state.ts';
 
 function snapshotFrame(state: unknown, extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ type: 'snapshot', protocol: 1, seq: 1, at: 1, state, ...extra });
+  return JSON.stringify({ type: 'snapshot', protocol: 2, seq: 1, at: 1, context: null, state, ...extra });
 }
 
 describe('forwards compatibility', () => {

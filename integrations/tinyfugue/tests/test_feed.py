@@ -1,528 +1,257 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import socket
 import stat
-import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
-import pytest
-from tinyscry_relay.protocol import Character, GameState, Target, Vital
-from websockets.asyncio.server import ServerConnection, serve
+from tinyscry_relay.protocol import GameState, StateContext
 
-from tinyscry_tf.diagnostics import DiagnosticCapture
-from tinyscry_tf.feed import load_checkpoint, run_feed, store_checkpoint
-from tinyscry_tf.publisher import RelayPublisher
+from tinyscry_tf.feed import FeedCheckpoint, WorldCheckpoint, load_checkpoint, run_feed, store_checkpoint
 
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return cast(int, probe.getsockname()[1])
+EMPTY = GameState(character=None, target=None)
 
 
 class _FakeSource:
-    """Hands run_feed() fixed batches of raw hook lines, like a drained spool."""
+    dropped = 0
 
     def __init__(self, batches: list[list[str]]) -> None:
-        self._batches = list(batches)
-        self.dropped = 0
+        self.batches = list(batches)
+        self.calls = 0
 
     def read_lines(self) -> list[str]:
-        return self._batches.pop(0) if self._batches else []
+        self.calls += 1
+        return self.batches.pop(0) if self.batches else []
 
 
-async def _collect_publishes(source: _FakeSource, port: int) -> list[dict[str, object]]:
-    received: list[dict[str, object]] = []
-    got_all = asyncio.Event()
+class _CollectingPublisher:
+    def __init__(self) -> None:
+        self.operations: list[tuple[str, StateContext | None, GameState]] = []
 
-    async def handle(connection: ServerConnection) -> None:
-        async for frame in connection:
-            assert isinstance(frame, str)
-            received.append(cast(dict[str, object], json.loads(frame)))
-            if not source._batches:
-                got_all.set()
+    async def select(self, context: StateContext | None, state: GameState) -> None:
+        self.operations.append(("select", context, state))
 
-    async with serve(handle, "127.0.0.1", port):
-        publisher = RelayPublisher(url=f"ws://127.0.0.1:{port}/ingest")
-        stop = asyncio.Event()
-
-        async def stop_when_drained() -> None:
-            await asyncio.wait_for(got_all.wait(), timeout=2)
-            await asyncio.sleep(0.05)
-            stop.set()
-
-        await asyncio.gather(
-            run_feed(source, publisher, poll_interval=0.01, stop=stop),
-            stop_when_drained(),
-        )
-        await publisher.close()
-    return received
+    async def publish(self, context: StateContext, state: GameState) -> None:
+        self.operations.append(("publish", context, state))
 
 
-def test_run_feed_normalizes_and_publishes_only_changed_states() -> None:
+async def _run(
+    source: _FakeSource,
+    publisher: _CollectingPublisher,
+    *,
+    initial_checkpoint: FeedCheckpoint | None = None,
+    checkpoint: Callable[[FeedCheckpoint], None] | None = None,
+    context_marker: Callable[[StateContext | None], None] | None = None,
+) -> None:
+    stop = asyncio.Event()
+
+    async def stop_after_drain() -> None:
+        while source.batches:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.08)
+        stop.set()
+
+    await asyncio.gather(
+        run_feed(
+            source,
+            publisher,
+            poll_interval=0.005,
+            stop=stop,
+            initial_checkpoint=initial_checkpoint,
+            checkpoint=checkpoint,
+            context_marker=context_marker,
+        ),
+        stop_after_drain(),
+    )
+
+
+def _character_name(state: GameState) -> str | None:
+    return state.character.name if state.character is not None else None
+
+
+def test_background_world_updates_cache_without_overwriting_foreground() -> None:
     async def scenario() -> None:
-        port = _free_port()
         source = _FakeSource(
             [
-                ['1700000000 Char.Status {"character_name":"Rin","health":"9","health_max":"10"}'],
-                ["not-a-valid-line"],  # rejected, must not stop the loop
-                ['1700000001 Char.Status {"health":"9","health_max":"10"}'],  # no material change
-                ['1700000002 Char.Status {"health":"5","health_max":"10"}'],
+                ["TS2 S session1 1 1 Alpha 1"],
+                ['TS2 G session1 1 Alpha 2 Char.Status {"character_name":"Alice","health":"9"}'],
+                ['TS2 G session1 2 Beta 3 Char.Status {"character_name":"Bob","health":"7"}'],
+                ["TS2 S session1 2 2 Beta 4"],
             ]
         )
-        received = await _collect_publishes(source, port)
-
-        assert len(received) == 2
-        first_state = cast(dict[str, object], received[0]["state"])
-        second_state = cast(dict[str, object], received[1]["state"])
-        first_character = cast(dict[str, object], first_state["character"])
-        second_character = cast(dict[str, object], second_state["character"])
-        assert cast(dict[str, object], first_character["hp"])["current"] == 9
-        assert cast(dict[str, object], second_character["hp"])["current"] == 5
-
-    asyncio.run(scenario())
-
-
-def test_run_feed_writes_raw_lines_to_diagnostics_only_when_enabled(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        diagnostics = DiagnosticCapture(tmp_path / "diagnostics")
-        diagnostics.open()
-
-        class _NullPublisher:
-            async def publish(self, state: GameState) -> None:
-                return None
-
-        source = _FakeSource([['1700000000 Char.Status {"character_name":"Rin"}'], []])
-        stop = asyncio.Event()
-
-        async def stop_soon() -> None:
-            await asyncio.sleep(0.05)
-            stop.set()
-
-        await asyncio.gather(
-            run_feed(source, _NullPublisher(), poll_interval=0.01, diagnostics=diagnostics, stop=stop),
-            stop_soon(),
-        )
-        diagnostics.close()
-
-        assert (tmp_path / "diagnostics" / "gmcp.raw").read_text(encoding="utf-8") == (
-            '1700000000 Char.Status {"character_name":"Rin"}\n'
-        )
-
-    asyncio.run(scenario())
-
-
-def _write_env(base: Path) -> dict[str, str]:
-    env = dict(os.environ)
-    env["HOME"] = str(base / "home")
-    env["XDG_RUNTIME_DIR"] = str(base / "run")
-    env["XDG_STATE_HOME"] = str(base / "state")
-    (base / "home").mkdir(parents=True, exist_ok=True)
-    (base / "run").mkdir(parents=True, exist_ok=True)
-    os.chmod(base / "run", 0o700)
-    return env
-
-
-async def _spawn_feed(env: dict[str, str], port: int) -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "tinyscry_tf.feed",
-        "--relay-url",
-        f"ws://127.0.0.1:{port}/ingest",
-        "--poll-interval",
-        "0.02",
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-
-def test_feed_subprocess_delivers_state_and_rejects_a_duplicate_producer(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        env = _write_env(tmp_path)
-        received: list[dict[str, object]] = []
-        got_one = asyncio.Event()
-
-        async def handle(connection: ServerConnection) -> None:
-            async for frame in connection:
-                assert isinstance(frame, str)
-                received.append(cast(dict[str, object], json.loads(frame)))
-                got_one.set()
-            await connection.wait_closed()
-
-        async with serve(handle, "127.0.0.1", 0) as server:
-            port = server.sockets[0].getsockname()[1]
-            feed = await _spawn_feed(env, port)
-            try:
-                # Wait for the fixed hook path to exist before writing through it,
-                # exactly like TinyFugue's fwrite() would once loaded after the feed.
-                hook_spool = Path(env["HOME"]) / ".local" / "state" / "tinyscry" / "spool"
-                for _ in range(200):
-                    if hook_spool.exists():
-                        break
-                    await asyncio.sleep(0.02)
-                assert hook_spool.exists(), "feed did not create the fixed hook spool path in time"
-
-                with hook_spool.open("a", encoding="utf-8") as handle_file:
-                    handle_file.write('1700000000 Char.Status {"character_name":"Rin","health":"9"}\n')
-
-                await asyncio.wait_for(got_one.wait(), timeout=5)
-                state = cast(dict[str, object], received[0]["state"])
-                character = cast(dict[str, object], state["character"])
-                assert character["name"] == "Rin"
-
-                duplicate = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-m",
-                    "tinyscry_tf.feed",
-                    "--relay-url",
-                    f"ws://127.0.0.1:{port}/ingest",
-                    env=env,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                dup_stderr = (await duplicate.stderr.read()).decode()  # type: ignore[union-attr]
-                await duplicate.wait()
-                assert duplicate.returncode != 0
-                assert "another TinyScry feed" in dup_stderr
-            finally:
-                feed.terminate()
-                try:
-                    await asyncio.wait_for(feed.wait(), timeout=5)
-                except TimeoutError:
-                    feed.kill()
-                    await feed.wait()
-
-    asyncio.run(scenario())
-
-
-def test_feed_restart_recovers_after_supervised_crash_cleanup(tmp_path: Path) -> None:
-    """A supervised crash/restart recreates the hook and preserves normalized identity."""
-
-    async def scenario() -> None:
-        env = _write_env(tmp_path)
-        received: list[dict[str, object]] = []
-        connected = asyncio.Event()
-
-        async def handle(connection: ServerConnection) -> None:
-            connected.set()
-            async for frame in connection:
-                assert isinstance(frame, str)
-                received.append(cast(dict[str, object], json.loads(frame)))
-            await connection.wait_closed()
-
-        async with serve(handle, "127.0.0.1", 0) as server:
-            port = server.sockets[0].getsockname()[1]
-            feed = await _spawn_feed(env, port)
-            hook_spool = Path(env["HOME"]) / ".local" / "state" / "tinyscry" / "spool"
-
-            for _ in range(200):
-                if hook_spool.exists():
-                    break
-                await asyncio.sleep(0.02)
-            assert hook_spool.exists()
-
-            with hook_spool.open("a", encoding="utf-8") as handle_file:
-                handle_file.write(
-                    '1700000000 Char.Status {"character_name":"Rin","health":"9","health_max":"10"}\n'
-                )
-
-            await asyncio.wait_for(connected.wait(), timeout=5)
-            for _ in range(200):
-                if received:
-                    break
-                await asyncio.sleep(0.02)
-            assert received
-
-            feed.kill()
-            await feed.wait()
-
-            # Model systemd ExecStopPost after an abnormal service exit.
-            hook_spool.unlink(missing_ok=True)
-            assert not hook_spool.exists()
-
-            connected.clear()
-            received.clear()
-            restarted = await _spawn_feed(env, port)
-            try:
-                for _ in range(200):
-                    if hook_spool.exists():
-                        break
-                    await asyncio.sleep(0.02)
-                assert hook_spool.exists()
-
-                # No character_name or maximum is supplied after restart.
-                # The private normalized checkpoint must restore both.
-                with hook_spool.open("a", encoding="utf-8") as handle_file:
-                    handle_file.write('1700000001 Char.Status {"health":"5"}\n')
-
-                await asyncio.wait_for(connected.wait(), timeout=5)
-                for _ in range(200):
-                    if received:
-                        state = cast(dict[str, object], received[-1]["state"])
-                        character = cast(dict[str, object], state["character"])
-                        hp = cast(dict[str, object], character["hp"])
-                        if hp["current"] == 5:
-                            break
-                    await asyncio.sleep(0.02)
-
-                state = cast(dict[str, object], received[-1]["state"])
-                character = cast(dict[str, object], state["character"])
-                hp = cast(dict[str, object], character["hp"])
-                assert character["name"] == "Rin"
-                assert hp == {"current": 5, "max": 10}
-            finally:
-                restarted.terminate()
-                try:
-                    await asyncio.wait_for(restarted.wait(), timeout=5)
-                except TimeoutError:
-                    restarted.kill()
-                    await restarted.wait()
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("bad_interval", [0, -1])
-def test_negative_or_zero_poll_interval_is_rejected(bad_interval: float, tmp_path: Path) -> None:
-    async def scenario() -> None:
-        env = _write_env(tmp_path)
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "tinyscry_tf.feed",
-            "--poll-interval",
-            str(bad_interval),
-            env=env,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stderr = (await process.stderr.read()).decode()  # type: ignore[union-attr]
-        await process.wait()
-        assert process.returncode != 0
-        assert "--poll-interval" in stderr
-
-    asyncio.run(scenario())
-
-
-def test_run_feed_keeps_draining_and_stops_promptly_while_publish_is_blocked() -> None:
-    class _CountingSource:
-        dropped = 0
-
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def read_lines(self) -> list[str]:
-            self.calls += 1
-            return (
-                [
-                    f"170000000{self.calls} Char.Status "
-                    f'{{"character_name":"Rin","health":"{self.calls}","health_max":"100"}}'
-                ]
-                if self.calls <= 5
-                else []
-            )
-
-    class _BlockedPublisher:
-        def __init__(self) -> None:
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-
-        async def publish(self, state: GameState) -> None:
-            self.started.set()
-            await self.release.wait()
-
-    async def scenario() -> None:
-        source = _CountingSource()
-        publisher = _BlockedPublisher()
-        stop = asyncio.Event()
-
-        task = asyncio.create_task(run_feed(source, publisher, poll_interval=0.01, stop=stop))
-        await asyncio.wait_for(publisher.started.wait(), timeout=1)
-        await asyncio.sleep(0.08)
-
-        assert source.calls > 5, "relay outage must not stop spool draining"
-
-        stop.set()
-        await asyncio.wait_for(task, timeout=1)
-
-    asyncio.run(scenario())
-
-
-def test_run_feed_does_not_publish_checkpoint_without_fresh_spool_input() -> None:
-    async def scenario() -> None:
-        checkpoint = GameState(
-            character=Character(
-                name="Rin",
-                hp=Vital(current=9, max=10),
-                mana=Vital(current=4, max=8),
-                moves=Vital(current=7, max=12),
-            ),
-            target=None,
-        )
-        source = _FakeSource([[]])
-        published: list[GameState] = []
-
-        class _CollectingPublisher:
-            async def publish(self, state: GameState) -> None:
-                published.append(state)
-
-        stop = asyncio.Event()
-
-        async def stop_after_idle() -> None:
-            await asyncio.sleep(0.08)
-            stop.set()
-
-        await asyncio.gather(
-            run_feed(
-                source,
-                _CollectingPublisher(),
-                poll_interval=0.01,
-                stop=stop,
-                initial_state=checkpoint,
-            ),
-            stop_after_idle(),
-        )
-
-        assert published == []
-
-    asyncio.run(scenario())
-
-
-def test_run_feed_seeds_checkpoint_before_publishing_a_fresh_change(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        checkpoint_path = tmp_path / "run" / "state.json"
-        checkpoint_path.parent.mkdir(parents=True)
-        original = GameState(
-            character=Character(
-                name="Rin",
-                hp=Vital(current=9, max=10),
-                mana=Vital(current=4, max=8),
-                moves=Vital(current=7, max=12),
-            ),
-            target=None,
-        )
-        store_checkpoint(checkpoint_path, original)
-        restored = load_checkpoint(checkpoint_path)
-        assert restored == original
-
-        source = _FakeSource([['1700000001 Char.Status {"health":"5"}'], []])
-        published: list[GameState] = []
-
-        class _CollectingPublisher:
-            async def publish(self, state: GameState) -> None:
-                published.append(state)
-
-        stop = asyncio.Event()
-
-        async def stop_after_drain() -> None:
-            await asyncio.sleep(0.08)
-            stop.set()
-
-        await asyncio.gather(
-            run_feed(
-                source,
-                _CollectingPublisher(),
-                poll_interval=0.01,
-                stop=stop,
-                initial_state=restored,
-                checkpoint=lambda state: store_checkpoint(checkpoint_path, state),
-            ),
-            stop_after_drain(),
-        )
-
-        expected = GameState(
-            character=Character(
-                name="Rin",
-                hp=Vital(current=5, max=10),
-                mana=Vital(current=4, max=8),
-                moves=Vital(current=7, max=12),
-            ),
-            target=None,
-        )
-        assert published == [expected]
-        assert load_checkpoint(checkpoint_path) == expected
-
-    asyncio.run(scenario())
-
-
-def test_checkpoint_is_private_and_rejects_malformed_state(tmp_path: Path) -> None:
-    checkpoint = tmp_path / "state.json"
-    state = GameState(
-        character=Character(name="Rin", hp=None, mana=None, moves=None),
-        target=None,
-    )
-
-    store_checkpoint(checkpoint, state)
-
-    assert stat.S_IMODE(checkpoint.stat().st_mode) == 0o600
-    assert load_checkpoint(checkpoint) == state
-
-    checkpoint.write_text('{"character":{"name":""},"target":null}', encoding="utf-8")
-    assert load_checkpoint(checkpoint) is None
-
-
-@pytest.mark.parametrize(
-    ("positions", "expected_target"),
-    [
-        (["Stand"], None),
-        (["Fight"], Target(name="a porcufish", health_percent=49.0)),
-        (["Fight", "Stand"], None),
-    ],
-    ids=["stale-seed-retired", "active-fight-retained", "fight-then-stand-cleared"],
-)
-def test_run_feed_retires_a_checkpoint_seeded_target_unless_live_combat_holds_it(
-    tmp_path: Path, positions: list[str], expected_target: Target | None
-) -> None:
-    """A restored target must not outlive the first live non-Fight observation."""
-
-    async def scenario() -> None:
-        checkpoint_path = tmp_path / "run" / "state.json"
-        restored = GameState(
-            character=Character(name="Musa", hp=Vital(current=3132, max=3164), mana=None, moves=None),
-            target=Target(name="a porcufish", health_percent=49.0),
-        )
-        store_checkpoint(checkpoint_path, restored)
-
-        lines = [
-            f'17000000{index:02d} Char.Vitals {{"hp":"{3130 - index}","maxhp":"3164",'
-            f'"position":"{position}"}}'
-            for index, position in enumerate(positions, start=1)
+        publisher = _CollectingPublisher()
+        markers: list[StateContext | None] = []
+
+        await _run(source, publisher, context_marker=markers.append)
+
+        assert [
+            (kind, context.foreground if context else None, _character_name(state))
+            for kind, context, state in publisher.operations
+        ] == [
+            ("select", 1, None),
+            ("publish", 1, "Alice"),
+            ("select", 2, "Bob"),
         ]
-        source = _FakeSource([lines, []])
+        assert markers == [
+            None,
+            StateContext("session1", 1, 1),
+            StateContext("session1", 2, 2),
+        ]
 
-        class _CollectingPublisher:
-            async def publish(self, state: GameState) -> None:
-                published.append(state)
+    asyncio.run(scenario())
 
-        published: list[GameState] = []
-        stop = asyncio.Event()
 
-        async def stop_after_drain() -> None:
-            await asyncio.sleep(0.08)
-            stop.set()
+def test_selection_and_gmcp_from_one_spool_drain_keep_the_context_order() -> None:
+    class _StrictPublisher(_CollectingPublisher):
+        selected: StateContext | None = None
 
-        await asyncio.gather(
-            run_feed(
-                source,
-                _CollectingPublisher(),
-                poll_interval=0.01,
-                stop=stop,
-                initial_state=restored,
-                checkpoint=lambda state: store_checkpoint(checkpoint_path, state),
-            ),
-            stop_after_drain(),
+        async def select(self, context: StateContext | None, state: GameState) -> None:
+            self.selected = context
+            await super().select(context, state)
+
+        async def publish(self, context: StateContext, state: GameState) -> None:
+            assert context == self.selected
+            await super().publish(context, state)
+
+    async def scenario() -> None:
+        source = _FakeSource(
+            [
+                [
+                    "TS2 S session1 1 1 Alpha 1",
+                    'TS2 G session1 1 Alpha 2 Char.Status {"character_name":"Alice"}',
+                ]
+            ]
         )
+        publisher = _StrictPublisher()
 
-        assert published[-1].target == expected_target
-        final = load_checkpoint(checkpoint_path)
-        assert final is not None
-        assert final.target == expected_target
-        assert final.character is not None
-        assert final.character.hp == Vital(current=3130 - len(positions), max=3164)
+        await _run(source, publisher)
+
+        assert [operation[0] for operation in publisher.operations] == ["select", "publish"]
+        assert _character_name(publisher.operations[-1][2]) == "Alice"
+
+    asyncio.run(scenario())
+
+
+def test_active_reset_clears_only_that_world_and_rejects_old_generation() -> None:
+    async def scenario() -> None:
+        source = _FakeSource(
+            [
+                ["TS2 S s1 1 1 Alpha 1"],
+                ['TS2 G s1 1 Alpha 2 Char.Status {"character_name":"Alice"}'],
+                ["TS2 R s1 3 Alpha 3"],
+                ['TS2 G s1 1 Alpha 4 Char.Status {"character_name":"Old"}'],
+                ['TS2 G s1 3 Alpha 5 Char.Status {"character_name":"New"}'],
+            ]
+        )
+        publisher = _CollectingPublisher()
+
+        await _run(source, publisher)
+
+        assert [
+            (kind, context.connection if context else None, _character_name(state))
+            for kind, context, state in publisher.operations
+        ] == [
+            ("select", 1, None),
+            ("publish", 1, "Alice"),
+            ("select", 3, None),
+            ("publish", 3, "New"),
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_new_session_invalidates_cached_world_state() -> None:
+    async def scenario() -> None:
+        source = _FakeSource(
+            [
+                ['TS2 G old 1 Alpha 1 Char.Status {"character_name":"Old"}'],
+                ["TS2 S old 1 1 Alpha 2"],
+                ["TS2 S fresh 1 1 Alpha 3"],
+            ]
+        )
+        publisher = _CollectingPublisher()
+
+        await _run(source, publisher)
+
+        assert _character_name(publisher.operations[0][2]) == "Old"
+        assert _character_name(publisher.operations[1][2]) is None
+
+    asyncio.run(scenario())
+
+
+def test_no_world_selects_empty_state_and_clears_marker() -> None:
+    async def scenario() -> None:
+        source = _FakeSource([["TS2 S s1 1 1 Alpha 1", "TS2 S s1 2 0 - 2"]])
+        publisher = _CollectingPublisher()
+        markers: list[StateContext | None] = []
+
+        await _run(source, publisher, context_marker=markers.append)
+
+        assert publisher.operations[-1] == ("select", None, EMPTY)
+        assert markers[-1] is None
+
+    asyncio.run(scenario())
+
+
+def test_checkpoint_is_session_and_world_aware_and_private(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "state.json"
+    state = GameState(character=None, target=None)
+    checkpoint = FeedCheckpoint(
+        "session1",
+        {"Alpha": WorldCheckpoint(2, state), "Beta World": WorldCheckpoint(4, state)},
+    )
+
+    store_checkpoint(path, checkpoint)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert load_checkpoint(path) == checkpoint
+    path.write_text('{"version":2,"session":"bad/session","worlds":{}}', encoding="utf-8")
+    assert load_checkpoint(path) is None
+
+
+def test_matching_checkpoint_seeds_world_but_different_session_discards_it() -> None:
+    async def scenario() -> None:
+        from tinyscry_relay.protocol import Character
+
+        seeded = GameState(character=Character("Seed", None, None, None), target=None)
+        checkpoint = FeedCheckpoint("same", {"Alpha": WorldCheckpoint(1, seeded)})
+
+        matching = _CollectingPublisher()
+        await _run(_FakeSource([["TS2 S same 1 1 Alpha 1"]]), matching, initial_checkpoint=checkpoint)
+        assert _character_name(matching.operations[0][2]) == "Seed"
+
+        fresh = _CollectingPublisher()
+        await _run(_FakeSource([["TS2 S new 1 1 Alpha 1"]]), fresh, initial_checkpoint=checkpoint)
+        assert _character_name(fresh.operations[0][2]) is None
+
+    asyncio.run(scenario())
+
+
+def test_relay_outage_does_not_stop_spool_draining_and_new_selection_cancels_old() -> None:
+    class _BlockedPublisher(_CollectingPublisher):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        async def select(self, context: StateContext | None, state: GameState) -> None:
+            self.operations.append(("select", context, state))
+            if context is not None and context.foreground == 1:
+                self.started.set()
+                try:
+                    await asyncio.Future[None]()
+                except asyncio.CancelledError:
+                    self.cancelled.set()
+                    raise
+
+    async def scenario() -> None:
+        source = _FakeSource([["TS2 S s1 1 1 Alpha 1"], ["TS2 S s1 2 2 Beta 2"], [], []])
+        publisher = _BlockedPublisher()
+
+        await _run(source, publisher)
+
+        assert source.calls >= 4
+        assert publisher.cancelled.is_set()
+        assert publisher.operations[-1][1] == StateContext("s1", 2, 2)
 
     asyncio.run(scenario())

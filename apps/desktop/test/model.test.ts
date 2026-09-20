@@ -10,6 +10,7 @@ const secondState = {
   character: { name: 'Aria', hp: { current: 80, max: 100 }, mana: null, moves: null },
   target: null,
 };
+const context = { session: 'session1', foreground: 1, connection: 1 } as const;
 
 const connected = { kind: 'connection', phase: 'connected', detail: null } as const;
 
@@ -19,9 +20,16 @@ describe('applyEvent', () => {
       kind: 'snapshot',
       seq: 4,
       at: 10,
+      context,
       state: firstState,
     });
-    const afterOlder = applyEvent(afterFirst, { kind: 'snapshot', seq: 3, at: 11, state: secondState });
+    const afterOlder = applyEvent(afterFirst, {
+      kind: 'snapshot',
+      seq: 3,
+      at: 11,
+      context,
+      state: secondState,
+    });
 
     expect(afterOlder).toBe(afterFirst);
   });
@@ -32,10 +40,17 @@ describe('applyEvent', () => {
       seq: 9,
       at: 10,
       state: firstState,
+      context,
     });
     const reconnecting = applyEvent(initial, { kind: 'connection', phase: 'reconnecting', detail: 'closed' });
     const reconnected = applyEvent(reconnecting, connected);
-    const next = applyEvent(reconnected, { kind: 'snapshot', seq: 0, at: 12, state: secondState });
+    const next = applyEvent(reconnected, {
+      kind: 'snapshot',
+      seq: 0,
+      at: 12,
+      context,
+      state: secondState,
+    });
 
     expect(next.lastSeq).toBe(0);
     expect(next.state).toEqual(secondState);
@@ -46,6 +61,7 @@ describe('applyEvent', () => {
       kind: 'snapshot',
       seq: 0,
       at: 10,
+      context,
       state: firstState,
     });
     const afterError = applyEvent(withState, {
@@ -59,10 +75,41 @@ describe('applyEvent', () => {
 
   it('transitions from no data to fresh data', () => {
     const connectedModel = applyEvent(INITIAL_MODEL, connected);
-    const withSnapshot = applyEvent(connectedModel, { kind: 'snapshot', seq: 0, at: 10, state: firstState });
+    const withSnapshot = applyEvent(connectedModel, {
+      kind: 'snapshot',
+      seq: 0,
+      at: 10,
+      context,
+      state: firstState,
+    });
 
     expect(connectedModel.hasData).toBe(false);
     expect(withSnapshot.hasData).toBe(true);
+  });
+
+  it('invalidates live freshness when a cached snapshot changes context', () => {
+    const live = applyEvent(
+      applyEvent(
+        applyEvent(applyEvent(INITIAL_MODEL, connected), {
+          kind: 'snapshot',
+          seq: 0,
+          at: 10,
+          context,
+          state: firstState,
+        }),
+        { kind: 'feed', status: 'live', detail: null },
+      ),
+      {
+        kind: 'snapshot',
+        seq: 1,
+        at: 11,
+        context: { ...context, foreground: 2 },
+        state: secondState,
+      },
+    );
+
+    expect(freshnessOf(live)).toBe('feed-stalled');
+    expect(freshnessOf(applyEvent(live, { kind: 'feed', status: 'live', detail: null }))).toBe('fresh');
   });
 
   it('retains last values but marks them non-fresh while reconnecting', () => {
@@ -70,6 +117,7 @@ describe('applyEvent', () => {
       kind: 'snapshot',
       seq: 0,
       at: 10,
+      context,
       state: firstState,
     });
     const reconnecting = applyEvent(withSnapshot, {
@@ -85,7 +133,13 @@ describe('applyEvent', () => {
 
 describe('freshnessOf', () => {
   const live = applyEvent(
-    applyEvent(applyEvent(INITIAL_MODEL, connected), { kind: 'snapshot', seq: 0, at: 10, state: firstState }),
+    applyEvent(applyEvent(INITIAL_MODEL, connected), {
+      kind: 'snapshot',
+      seq: 0,
+      at: 10,
+      context,
+      state: firstState,
+    }),
     { kind: 'feed', status: 'live', detail: null },
   );
 

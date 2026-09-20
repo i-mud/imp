@@ -31,8 +31,8 @@ because the shape is ours.
 - Adding a new vital is: extend `GameState`, extend both decoders, add a
   fixture, extend the normalizer, extend the HUD. `docs/architecture/objects/game-state.md`
   records that chain.
-- Unknown keys are ignored rather than rejected, so a newer relay can talk to
-  an older HUD. Version 1 is therefore additive-compatible; the version number
-  is reserved for genuinely breaking changes.
+- Unknown keys are ignored rather than rejected, so compatible additions do
+  not require a version bump. Removing, retyping, or changing the meaning of a
+  field does; version 2 therefore has no version-1 compatibility shim.
 - The normalizer carries the cost of MUD uncertainty, and it is the only place
   allowed to contain `UNVERIFIED:` markers.

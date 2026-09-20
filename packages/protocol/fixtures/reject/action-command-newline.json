@@ -1,0 +1,8 @@
+{
+  "description": "action command contains a newline",
+  "direction": "client",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "command",
+  "frame": "{\"type\":\"action\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":1,\"connection\":1},\"command\":\"look\\nnorth\"}"
+}

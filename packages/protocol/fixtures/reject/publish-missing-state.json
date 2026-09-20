@@ -4,5 +4,5 @@
   "expect": "reject",
   "code": "invalid_field",
   "path": "state",
-  "frame": "{\"type\":\"publish\",\"protocol\":1}"
+  "frame": "{\"type\":\"publish\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":1,\"connection\":1}}"
 }

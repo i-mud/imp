@@ -1,0 +1,6 @@
+{
+  "description": "desktop submits a printable ASCII command for its displayed context",
+  "direction": "client",
+  "expect": "accept",
+  "frame": "{\"type\":\"action\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":2,\"connection\":3},\"command\":\"say hello\"}"
+}

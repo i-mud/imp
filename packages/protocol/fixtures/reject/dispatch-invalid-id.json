@@ -1,0 +1,8 @@
+{
+  "description": "dispatch correlation identifier contains punctuation",
+  "direction": "server",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "id",
+  "frame": "{\"type\":\"dispatch\",\"protocol\":2,\"id\":\"abc-123\",\"context\":{\"session\":\"s1\",\"foreground\":2,\"connection\":3},\"command\":\"north\"}"
+}

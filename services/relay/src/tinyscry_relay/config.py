@@ -13,7 +13,6 @@ class RelayConfig:
     port: int
     stale_after: float
     log_level: str
-    allow_non_loopback: bool
 
 
 def parse_args(argv: list[str] | None = None) -> RelayConfig:
@@ -24,24 +23,18 @@ def parse_args(argv: list[str] | None = None) -> RelayConfig:
     parser.add_argument(
         "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
     )
-    parser.add_argument(
-        "--allow-non-loopback",
-        action="store_true",
-        help="permit binding outside loopback; this removes the SSH-only security boundary",
-    )
     parsed = parser.parse_args(argv)
     if not 0 < parsed.port <= 65_535:
         parser.error("--port must be in 1..65535")
     if parsed.stale_after <= 0:
         parser.error("--stale-after must be positive")
-    if parsed.host not in {"127.0.0.1", "::1", "localhost"} and not parsed.allow_non_loopback:
-        parser.error("non-loopback --host requires --allow-non-loopback")
+    if parsed.host not in {"127.0.0.1", "::1", "localhost"}:
+        parser.error("--host must resolve to a loopback binding")
     return RelayConfig(
         host=parsed.host,
         port=parsed.port,
         stale_after=parsed.stale_after,
         log_level=parsed.log_level,
-        allow_non_loopback=parsed.allow_non_loopback,
     )
 
 

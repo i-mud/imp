@@ -1,0 +1,8 @@
+{
+  "description": "context session contains a separator",
+  "direction": "client",
+  "expect": "reject",
+  "code": "invalid_field",
+  "path": "context.session",
+  "frame": "{\"type\":\"action\",\"protocol\":2,\"context\":{\"session\":\"bad/session\",\"foreground\":1,\"connection\":1},\"command\":\"look\"}"
+}

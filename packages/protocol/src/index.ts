@@ -1,13 +1,22 @@
-export { LIMITS, isSafeText } from './limits.ts';
+export { LIMITS, isSafeText, isValidActionCommand } from './limits.ts';
 export { PROTOCOL_VERSION } from './messages.ts';
 export type {
+  ActionMessage,
+  ActionResultMessage,
+  ActionStatus,
   ClientMessage,
+  ConsumerMessage,
+  ConsumerReadyMessage,
+  ConsumerResultMessage,
+  DispatchMessage,
   FeedStatus,
   HelloMessage,
   PublishMessage,
   RelayInfo,
+  SelectMessage,
   ServerMessage,
   SnapshotMessage,
+  StateContext,
   StatusMessage,
 } from './messages.ts';
 export { describeError } from './result.ts';

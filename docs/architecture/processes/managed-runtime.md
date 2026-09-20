@@ -8,14 +8,15 @@ never owns or daemonizes the operator's interactive TinyFugue session.
 
 ## Ownership
 
-| Resource                                       | Owner                          | Lifecycle                                     |
-| ---------------------------------------------- | ------------------------------ | --------------------------------------------- |
-| TinyFugue session                              | operator                       | started and stopped interactively             |
-| GMCP hook                                      | TinyFugue startup config       | fixed named `/def`; repeated loads replace it |
-| live spool, conversion, normalization, publish | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`      |
-| loopback relay                                 | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`        |
-| local SSH forward                              | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process  |
-| WebSocket reconnect and public HUD state       | `RelayStateSource` / HUD model | unchanged four-state presentation             |
+| Resource                                     | Owner                          | Lifecycle                                                  |
+| -------------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
+| TinyFugue session                            | operator                       | started and stopped interactively                          |
+| capture/select/action definitions            | TinyFugue startup config       | fixed named `/def`; repeated loads replace                 |
+| per-dispatch action helper                   | TinyFugue `/quote`             | reader loss or one line ends it; guarded macro replaces it |
+| spool, per-world normalize, selected publish | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`                   |
+| loopback state/action relay                  | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`                     |
+| local SSH forward                            | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process               |
+| WebSocket reconnect and public HUD state     | `RelayStateSource` / HUD model | unchanged freshness presentation                           |
 
 Live VPS reboot verification confirmed that user lingering (`Linger=yes`) keeps
 both VPS user units available without a root-owned service or administrative SSH
@@ -45,15 +46,22 @@ identity outside `$XDG_RUNTIME_DIR`, and sends no GMCP request of its own.
 
 ```text
 interactive TinyFugue
-  -> fixed-path fwrite hook
+  -> fixed-path TS2 fwrite hooks
   -> ~/.local/state/tinyscry/spool (symlink)
   -> private $XDG_RUNTIME_DIR/tinyscry/spool
-  -> tinyscry-feed (check -> normalize -> publish)
+  -> tinyscry-feed (strict parse -> per-world normalize -> selected publish)
   -> tinyscry-relay on 127.0.0.1:8787
   -> system OpenSSH local forward
-  -> RelayStateSource
-  -> existing HUD model
+  -> RelayStateSource / separate one-shot ActionSink
 ```
+
+The reverse action hop returns through the same tunnel and relay to one helper
+whose context exactly matches the selection. TinyFugue owns that asynchronous,
+world-pinned child. It emits at most one line and exits; the fenced
+`/tinyscry_send` macro starts the next helper only when the context still
+matches. If TinyFugue closes the quote-pipe reader first, the idle helper detects
+the terminal descriptor state without writing and exits, allowing the shell
+intermediary and TinyFugue teardown to complete.
 
 The TinyFugue-facing hop is deliberately a drained regular file, not a FIFO.
 TinyFugue's `fwrite()` performs a blocking open/write/close and has
@@ -100,28 +108,31 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 | SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                                                                                                                                               |
 | local port occupied by TinyScry relay  | use external endpoint; spawn no child                                                                                                                                                                                                                |
 | local port occupied by another service | report conflict; spawn and kill nothing                                                                                                                                                                                                              |
+| TinyFugue closes action pipe reader    | idle helper writes nothing, closes its WebSocket, and exits; no reconnect or action result                                                                                                                                                           |
 | TinyScry closes                        | terminate and reap only its owned SSH child                                                                                                                                                                                                          |
 
 ## Source and checks
 
-- `integrations/tinyfugue/src/tinyscry_tf/feed.py` - feed orchestration
+- `integrations/tinyfugue/src/tinyscry_tf/feed.py` - per-world feed orchestration
 - `integrations/tinyfugue/src/tinyscry_tf/spool.py` - private spool and producer lock
+- `integrations/tinyfugue/src/tinyscry_tf/action_consumer.py` - context-bound
+  fixed-macro delivery
 - `integrations/tinyfugue/src/tinyscry_tf/diagnostics.py` - opt-in bounded capture
-- `integrations/tinyfugue/tinyscry.tf` - idempotent fixed-path hook
+- `integrations/tinyfugue/tinyscry.tf` - idempotent fixed-path hooks
 - `deploy/systemd/` - VPS user units
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - mode and SSH alias
 - `apps/desktop/src/lib/tunnel.ts` - transport-independent diagnostic polling
 
 Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
-`test_feed.py`, `test_diagnostics.py`, `apps/desktop/src-tauri/src/tunnel.rs`,
-and `apps/desktop/test/relay-source.test.ts`.
+`test_feed.py`, `test_action_consumer.py`, `test_diagnostics.py`,
+`apps/desktop/src-tauri/src/tunnel.rs`, and desktop source/action tests.
 
 ## Verification
 
-Status: verified
-Verified against: focused Python, Rust, and frontend checks plus live VPS
-restart and reboot evidence recorded in `docs/status.md`.
+Status: verified for the established service/tunnel lifecycle; deterministic
+for the new context/action path. Its pending live procedure is in
+`integrations/tinyfugue/README.md`.
 
 The deterministic gate and the live evidence prove different things, and neither
 substitutes for the other. The gate proves unit-level invariants: that a

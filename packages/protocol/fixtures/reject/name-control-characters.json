@@ -4,5 +4,5 @@
   "expect": "reject",
   "code": "invalid_field",
   "path": "state.character.name",
-  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"at\":1,\"state\":{\"character\":{\"name\":\"Ex\\u001b[31mample\",\"hp\":null,\"mana\":null,\"moves\":null},\"target\":null}}"
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":1,\"at\":1,\"context\":null,\"state\":{\"character\":{\"name\":\"Ex\\u001b[31mample\",\"hp\":null,\"mana\":null,\"moves\":null},\"target\":null}}"
 }

@@ -1,8 +1,8 @@
 {
-  "description": "no timestamp",
+  "description": "snapshot without a timestamp",
   "direction": "server",
   "expect": "reject",
   "code": "invalid_field",
   "path": "at",
-  "frame": "{\"type\":\"snapshot\",\"protocol\":1,\"seq\":1,\"state\":{\"character\":null,\"target\":null}}"
+  "frame": "{\"type\":\"snapshot\",\"protocol\":2,\"seq\":1,\"context\":null,\"state\":{\"character\":null,\"target\":null}}"
 }

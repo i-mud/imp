@@ -8,11 +8,10 @@ captured string types and transitions. The fixture covers observed
 target acquisition/damage/clearing, and identity-preserving handling of the
 observed but unmapped `Char.Group.List` package.
 
-The source capture contained 249 raw hook lines over 214.662 seconds. Of those,
-200 contained valid JSON. The converter safely rejected 49 `Char.Items.Add` or
-`Char.Items.Remove` events because the server payloads contained unescaped
-control characters inside JSON strings. Those inventory events are unrelated
-to the HUD contract and are not repaired or guessed here.
+The source capture includes both valid JSON and malformed inventory events whose
+server payloads contain unescaped control characters inside JSON strings. Those
+inventory events are unrelated to the HUD contract and are safely rejected
+rather than repaired or guessed here.
 
 `malformed.jsonl` contains intentionally hostile records. Its oversized line
 is generated at test runtime from the `oversized` marker rather than stored as

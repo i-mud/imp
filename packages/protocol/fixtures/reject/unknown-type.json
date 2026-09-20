@@ -4,5 +4,5 @@
   "expect": "reject",
   "code": "unknown_type",
   "path": "type",
-  "frame": "{\"type\":\"combat-log\",\"protocol\":1,\"at\":1}"
+  "frame": "{\"type\":\"combat-log\",\"protocol\":2,\"at\":1}"
 }

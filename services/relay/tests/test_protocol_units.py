@@ -3,8 +3,10 @@ from __future__ import annotations
 from tinyscry_relay.protocol import (
     Character,
     GameState,
+    PublishMessage,
     RelayInfo,
     SnapshotMessage,
+    StateContext,
     Target,
     Vital,
     decode_client_message,
@@ -25,7 +27,10 @@ def test_absent_nullable_fields_decode_as_null() -> None:
 
 
 def test_rejects_unpaired_surrogate_after_json_decode() -> None:
-    result = decode_client_message('{"type":"publish","protocol":1,"state":{"character":{"name":"\\ud800"}}}')
+    result = decode_client_message(
+        '{"type":"publish","protocol":2,"context":{"session":"s1","foreground":1,"connection":1},'
+        '"state":{"character":{"name":"\\ud800"}}}'
+    )
 
     assert not result.ok
     assert result.error is not None
@@ -44,7 +49,8 @@ def test_frame_limit_is_counted_in_utf16_code_units() -> None:
 
 def test_json_numbers_with_integral_float_syntax_decode_as_integers() -> None:
     result = decode_server_message(
-        '{"type":"snapshot","protocol":1.0,"seq":2e0,"at":3.0,"state":{"character":null,"target":null}}'
+        '{"type":"snapshot","protocol":2.0,"seq":2e0,"at":3.0,"context":null,'
+        '"state":{"character":null,"target":null}}'
     )
 
     assert result.ok
@@ -58,13 +64,14 @@ def test_encoders_emit_wire_field_names_and_round_trip() -> None:
         character=Character("Ada", Vital(20, 10), None, Vital(4, 5)),
         target=Target("Troll", 87.5),
     )
+    context = StateContext("s1", 1, 2)
 
-    publish = decode_client_message(encode_publish(state))
-    snapshot = decode_server_message(encode_snapshot(4, 123, state))
+    publish = decode_client_message(encode_publish(context, state))
+    snapshot = decode_server_message(encode_snapshot(4, 123, context, state))
     hello = decode_server_message(encode_hello(123, RelayInfo("relay", "1.2")))
     status = decode_server_message(encode_status(123, "live", None))
 
-    assert publish.ok and publish.value is not None and publish.value.state == state
+    assert publish.ok and isinstance(publish.value, PublishMessage) and publish.value.state == state
     assert snapshot.ok and isinstance(snapshot.value, SnapshotMessage) and snapshot.value.state == state
     assert hello.ok
     assert status.ok

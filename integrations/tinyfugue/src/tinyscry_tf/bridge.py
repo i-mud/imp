@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from tinyscry_relay.protocol import GameState
+from tinyscry_relay.protocol import GameState, StateContext
 
 from tinyscry_tf.normalize import Normalizer
 from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher
@@ -20,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class StatePublisher(Protocol):
-    async def publish(self, state: GameState) -> None: ...
+    async def select(self, context: StateContext | None, state: GameState) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ async def process_lines(stream: TextIO, publisher: StatePublisher) -> BridgeStat
         previous = normalizer.state
         state = normalizer.apply(parsed.record)
         if state != previous and state != last_published:
-            await publisher.publish(state)
+            await publisher.select(None, state)
             last_published = state
             published += 1
 
@@ -82,17 +82,12 @@ def _arguments() -> argparse.ArgumentParser:
         help="read newline-delimited adapter records from this named pipe",
     )
     parser.add_argument("--relay-url", default=DEFAULT_RELAY_URL, help="relay ingest WebSocket URL")
-    parser.add_argument(
-        "--allow-non-loopback",
-        action="store_true",
-        help="explicitly permit a relay URL outside the loopback and SSH boundary",
-    )
     return parser
 
 
 def main() -> None:
     args = _arguments().parse_args()
-    publisher = RelayPublisher(url=args.relay_url, allow_non_loopback=args.allow_non_loopback)
+    publisher = RelayPublisher(url=args.relay_url)
 
     # Record data is never interpolated into a shell command: no shell=True,
     # os.system, or subprocess call exists anywhere in this data path.

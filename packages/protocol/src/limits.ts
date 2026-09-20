@@ -19,6 +19,12 @@ export const LIMITS = {
   maxDetailChars: 256,
   /** Relay identification strings. */
   maxRelayIdentChars: 64,
+  /** Opaque TinyFugue session identifier. */
+  maxContextSessionChars: 128,
+  /** One command forwarded to TinyFugue. */
+  maxActionChars: 512,
+  /** Relay-generated action dispatch identifier. */
+  maxCorrelationChars: 64,
   /** Upper bound for vital `current` / `max` values. */
   maxVitalValue: 1_000_000_000,
 } as const;
@@ -36,4 +42,9 @@ const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f]|\p{Surrogate}/u;
 /** True when `value` is safe to store and render as a label. */
 export function isSafeText(value: string): boolean {
   return !UNSAFE_TEXT.test(value);
+}
+
+/** True when `value` is a non-empty printable-ASCII action command. */
+export function isValidActionCommand(value: string): boolean {
+  return value.length <= LIMITS.maxActionChars && /^[\x20-\x7e]+$/.test(value);
 }

@@ -1,0 +1,6 @@
+{
+  "description": "TinyFugue helper registers for one exact context",
+  "direction": "client",
+  "expect": "accept",
+  "frame": "{\"type\":\"consumer\",\"protocol\":2,\"context\":{\"session\":\"s1\",\"foreground\":2,\"connection\":3}}"
+}

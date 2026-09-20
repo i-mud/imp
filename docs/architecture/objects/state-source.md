@@ -17,6 +17,15 @@ WebSockets, the relay, and SSH process details.
 - `apps/desktop/src/lib/tunnel.ts` - polls transport-independent diagnostics
   exposed by the Tauri backend
 
+Outbound commands use a separate boundary:
+
+- `apps/desktop/src/lib/action/types.ts` - `ActionSink` and terminal result.
+- `apps/desktop/src/lib/action/mock.ts` - deterministic, network-free mock.
+- `apps/desktop/src/lib/action/relay.ts` - one ephemeral `/action` connection
+  per invocation, with no retry.
+- `apps/desktop/src/lib/config.ts` - also the only module allowed to select a
+  concrete action sink.
+
 ## Relationships
 
 Implemented by:
@@ -56,6 +65,11 @@ The tunnel does not introduce a second top-level state machine. The public HUD
 states still derive from relay socket phase plus feed liveness. See
 `docs/architecture/processes/managed-runtime.md`.
 
+`ActionSink` is deliberately not a method on `StateSource`. Observation has a
+long-lived reconnecting lifecycle; an action is a one-shot, context-bound
+request whose ambiguous result must not be retried. Keeping them separate
+prevents source reconnect behavior from replaying a command.
+
 ## Change impact
 
 - Adding an event kind: `types.ts`, `model.ts` (exhaustive switch), the reducer
@@ -63,6 +77,8 @@ states still derive from relay socket phase plus feed liveness. See
 - Adding a source: implement the interface and register it in `config.ts` only.
   If a change requires touching a component, the seam has been violated.
 - Changing reconnect policy affects `docs/architecture/processes/connection-lifecycle.md`.
+- Adding an action sink: implement `ActionSink` and register it in `config.ts`;
+  do not add outbound methods to `StateSource`.
 
 ## Invariants
 
@@ -73,6 +89,10 @@ states still derive from relay socket phase plus feed liveness. See
   fault. See `packages/protocol/SPEC.md`.
 - The mock feeds its frames through the real decoder, so both sources share one
   validation path and the mock cannot drift from the protocol.
+- Mock mode selects both mock implementations and never opens an action
+  network connection.
+- The relay action sink validates a command before opening its one-shot socket
+  and never retries an `unknown` result.
 
 ## Verification
 

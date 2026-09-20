@@ -7,7 +7,7 @@ session on a remote VPS and renders them in a compact, frameless, dark window
 that sits over your MUD client: HP, mana, movement, and the current target's
 health.
 
-The MUD never talks to the HUD directly. A relay on the VPS normalizes state
+The MUD never talks to the HUD directly. TinyFugue-side Python normalizes state
 into a protocol TinyScry owns, and the HUD reads it over an SSH tunnel.
 
 - Architecture and change impact: [`docs/architecture/CONTEXT.md`](docs/architecture/CONTEXT.md)
@@ -17,18 +17,18 @@ into a protocol TinyScry owns, and the HUD reads it over an SSH tunnel.
 
 ## Data flow
 
-```
-MUD
- -> GMCP
- -> TinyFugue                       (VPS)
- -> TinyScry TF adapter             (VPS, integrations/tinyfugue)
- -> TinyScry relay, 127.0.0.1 only  (VPS, services/relay)
- -> SSH tunnel
- -> TinyScry desktop HUD            (your machine, apps/desktop)
+```text
+MUD <-> GMCP <-> TinyFugue             (VPS)
+                  <-> TinyScry TF adapter
+                  <-> TinyScry relay, loopback only
+                  <-> SSH tunnel
+                  <-> TinyScry desktop
 ```
 
-The relay is **never** exposed publicly. Its security boundary is loopback plus
-SSH, which is why it carries no authentication of its own - see
+The relay is **never** exposed publicly. Loopback plus SSH prevents remote
+network access, but loopback does not isolate OS users and TinyScry adds no
+per-user authentication. Both workstation and VPS must be single-user or trust
+every host-local process - see
 [ADR 0001](docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md).
 
 ## Repository structure
@@ -118,7 +118,8 @@ Check it:
 curl http://127.0.0.1:8787/healthz
 ```
 
-Endpoints: `/state` (subscribers), `/ingest` (producer), `/healthz`.
+Endpoints: `/state` (subscribers), `/ingest` (producer), `/action`
+(one-shot requests), `/action-consumer` (TinyFugue helper), and `/healthz`.
 
 ### 4. Feed the relay without a MUD
 
@@ -200,20 +201,23 @@ does not start a child. Closing TinyScry terminates only the child it spawned.
 
 ## How TinyFugue feeds it
 
-On the VPS, TinyFugue's hook writes to a private spool that `tinyscry-feed`
-drains, checks, normalizes and publishes as one process - no unbounded raw
-capture file and no separate pipeline stages to keep alive by hand:
+On the VPS, TinyFugue's hook writes versioned session/world/context events to a
+private spool. `tinyscry-feed` drains them, keeps each world's normalized state
+separate, and publishes only the selected exact context:
 
 ```bash
 uv run --directory integrations/tinyfugue tinyscry-feed
 ```
 
-TinyFugue is never asked to build a command line out of server content. The
-verified hook, why the transport is a drained file rather than a FIFO, the
-observed mappings, and the record contract are documented in
-[`integrations/tinyfugue/README.md`](integrations/tinyfugue/README.md). For
-the full VPS install - systemd units, lingering, the TinyFugue hook install
-step - see [`deploy/README.md`](deploy/README.md).
+The same fixed hook starts a context-bound action helper for the foreground
+world. Action text crosses WebSocket and pipe boundaries as data; it is never
+shell argv or evaluated TinyFugue source.
+
+The verified hook, drained-file transport, per-world event contract, action
+boundary, live verification procedure, and observed mappings are documented in
+[`integrations/tinyfugue/README.md`](integrations/tinyfugue/README.md). For the
+full VPS install - systemd units, lingering, and the hook install step - see
+[`deploy/README.md`](deploy/README.md).
 
 ## Checks
 
@@ -245,6 +249,9 @@ Implemented, verified, and the next milestone: [`docs/status.md`](docs/status.md
   input and never partially applies state.
 - The relay binds `127.0.0.1` by default and has no public listening socket.
 - No secrets, no persisted passwords, no private key handling.
+- Loopback TCP is not same-user isolation. Another local OS user or process can
+  reach the listener; `Origin` checks are browser defense-in-depth, not
+  authentication. Untrusted multi-user hosts are unsupported.
 - No server-provided value is ever interpolated into a shell command.
 
 Details: [`docs/architecture/boundaries/trust-boundary.md`](docs/architecture/boundaries/trust-boundary.md).

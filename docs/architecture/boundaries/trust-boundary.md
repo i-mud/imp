@@ -8,23 +8,38 @@ payload. TinyScry treats all of it as adversarial input.
 
 ## Where untrusted data is checked
 
-| Boundary                 | Enforced by                                            |
-| ------------------------ | ------------------------------------------------------ |
-| raw TF hook line         | `integrations/tinyfugue/src/tinyscry_tf/capture.py`    |
-| TF record envelope       | `integrations/tinyfugue/src/tinyscry_tf/records.py`    |
-| GMCP -> normalized state | `integrations/tinyfugue/src/tinyscry_tf/normalize.py`  |
-| producer output          | `publisher.py`, via `decode_game_state` before sending |
-| relay ingest             | `services/relay/src/tinyscry_relay/protocol.py`        |
-| HUD ingest               | `packages/protocol/src/decode.ts`                      |
+| Boundary                    | Enforced by                                                |
+| --------------------------- | ---------------------------------------------------------- |
+| versioned TF spool event    | `integrations/tinyfugue/src/tinyscry_tf/events.py`         |
+| offline adapter record      | `integrations/tinyfugue/src/tinyscry_tf/records.py`        |
+| GMCP -> normalized state    | `integrations/tinyfugue/src/tinyscry_tf/normalize.py`      |
+| producer output             | `publisher.py`, via protocol encoders before sending       |
+| relay ingest/action/helper  | `services/relay/src/tinyscry_relay/protocol.py`            |
+| HUD state and action result | `packages/protocol/src/decode.ts`                          |
+| TF action delivery          | `action_consumer.py` plus the private exact-context marker |
 
 Bounds and character rules are specified once in `packages/protocol/SPEC.md`.
+
+## Host-local trust model
+
+Loopback prevents remote network access; it does not enforce UID or same-user
+ownership. On the VPS, any process in the relay's network namespace, including
+one owned by another local OS user, can reach its loopback listener. On the
+workstation, any process that can reach the local forwarded listener has the
+same access to state and action endpoints.
+
+`Origin` checks are browser defense-in-depth against cross-site requests. An
+`Origin` header is not process identity and is not authentication. TinyScry
+provides no per-user authentication on either host's loopback endpoints.
+Supported deployment therefore requires a single-user workstation and VPS, or
+mutual trust among every host-local user and process. An untrusted multi-user
+host is outside TinyScry's supported trust boundary.
 
 ## Why validation is repeated
 
 Each consumer validates what it receives rather than trusting its producer.
-This is not redundancy: the relay is reachable by any local process on the VPS,
-and the HUD is reachable by whatever is on the other end of the tunnel. Neither
-can verify the other's diligence, so each defends itself.
+Loopback peers are inside the supported trust boundary, but malformed MUD data
+and implementation faults still fail closed at every consumer.
 
 ## Reject, do not sanitise - except once
 
@@ -41,15 +56,31 @@ point a control character is a bug, and the decoder says so.
 No server-provided value is ever interpolated into a shell command, in any
 component. Concretely:
 
-- The TF integration's documented path is: TinyFugue's `GMCP` hook appends
-  `<epoch-seconds> <package> [JSON]` to a fixed-path file with `fwrite`;
-  `tinyscry-capture` reads that file or stdin, parses each line and emits
-  checked adapter JSONL; `tinyscry-bridge` consumes it through a pipe. Every
-  parse happens in Python. TF is never asked to build a command line out of
-  server content, and the capture filename never contains MUD data.
+- The TF hook appends versioned `TS2` events to the fixed private spool path.
+  Session, generation, and world tokens come from local TinyFugue state. Raw
+  GMCP remains the final data field and is parsed only by Python. No MUD value
+  is evaluated as TF source or placed in a command line.
 - `integrations/tinyfugue/src/tinyscry_tf/bridge.py` uses no `shell=True`, no
   `os.system`, and constructs no subprocess from record content.
-- The relay executes nothing.
+- The relay executes nothing. Its outbound broker only moves a bounded
+  printable-ASCII command between WebSocket peers.
+- The action helper receives the raw command only as decoded WebSocket data. It
+  verifies the private exact-context marker, converts the command with the
+  `textencode.tf` representation, and writes one fixed `/tinyscry_send
+<session> <foreground> <connection> <world-token> <encoded-data>` line to its
+  stdout pipe. TinyFugue rechecks that locally generated context and the
+  quote-pinned current world before decoding the command, calling `send()`, and
+  starting a replacement helper inside the same guard. A stale line cannot
+  recreate its old context. The raw command is never shell argv, shell syntax,
+  a generated macro name, or evaluated TF source.
+- TinyFugue's asynchronous `/quote -dexec` starts only the fixed
+  `tinyscry-action-consumer` executable with locally generated session,
+  generation, and encoded-world arguments. Blank `-w` pins its output to the
+  world selected when the helper started. Each registration accepts at most one
+  dispatch; after one fixed write and flush the helper exits and closes stdout.
+  While idle it writes no liveness bytes and observes only terminal stdout
+  reader-loss events; reader loss ends the helper without a result or reconnect.
+  Before any dispatch it reconnects only while its exact marker remains current.
 - Managed mode in `apps/desktop/src-tauri/src/tunnel.rs` is the one permitted
   desktop process-execution boundary. It constructs the system `ssh` command
   directly with `std::process::Command`, fixed SSH options and loopback
@@ -60,7 +91,7 @@ component. Concretely:
   external mode owns no process, and a pre-existing listener or unrelated SSH
   process is never killed.
 
-This is checkable rather than asserted. Search the execution surfaces:
+This is checkable rather than asserted. Search the process-execution surfaces:
 
 ```bash
 grep -rnE 'shell=True|os\.system|subprocess\.|child_process|execSync|Command::new|\.spawn\(' \
@@ -68,21 +99,20 @@ grep -rnE 'shell=True|os\.system|subprocess\.|child_process|execSync|Command::ne
   packages/protocol/src apps/desktop/src-tauri/src
 ```
 
-The expected process-execution hits are the managed OpenSSH
-`Command::new("ssh")` and `.spawn()` path in `tunnel.rs`; they are permitted
-because the command uses direct argv, fixed forwarding/options, and accepts no
-MUD-derived input. Any relay execution hit, shell-based execution, additional
-spawn path, or path carrying server content into argv requires investigation.
-
-If TinyFugue is ever made to invoke an external command, the content must cross
-the boundary as data on stdin or a pipe - never as an argument assembled from
-server text.
+The expected source hit is the managed OpenSSH `Command::new("ssh")` and
+`.spawn()` path in `tunnel.rs`; it is permitted because the command uses direct
+argv, fixed forwarding/options, and accepts no MUD-derived input. The
+TinyFugue `/quote` boundary is declarative TF source rather than a Python or
+desktop spawn and is constrained as described above. Any relay execution hit,
+shell-based execution, additional spawn path, or path carrying server content
+into argv requires investigation.
 
 ## Secrets
 
 TinyScry holds none.
 
-- No authentication tokens; the relay's boundary is loopback plus SSH
+- No authentication tokens. Loopback plus SSH prevents remote unauthenticated
+  access but deliberately provides no per-user authentication
   (`docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md`).
 - No password storage and no private key handling. SSH is the operator's
   existing `ssh` client and its existing agent/keys.
@@ -124,6 +154,6 @@ character class requires a new rejection fixture, in both languages.
 ## Verification
 
 Status: verified
-Verified against: current protocol rejection tests, hostile-line tests in
-`integrations/tinyfugue/tests/test_records.py`, and managed OpenSSH argv and
-ownership tests in `apps/desktop/src-tauri/src/tunnel.rs`.
+Verified against: protocol rejection tests, hostile event/record tests,
+context-marker and action-helper tests, relay Origin/action tests, and managed
+OpenSSH argv and ownership tests.
