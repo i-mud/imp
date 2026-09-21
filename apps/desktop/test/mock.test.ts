@@ -26,6 +26,11 @@ describe('MockStateSource', () => {
         expect(character?.mana?.current).toBeLessThanOrEqual(800);
         expect(character?.moves?.current).toBeGreaterThanOrEqual(0);
         expect(character?.moves?.current).toBeLessThanOrEqual(500);
+        expect(snapshot.context).toEqual({
+          session: 'mock_session',
+          foreground: 1,
+          connection: 1,
+        });
       }
       source.stop();
     } finally {

@@ -38,13 +38,14 @@ Read the card for the concept you are changing, then the source it cites.
 
 ### Objects
 
-| Card                                                     | Covers                                           |
-| -------------------------------------------------------- | ------------------------------------------------ |
-| [`objects/game-state.md`](objects/game-state.md)         | the normalized state shape and who depends on it |
-| [`objects/relay.md`](objects/relay.md)                   | the relay's state ownership and endpoints        |
-| [`objects/state-source.md`](objects/state-source.md)     | HUD transport boundary and tunnel diagnostics    |
-| [`objects/hud-model.md`](objects/hud-model.md)           | how the HUD turns events into rendered state     |
-| [`objects/desktop-alerts.md`](objects/desktop-alerts.md) | desktop-local alert evaluation and effects       |
+| Card                                                       | Covers                                                    |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| [`objects/game-state.md`](objects/game-state.md)           | the normalized state shape and who depends on it          |
+| [`objects/relay.md`](objects/relay.md)                     | the relay's state ownership and endpoints                 |
+| [`objects/state-source.md`](objects/state-source.md)       | HUD transport boundary and tunnel diagnostics             |
+| [`objects/hud-model.md`](objects/hud-model.md)             | how the HUD turns events into rendered state              |
+| [`objects/desktop-alerts.md`](objects/desktop-alerts.md)   | desktop-local alert evaluation and effects                |
+| [`objects/desktop-actions.md`](objects/desktop-actions.md) | local action templates, UI invocation, and result meaning |
 
 ### Processes
 
@@ -94,6 +95,8 @@ about to contradict it.
    outbound control must not make state observation bidirectional.
 8. Desktop alerts consume normalized `GameState` plus the existing desktop
    freshness model; they do not publish state or trigger outbound actions.
+9. Saved desktop actions are local command templates, not queued or retained
+   dispatches; the relay and TinyFugue no-replay contract remains unchanged.
 
 ## Maintaining this map
 

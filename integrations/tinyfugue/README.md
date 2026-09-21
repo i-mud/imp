@@ -136,6 +136,11 @@ TinyScry does not work around a missing identity: it never infers the local
 character from `Room.Players` or `Char.Group.List`, never persists identity
 across a reboot, and implements no `Char.Status` refresh request.
 
+Even with those prerequisites, a very fast AVATAR login/world transition can
+still be followed only by delta packets that omit `character_name`. TinyScry then
+has no authoritative identity to publish. This known reacquisition limitation is
+deferred; it is not attributed to the configurable action UI.
+
 ## Live feed transport: a drained spool, not a FIFO
 
 TinyFugue's `fwrite()` is `fopen(path, "a")`, one write, `fclose()` - a fresh,
@@ -435,12 +440,22 @@ and neither `forwarded` nor connectionless echo proves MUD-server execution.
 `tfwrite: bad handle` messages observed in the connectionless worlds were a
 probe-world artifact; they did not prevent direct or TinyScry send delivery.
 
-### Optional real-MUD acceptance
+### Real-MUD acceptance
 
-This is a separate operator-controlled external-effect test. If performed, use
-an explicitly approved harmless command, treat `forwarded` only as a successful
-bridge write, independently observe the MUD response, and never retry an
-`unknown` result. It is not required for the connectionless acceptance above.
+The operator-controlled real-MUD acceptance was completed with the approved
+harmless command `look` from the native Windows UI. The action traversed
+`RelayActionSink`, the relay, the matching TinyFugue consumer, and the MUD path
+and was independently observed to execute exactly once. The UI reported
+`Forwarded to TinyFugue. Final MUD delivery is not confirmed.` That wording
+remains the contract: `forwarded` alone proves only the bridge write and flush,
+not MUD receipt or execution.
+
+Removing the matching consumer caused a later action to be rejected without
+execution. Restoring a matching consumer did not replay that action; one fresh
+action then executed exactly once. No queue, retry, replay, reconnect resend, or
+duplicate invocation was observed. Deterministic tests cover `unknown` result
+semantics and its no-retry wording, and manual browser mock acceptance checked
+that presentation; no live `unknown` outcome was deliberately manufactured.
 
 ## Verified TinyFugue boundary
 
@@ -465,10 +480,10 @@ change needs live re-verification.
 
 The prior real capture included valid HUD records and malformed inventory
 events whose MUD payloads contained unescaped controls inside JSON strings.
-The converter logged only bounded error codes and did not repair or execute
-the input. That evidence covers the GMCP parsing boundary, not the new
-context/action runtime; use the checklist above before recording the latter as
-live-verified.
+The converter logged only bounded error codes and did not repair or execute the
+input. That evidence covers the GMCP parsing boundary. The context/action
+runtime has separate connectionless fence evidence and the real-MUD native UI
+acceptance recorded above.
 
 ## Observed real-session schema
 

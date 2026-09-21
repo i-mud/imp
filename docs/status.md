@@ -29,7 +29,7 @@ tunnel mode remains the default and remains supported.
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `packages/protocol`       | Version 2 complete: context-bound state/actions, fail-closed dual decoders, shared accept/reject corpus.              |
 | `services/relay`          | Loopback-only contextual state relay plus Origin policy and single-flight action broker.                              |
-| `apps/desktop` (frontend) | HUD sources plus separate relay/mock `ActionSink`; no action UI is claimed in this slice.                             |
+| `apps/desktop` (frontend) | Configurable local action UI implemented; Windows-native interaction and live action-path acceptance complete.        |
 | `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle covered by deterministic Rust checks.                 |
 | `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, and fixed-macro action helper implemented. |
 
@@ -59,24 +59,48 @@ the Rust crate and does not prove native or live runtime behavior.
 These checks require a native platform, real processes, or operator-controlled
 infrastructure and remain separate from CI:
 
-| Evidence                  | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows Tauri runtime     | Verified on Windows 11: launch, close, topmost, drag, transparency, live WebView updates, and clean runtime console. Slice 5 expanded/compact sizing and repeated mode toggling were smoke-tested on Windows. Slice 6 verified on Windows 11: non-maximizable drag-region behavior, settings presentation/restoration, bundled low-HP sound, native notification delivery, and target-driven expanded sizing.                                                                                                                                                                                                  |
-| Actual OpenSSH child      | Verified in native managed mode: its tunnel dropped during a real VPS reboot and recovered automatically without a TinyScry restart.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Real VPS/systemd behavior | Verified on a real VPS reboot: `Linger=yes` preserved the user manager; `tinyscry-feed` and `tinyscry-relay` returned before interactive login.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Interactive TinyFugue     | The fixed-path `fwrite()` blocking behavior was measured on TinyFugue 5.1.6; the hook did not block the interactive client. Build 5.2.2-3-g4f0ff34 was then used for live play and the reboot bootstrap with no observed blocking, but that measurement was not rerun on it.                                                                                                                                                                                                                                                                                                                                   |
-| Real MUD/GMCP session     | Verified from live play and a redacted capture; observed normalization covered `Char.Status` and `Char.Vitals`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| External SSH runtime      | Verified with a manual local forward, including interruption and recovery.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Relay bind                | Verified through the live restart and reboot: the VPS listener remained at `127.0.0.1:8787` only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Non-loopback guard        | Superseded by a permanent restriction: every non-loopback host is rejected and no override exists. Deterministic coverage is current; the old live opt-in evidence no longer describes the code.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `GET /healthz`            | Tunneled HTTP 200; observed `down`, `live`, and `stale` feed states.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Last-known safety         | Reverified live after the identity fix. Before the feed restart: `seq=3`. After it, before any fresh GMCP: `feed=down`, `producer_count=0`, `has_snapshot=true`, `seq=3` - the snapshot stayed relay-owned and the restarted feed republished nothing. Fresh material GMCP then gave `feed=live`, `producer_count=1`, `has_snapshot=true`, `seq=5`.                                                                                                                                                                                                                                                            |
-| Runtime spool and hook    | Verified after reboot: systemd recreated the private runtime spool and persistent TinyFugue hook symlink.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| TinyFugue ownership       | Verified after reboot: TinyFugue did not auto-start; it remains operator-owned and intentionally interactive.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Identity bootstrap        | Verified live after a real reboot: the ephemeral checkpoint was gone, and the next normal login produced `Char.StatusVars` followed by a full `Char.Status` carrying `character_name`, a `0600` checkpoint, and `feed: live` with a non-null sequence.                                                                                                                                                                                                                                                                                                                                                         |
-| TinyFugue GMCP login hook | Required and verified: the operator build must expose the `GMCP_LOGIN` hook its login scripts use to negotiate GMCP and send `Char.Login`. Tested with `5.2.2-3-g4f0ff34`; a version number alone does not prove `GMCP_LOGIN` is compiled in, so the capability is the invariant.                                                                                                                                                                                                                                                                                                                              |
-| Outbound action path      | Live-verified on pinned TinyFugue build `5.2.2-3-g4f0ff34` (`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`) with connectionless echo worlds. Exact-current actions delivered once with one-shot helper replacement; stale foreground and connection generations were synchronously suppressed after the relay reported `forwarded`; select/GMCP lookups preserved established connection generations; quote pinning prevented retargeting; idle relay restart, helper loss, and prompt `/quit -y` cleanup all passed without replay. This proves the fixed local bridge and fences, not real MUD-server execution. |
-| Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Evidence                  | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows Tauri runtime     | Verified on Windows 11: clean launch and console, close, topmost, drag, transparency, live updates, and a non-maximizable HUD. Slice 8 verified expanded/compact Settings and Actions sizing/restoration, width-preserving attached panels, originating-width management and its drag region, the bounded wrapped compact palette and icon trigger, native restart persistence, and keyboard focus paths.                                                                               |
+| Actual OpenSSH child      | Verified in native managed mode: its tunnel dropped during a real VPS reboot and recovered automatically without a TinyScry restart.                                                                                                                                                                                                                                                                                                                                                    |
+| Real VPS/systemd behavior | Verified on a real VPS reboot: `Linger=yes` preserved the user manager; `tinyscry-feed` and `tinyscry-relay` returned before interactive login.                                                                                                                                                                                                                                                                                                                                         |
+| Interactive TinyFugue     | The fixed-path `fwrite()` blocking behavior was measured on TinyFugue 5.1.6; the hook did not block the interactive client. Build 5.2.2-3-g4f0ff34 was then used for live play and the reboot bootstrap with no observed blocking, but that measurement was not rerun on it.                                                                                                                                                                                                            |
+| Real MUD/GMCP session     | Verified from live play and a redacted capture; observed normalization covered `Char.Status` and `Char.Vitals`.                                                                                                                                                                                                                                                                                                                                                                         |
+| External SSH runtime      | Verified with a manual local forward, including interruption and recovery.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Relay bind                | Verified through the live restart and reboot: the VPS listener remained at `127.0.0.1:8787` only.                                                                                                                                                                                                                                                                                                                                                                                       |
+| Non-loopback guard        | Superseded by a permanent restriction: every non-loopback host is rejected and no override exists. Deterministic coverage is current; the old live opt-in evidence no longer describes the code.                                                                                                                                                                                                                                                                                        |
+| `GET /healthz`            | Tunneled HTTP 200; observed `down`, `live`, and `stale` feed states.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Last-known safety         | Reverified live after the identity fix. Before the feed restart: `seq=3`. After it, before any fresh GMCP: `feed=down`, `producer_count=0`, `has_snapshot=true`, `seq=3` - the snapshot stayed relay-owned and the restarted feed republished nothing. Fresh material GMCP then gave `feed=live`, `producer_count=1`, `has_snapshot=true`, `seq=5`.                                                                                                                                     |
+| Runtime spool and hook    | Verified after reboot: systemd recreated the private runtime spool and persistent TinyFugue hook symlink.                                                                                                                                                                                                                                                                                                                                                                               |
+| TinyFugue ownership       | Verified after reboot: TinyFugue did not auto-start; it remains operator-owned and intentionally interactive.                                                                                                                                                                                                                                                                                                                                                                           |
+| Identity bootstrap        | Verified live after a real reboot: the ephemeral checkpoint was gone, and the next normal login produced `Char.StatusVars` followed by a full `Char.Status` carrying `character_name`, a `0600` checkpoint, and `feed: live` with a non-null sequence.                                                                                                                                                                                                                                  |
+| TinyFugue GMCP login hook | Required and verified: the operator build must expose the `GMCP_LOGIN` hook its login scripts use to negotiate GMCP and send `Char.Login`. Tested with `5.2.2-3-g4f0ff34`; a version number alone does not prove `GMCP_LOGIN` is compiled in, so the capability is the invariant.                                                                                                                                                                                                       |
+| Outbound action path      | The Slice 7 connectionless fence procedure passed on pinned TinyFugue build `5.2.2-3-g4f0ff34` (`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`). Slice 8 then live-verified native UI `look` through `RelayActionSink` -> relay -> TinyFugue -> MUD with one independently observed execution. Consumer removal rejected without execution; restoration did not replay the rejected action; one fresh action executed once. `forwarded` still proves only the fixed bridge write and flush. |
+| Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                                                                                                                                                                                                                                                                                                                             |
+
+### Slice 8 native and live action evidence
+
+- The Windows Tauri app launched cleanly and remained non-maximizable.
+  Expanded and compact Settings and Actions sizing/restoration were exercised
+  live. Compact attached panels retained the HUD width, Manage Actions retained
+  its originating HUD width and remained draggable, and the compact action
+  palette used bounded wrapped buttons behind its icon trigger.
+- Native restart persistence passed. Create, edit, and delete changes survived
+  as expected, and exact command text with intentional leading and trailing
+  spaces survived a restart unchanged. Keyboard Tab, Enter, and Escape paths
+  and focus restoration passed.
+- A native UI `look` action traversed the real `RelayActionSink`, relay,
+  TinyFugue helper, and MUD path and executed exactly once. The UI displayed
+  `Forwarded to TinyFugue. Final MUD delivery is not confirmed.` The execution
+  was established by separate observation; the `forwarded` result alone does
+  not establish MUD receipt or execution.
+- Removing the matching TinyFugue action consumer caused an action to be
+  rejected and not executed. Restoring a matching consumer did not replay it.
+  One new action after restoration executed exactly once. No queue, retry,
+  replay, reconnect resend, or duplicate invocation was observed.
+- Deterministic tests cover `unknown` result semantics and its no-retry
+  wording, and manual browser mock acceptance checked that presentation. No
+  live `unknown` result was deliberately manufactured.
 
 Slice 4 live evidence:
 
@@ -93,11 +117,11 @@ Slice 4 live evidence:
   targets correctly. Priority 2 is the shipped, live-verified configuration,
   not the only claimed valid priority.
 - An intermittent stale character-name state was observed during repeated
-  character relogs after the GMCP hook remediation. The upgraded TinyFugue
-  binary and `GMCP_LOGIN` hooks were verified active, and subsequent repeated
-  relogs under the final canonical runtime updated identity correctly. The
-  issue could not be reproduced further, so no speculative remediation was
-  added. Re-investigate if it recurs.
+  character relogs after the GMCP hook remediation. Normal relogs under the
+  final canonical runtime subsequently updated identity correctly. A narrower
+  rapid login/world-transition case can still miss the one authoritative full
+  `Char.Status.character_name` packet; that known limitation is deferred below
+  rather than addressed through speculative identity inference.
 
 CI does not replace any row in this table and must not be cited as evidence for
 Windows Tauri behavior, actual OpenSSH supervision, VPS/systemd behavior,
@@ -151,6 +175,21 @@ each is the kind that comes back.
    changed. Pinned against identity inference by
    `integrations/tinyfugue/tests/test_normalize.py`.
 
+## Known deferred issues
+
+1. **Character identity reacquisition during very fast AVATAR transitions.**
+   Some rapid login/world transitions can produce later GMCP without another
+   authoritative full `Char.Status.character_name` packet, leaving TinyScry
+   without character identity. The MUD documents no refresh request and later
+   status packets may be deltas. This predates and is not attributed to Slice 8;
+   no speculative identity inference is planned.
+2. **Separate TinyFugue runtime crash.** One upstream/runtime failure printed
+   `Internal error: socket.c, line 3717` followed by `resize freed string`.
+   Memory pressure and OOM were ruled out. This is tracked separately from the
+   TinyScry action UI and transport.
+3. **Minor visual polish.** Further margin, padding, font-size, and Edit/Delete
+   icon treatment is deferred.
+
 ## Current milestone
 
 Slices 5 (`hud-ui-refinement`) and 6 (`alerts-window-polish`) are complete.
@@ -177,5 +216,20 @@ live-verified exact-current delivery and helper replacement, both synchronous
 generation fences, the three corrected `/eval` scope boundaries, no-retarget
 quote pinning, idle relay recovery, no replay across helper loss, and prompt
 reader-loss shutdown. Relay `forwarded` still means only that the fixed
-TinyFugue bridge was written and flushed; no real MUD-server command execution
-is claimed.
+TinyFugue bridge was written and flushed; that Slice 7 connectionless procedure
+does not itself establish real MUD-server command execution.
+
+Slice 8, `configurable-action-ui`, is complete. It adds validated ordered action
+definitions in renderer-local plaintext storage, a same-window create/edit/delete
+surface, bounded expanded and compact action controls, exact-context
+`ActionSink` injection, and result wording that does not overstate `forwarded`.
+At most 64 definitions are retained. Saved definitions are reusable templates,
+not queued or retained dispatched-action history, and do not change the Slice 7
+no-retry/no-replay transport.
+
+The canonical automated gate, manual browser mock acceptance, Windows-native
+acceptance, and live real-MUD action-UI acceptance passed. The live run
+independently observed exact-once execution for an approved `look`, rejection
+without execution when the matching consumer was absent, no replay when it
+returned, and exact-once execution for a fresh action. Live `unknown` behavior
+was not manufactured or claimed.

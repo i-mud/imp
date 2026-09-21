@@ -107,21 +107,31 @@ desktop spawn and is constrained as described above. Any relay execution hit,
 shell-based execution, additional spawn path, or path carrying server content
 into argv requires investigation.
 
-## Secrets
+## Credentials and local command text
 
-TinyScry holds none.
+TinyScry does not request, manage, or persist authentication tokens, SSH
+passwords, or private keys.
 
-- No authentication tokens. Loopback plus SSH prevents remote unauthenticated
-  access but deliberately provides no per-user authentication
+- Loopback plus SSH prevents remote unauthenticated access but deliberately
+  provides no per-user authentication
   (`docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md`).
-- No password storage and no private key handling. SSH is the operator's
-  existing `ssh` client and its existing agent/keys.
+- SSH remains the operator's existing `ssh` client with its existing agent,
+  keys, host verification, and configuration.
 - `.gitignore` covers key material and `.env` files so a stray local file
   cannot be committed.
 
-Managed tunnel mode delegates to the system SSH client and its agent. Copying
-private keys into the app, persisting a password, or weakening OpenSSH host
-verification is out of bounds.
+Saved desktop action definitions are a separate class of data: operator-authored
+local application configuration. Their exact command strings are stored in
+plaintext WebView `localStorage`. Operators must not use saved actions to store
+passwords or other secrets.
+
+Persisted definitions are reusable command templates, not queued dispatches,
+retained action history, relay payload retention, retries, or reconnect resend.
+The relay/TinyFugue no-replay contract is unchanged.
+
+Managed tunnel mode delegates credentials and host verification to the system
+SSH client. Copying private keys into the app, persisting an SSH password, or
+weakening OpenSSH host verification remains out of bounds.
 
 ## Logging
 

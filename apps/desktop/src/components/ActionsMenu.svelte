@@ -10,37 +10,41 @@
   } = $props();
 </script>
 
-<div class="settings">
+<div class="actions-menu">
   <button
     bind:this={trigger}
-    class="settings-button"
-    aria-label="Settings"
+    class="actions-button"
+    type="button"
+    aria-label="Actions"
     aria-expanded={open}
-    aria-haspopup="dialog"
+    aria-controls="compact-actions-panel"
     onclick={(event) => {
       event.stopPropagation();
       if (!open) onopen();
       open = !open;
-    }}>⚙</button
+    }}>⚡</button
   >
 </div>
 
 <style>
-  .settings-button {
+  .actions-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 1.35rem;
     height: 1.35rem;
-    padding: 0 0 3px;
+    padding: 0;
     border: 0;
     border-radius: 50%;
     background: transparent;
     color: var(--muted);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 0.78rem;
     line-height: 1;
   }
 
-  .settings-button:hover,
-  .settings-button[aria-expanded='true'] {
+  .actions-button:hover,
+  .actions-button[aria-expanded='true'] {
     background: rgba(91, 180, 239, 0.18);
     color: var(--text);
   }

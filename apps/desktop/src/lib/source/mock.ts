@@ -1,4 +1,4 @@
-import { decodeServerMessage, PROTOCOL_VERSION, type GameState } from '@tinyscry/protocol';
+import { decodeServerMessage, PROTOCOL_VERSION, type GameState, type StateContext } from '@tinyscry/protocol';
 
 import type { SourceEvent, StateSource } from './types.ts';
 
@@ -16,6 +16,11 @@ interface MockVitals {
 const MAX_HP = 1_200;
 const MAX_MANA = 800;
 const MAX_MOVES = 500;
+const MOCK_CONTEXT: StateContext = {
+  session: 'mock_session',
+  foreground: 1,
+  connection: 1,
+};
 
 type TimerHandle = number | NodeJS.Timeout;
 
@@ -117,7 +122,7 @@ export class MockStateSource implements StateSource {
         protocol: PROTOCOL_VERSION,
         seq: this.sequence++,
         at: Date.now(),
-        context: null,
+        context: MOCK_CONTEXT,
         state,
       }),
     );
