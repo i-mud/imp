@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  actionDialogWindowSize,
+  compactPanelWindowSize,
   compactWindowSize,
   expandedWindowSize,
   EXPANDED_SETTINGS_WINDOW_SIZE,
-  settingsWindowSize,
 } from '../src/lib/window.ts';
 
 describe('compactWindowSize', () => {
@@ -22,26 +23,48 @@ describe('compactWindowSize', () => {
 });
 
 describe('expandedWindowSize', () => {
-  it('grows for a target and shrinks after target removal', () => {
-    const withoutTarget = expandedWindowSize(false);
-    const withTarget = expandedWindowSize(true);
-    const afterRemoval = expandedWindowSize(false);
-
-    expect(withoutTarget.width).toBe(320);
-    expect(withTarget.width).toBe(320);
-    expect(withoutTarget.height).toBeLessThan(withTarget.height);
-    expect(afterRemoval).toEqual(withoutTarget);
+  it('preserves the established no-action dimensions', () => {
+    expect(expandedWindowSize(false, false)).toEqual({ width: 320, height: 142 });
+    expect(expandedWindowSize(true, false)).toEqual({ width: 320, height: 190 });
   });
 
-  it('keeps expanded settings at the established size', () => {
-    expect(EXPANDED_SETTINGS_WINDOW_SIZE).toEqual({ width: 320, height: 215 });
+  it('adds one bounded action strip independent of action count', () => {
+    expect(expandedWindowSize(false, true)).toEqual({ width: 320, height: 192 });
+    expect(expandedWindowSize(true, true)).toEqual({ width: 320, height: 240 });
+  });
+
+  it('pins the expanded settings size', () => {
+    expect(EXPANDED_SETTINGS_WINDOW_SIZE).toEqual({ width: 320, height: 260 });
   });
 });
 
-describe('settingsWindowSize', () => {
-  it('provides deliberate temporary space for compact-mode settings', () => {
-    expect(settingsWindowSize(280, 180)).toEqual({ width: 320, height: 180 });
-    expect(settingsWindowSize(440.2, 319.1)).toEqual({ width: 441, height: 320 });
-    expect(settingsWindowSize(800, 800)).toEqual({ width: 560, height: 420 });
+describe('actionDialogWindowSize', () => {
+  it('uses the expanded HUD width and fixed management height', () => {
+    expect(actionDialogWindowSize(320)).toEqual({ width: 320, height: 400 });
+  });
+
+  it('preserves compact baseline widths including both supported bounds', () => {
+    expect(actionDialogWindowSize(280)).toEqual({ width: 280, height: 400 });
+    expect(actionDialogWindowSize(380)).toEqual({ width: 380, height: 400 });
+    expect(actionDialogWindowSize(560)).toEqual({ width: 560, height: 400 });
+  });
+
+  it('clamps management width to the compact window bounds', () => {
+    expect(actionDialogWindowSize(1)).toEqual({ width: 280, height: 400 });
+    expect(actionDialogWindowSize(800)).toEqual({ width: 560, height: 400 });
+  });
+});
+
+describe('compactPanelWindowSize', () => {
+  it('preserves a fitting closed compact width', () => {
+    const closed = compactWindowSize(347.2, 40);
+
+    expect(compactPanelWindowSize(closed.width, 180)).toEqual({ width: 348, height: 180 });
+  });
+
+  it('uses intrinsic panel width within the global compact bounds', () => {
+    expect(compactPanelWindowSize(280, 180)).toEqual({ width: 280, height: 180 });
+    expect(compactPanelWindowSize(440.2, 319.1)).toEqual({ width: 441, height: 320 });
+    expect(compactPanelWindowSize(800, 800)).toEqual({ width: 560, height: 420 });
   });
 });

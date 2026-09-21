@@ -2,11 +2,12 @@
   import { onMount } from 'svelte';
 
   import Hud from './components/Hud.svelte';
-  import { createStateSource } from './lib/config.ts';
+  import { createActionSink, createStateSource } from './lib/config.ts';
   import { HudStore } from './lib/hud/store.svelte.ts';
 
   const store = new HudStore();
   const source = createStateSource();
+  const actionSink = createActionSink();
 
   onMount(() => {
     store.attach(source);
@@ -14,4 +15,4 @@
   });
 </script>
 
-<Hud model={store.model} />
+<Hud model={store.model} {actionSink} />

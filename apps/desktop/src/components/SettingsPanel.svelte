@@ -7,11 +7,13 @@
     alertSettings,
     onmodechange,
     onalertsettingschange,
+    onmanageactions,
   }: {
     mode: DisplayMode;
     alertSettings: AlertSettings;
     onmodechange: (mode: DisplayMode) => void;
     onalertsettingschange: (settings: AlertSettings) => void;
+    onmanageactions: (invoker: HTMLButtonElement) => void;
   } = $props();
 
   function updateAlertSettings(patch: Partial<AlertSettings>): void {
@@ -98,6 +100,19 @@
       </label>
     </div>
   </section>
+
+  <section class="settings-section" aria-labelledby="action-settings-title">
+    <div id="action-settings-title" class="menu-title">Actions</div>
+    <button
+      class="manage-actions"
+      type="button"
+      data-action-manager-trigger
+      onclick={(event) => {
+        event.stopPropagation();
+        onmanageactions(event.currentTarget);
+      }}>Manage actions…</button
+    >
+  </section>
 </div>
 
 <style>
@@ -153,6 +168,23 @@
     display: inline-block;
     width: 0.75rem;
     color: var(--mana);
+  }
+
+  .manage-actions {
+    padding: 0.26rem 0.35rem;
+    border: 0;
+    border-radius: 0.25rem;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.68rem;
+    text-align: left;
+  }
+
+  .manage-actions:hover,
+  .manage-actions:focus-visible {
+    background: rgba(94, 157, 248, 0.16);
+    outline: none;
   }
 
   .alerts {

@@ -58,6 +58,27 @@ button {
 .settings *,
 .settings-panel,
 .settings-panel *,
+.actions-menu,
+.actions-menu *,
+.action-bar,
+.action-bar *,
+.action-dialog,
+.action-dialog *,
 button.close {
+  app-region: no-drag;
+}
+
+.compact-attached-panel,
+.compact-attached-panel * {
+  app-region: no-drag;
+}
+
+.action-dialog .dialog-titlebar,
+.action-dialog .dialog-title,
+.action-dialog .dialog-title * {
+  app-region: drag;
+}
+
+.action-dialog .dialog-close {
   app-region: no-drag;
 }
