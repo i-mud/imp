@@ -8,15 +8,16 @@ never owns or daemonizes the operator's interactive TinyFugue session.
 
 ## Ownership
 
-| Resource                                     | Owner                          | Lifecycle                                                  |
-| -------------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| TinyFugue session                            | operator                       | started and stopped interactively                          |
-| capture/select/action definitions            | TinyFugue startup config       | fixed named `/def`; repeated loads replace                 |
-| per-dispatch action helper                   | TinyFugue `/quote`             | reader loss or one line ends it; guarded macro replaces it |
-| spool, per-world normalize, selected publish | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`                   |
-| loopback state/action relay                  | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`                     |
-| local SSH forward                            | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process               |
-| WebSocket reconnect and public HUD state     | `RelayStateSource` / HUD model | unchanged freshness presentation                           |
+| Resource                                      | Owner                          | Lifecycle                                                  |
+| --------------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
+| TinyFugue session                             | operator                       | started and stopped interactively                          |
+| capture/select/action definitions             | TinyFugue startup config       | fixed named `/def`; repeated loads replace                 |
+| per-dispatch action helper                    | TinyFugue `/quote`             | reader loss or one line ends it; guarded macro replaces it |
+| spool, per-world normalize, selected publish  | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`                   |
+| loopback state/action relay                   | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`                     |
+| local SSH forward                             | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process               |
+| pre-existing relay endpoint on the local port | whoever started it             | adopted and monitored; never owned, signalled or replaced  |
+| WebSocket reconnect and public HUD state      | `RelayStateSource` / HUD model | unchanged freshness presentation                           |
 
 Live VPS reboot verification confirmed that user lingering (`Linger=yes`) keeps
 both VPS user units available without a root-owned service or administrative SSH
@@ -86,10 +87,29 @@ bounded reconnect backoff. It does not parse SSH config or handle credentials.
 The target is an existing SSH `Host` alias, so OpenSSH continues to own agent,
 `IdentityFile`, `ProxyJump`, `known_hosts`, and host verification.
 
-Port `8787` is fixed on both sides. Before spawning, managed mode distinguishes
-a TinyScry-shaped `/healthz` endpoint from an unrelated listener. It uses a
-verified existing endpoint or reports a conflict; it never kills the listener.
-Shutdown signals only the stored child handle.
+Port `8787` is fixed on both sides. Managed mode distinguishes a TinyScry-shaped
+`/healthz` endpoint from an unrelated listener, and never kills either.
+
+A verified existing endpoint is _adopted_, not owned: TinyScry reports
+`ExternalPortInUse`, spawns no child on top of it, holds no handle to it, and
+re-probes it about once a second. Adoption is therefore temporary rather than
+terminal. When the adopted endpoint disappears and the port is free, the same
+supervisor spawns and supervises its own SSH child in its place, with no
+application restart. If the endpoint stops answering as a relay while some
+process still holds the port, the forward is reported unavailable and TinyScry
+keeps waiting rather than binding or killing over it. An unrelated listener
+already holding the port at startup is a refusal instead: no child, no
+supervision. `down`, `stale` and `live` are all valid relay health states, so a
+stale feed never triggers takeover. Shutdown signals only the stored child
+handle.
+
+Each watch cycle classifies the port exactly once - relay endpoint, foreign
+owner, or free - and then applies one diagnostic transition, so a healthy
+adopted endpoint is never published as a conflict in passing. The health read
+has its own, longer deadline than the connect probe: an adopted endpoint is
+normally reached through the SSH forward, where the local connect is instant
+and only the answer pays network latency. Sharing the connect window made a
+slow but valid relay read as a foreign listener and the diagnostic flap.
 
 The Tauri command exposes only a transport diagnostic enum. `config.ts` feeds
 a human-readable detail into `RelayStateSource`; Svelte components still see
@@ -106,8 +126,9 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 | TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                                                                                                                                                 |
 | spool target replaced                  | next TinyFugue hook call reopens the stable path                                                                                                                                                                                                     |
 | SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                                                                                                                                               |
-| local port occupied by TinyScry relay  | use external endpoint; spawn no child                                                                                                                                                                                                                |
-| local port occupied by another service | report conflict; spawn and kill nothing                                                                                                                                                                                                              |
+| local port occupied by TinyScry relay  | adopt and monitor that endpoint; spawn no child                                                                                                                                                                                                      |
+| adopted relay endpoint disappears      | the same supervisor spawns its own SSH child once the port is free; no application restart                                                                                                                                                           |
+| local port occupied by another service | report unavailable; spawn, bind and kill nothing                                                                                                                                                                                                     |
 | TinyFugue closes action pipe reader    | idle helper writes nothing, closes its WebSocket, and exits; no reconnect or action result                                                                                                                                                           |
 | TinyScry closes                        | terminate and reap only its owned SSH child                                                                                                                                                                                                          |
 
@@ -120,7 +141,7 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 - `integrations/tinyfugue/src/tinyscry_tf/diagnostics.py` - opt-in bounded capture
 - `integrations/tinyfugue/tinyscry.tf` - idempotent fixed-path hooks
 - `deploy/systemd/` - VPS user units
-- `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership
+- `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership and adopted-endpoint watch
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - mode and SSH alias
 - `apps/desktop/src/lib/tunnel.ts` - transport-independent diagnostic polling
 
@@ -130,9 +151,13 @@ Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
 
 ## Verification
 
-Status: verified for the established service/tunnel lifecycle; deterministic
-for the new context/action path. Its pending live procedure is in
-`integrations/tinyfugue/README.md`.
+Status: verified for the established service/tunnel lifecycle, including
+adopted-endpoint takeover - a Windows-native run adopted a manual SSH forward
+exposing the remote TinyScry relay and, when that forward was terminated, took
+the forward over with its own supervised child without a restart. That run
+performed no VPS reboot and did not confirm the child's parent PID. The
+context/action path remains deterministic only; its pending live procedure is
+in `integrations/tinyfugue/README.md`.
 
 The deterministic gate and the live evidence prove different things, and neither
 substitutes for the other. The gate proves unit-level invariants: that a
