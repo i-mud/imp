@@ -25,7 +25,7 @@
   .vital {
     display: grid;
     min-width: 0;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .value {
@@ -34,17 +34,17 @@
     gap: 0.18rem;
     min-width: 0;
     color: var(--text);
-    font-size: 0.61rem;
-    line-height: 0.61rem;
+    font-size: var(--font-2xs);
+    line-height: var(--font-2xs);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
   .label {
     color: var(--muted);
-    font-size: 0.58rem;
-    font-weight: 750;
-    letter-spacing: 0.05em;
+    font-size: var(--font-2xs);
+    font-weight: var(--weight-label);
+    letter-spacing: var(--tracking-wide);
   }
 
   .unknown {
@@ -52,10 +52,10 @@
   }
 
   .track {
-    height: 0.2rem;
+    height: var(--track-height-compact);
     overflow: hidden;
     border-radius: 99px;
-    background: rgba(198, 219, 237, 0.12);
+    background: var(--track-bg);
   }
 
   .fill {

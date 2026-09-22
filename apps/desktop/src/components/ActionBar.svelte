@@ -18,6 +18,7 @@
   <div class="action-buttons">
     {#each definitions as definition (definition.id)}
       <button
+        class="action-btn"
         type="button"
         title={definition.label}
         aria-label={definition.label}
@@ -28,23 +29,27 @@
       </button>
     {/each}
   </div>
-  <div class="action-feedback" aria-live="polite">{feedback ?? '\u00a0'}</div>
+  {#if feedback}
+    <div class="action-feedback" aria-live="polite">{feedback}</div>
+  {/if}
 </section>
 
 <style>
   .action-bar {
     display: grid;
     min-width: 0;
-    height: var(--action-strip-height);
-    gap: 0.12rem;
-    padding: 0.25rem 0.65rem 0.18rem;
-    border-top: 1px solid rgba(191, 215, 235, 0.13);
+    gap: var(--space-6);
+    padding: var(--section-pad);
+    border-top: 1px solid var(--divider);
   }
 
   .action-buttons {
     display: flex;
+    /* The strip has a min-height; without this the buttons stretch to fill it
+       and stop matching the compact panel's buttons. */
+    align-items: center;
     min-width: 0;
-    gap: 0.35rem;
+    gap: var(--space-3);
     overflow-x: auto;
     scrollbar-width: thin;
   }
@@ -53,26 +58,7 @@
     flex: 0 0 auto;
     max-width: 9rem;
     min-width: 3rem;
-    padding: 0.2rem 0.5rem;
     overflow: hidden;
-    border: 1px solid rgba(94, 157, 248, 0.34);
-    border-radius: 0.3rem;
-    background: rgba(94, 157, 248, 0.12);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.66rem;
-  }
-
-  button:hover,
-  button:focus-visible {
-    border-color: rgba(94, 157, 248, 0.72);
-    background: rgba(94, 157, 248, 0.2);
-    outline: none;
-  }
-
-  button:disabled {
-    cursor: default;
-    opacity: 0.55;
   }
 
   button span {
@@ -86,9 +72,7 @@
     min-width: 0;
     overflow: hidden;
     color: var(--muted);
-    font-size: 0.58rem;
-    line-height: 1.15;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: var(--font-2xs);
+    line-height: 1;
   }
 </style>

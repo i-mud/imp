@@ -8,6 +8,8 @@
     type ActionDefinition,
   } from '../lib/action/definitions.ts';
 
+  import X from '@lucide/svelte/icons/x';
+
   let {
     definitions,
     onchange,
@@ -99,7 +101,9 @@
         <p class="persistence-error" role="alert">{saveError}</p>
       {/if}
     </div>
-    <button class="dialog-close" type="button" aria-label="Close action manager" onclick={onclose}>×</button>
+    <button class="dialog-close icon-btn" type="button" aria-label="Close action manager" onclick={onclose}
+      ><X size={16} /></button
+    >
   </header>
 
   <div class="dialog-content">
@@ -112,8 +116,9 @@
           {#each definitions as definition (definition.id)}
             <div class="saved-row">
               <span title={definition.label}>{definition.label}</span>
-              <button type="button" onclick={() => editDefinition(definition)}>Edit</button>
-              <button class="delete" type="button" onclick={() => deleteDefinition(definition.id)}
+              <button class="action-btn" type="button" onclick={() => editDefinition(definition)}>Edit</button
+              >
+              <button class="action-btn danger" type="button" onclick={() => deleteDefinition(definition.id)}
                 >Delete</button
               >
             </div>
@@ -161,8 +166,8 @@
       {/if}
 
       <div class="form-actions">
-        <button type="submit">Save</button>
-        <button type="button" onclick={onclose}>Cancel</button>
+        <button class="action-btn" type="submit">Save</button>
+        <button class="action-btn" type="button" onclick={onclose}>Cancel</button>
       </div>
     </form>
   </div>
@@ -184,9 +189,9 @@
     display: flex;
     align-items: start;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.75rem 0.8rem 0.6rem;
-    border-bottom: 1px solid rgba(191, 215, 235, 0.13);
+    gap: var(--space-8);
+    padding: var(--section-pad);
+    border-bottom: 1px solid var(--divider);
   }
 
   .dialog-title {
@@ -200,13 +205,13 @@
   }
 
   h2 {
-    font-size: 0.88rem;
+    font-size: var(--font-md);
   }
 
   h3 {
     color: var(--muted);
-    font-size: 0.61rem;
-    letter-spacing: 0.06em;
+    font-size: var(--font-2xs);
+    letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
   }
 
@@ -214,24 +219,15 @@
     margin-top: 0.22rem;
     overflow-wrap: anywhere;
     color: var(--muted);
-    font-size: 0.64rem;
+    font-size: var(--font-xs);
   }
 
   header .persistence-error {
-    color: #ff9ca5;
+    color: var(--bad);
   }
 
   .dialog-close {
     flex: 0 0 auto;
-    width: 1.5rem;
-    height: 1.5rem;
-    padding: 0 0 3px;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 1.2rem;
   }
 
   .dialog-content {
@@ -239,15 +235,15 @@
     min-width: 0;
     min-height: 0;
     grid-template-rows: minmax(5rem, 1fr) auto;
-    gap: 0.7rem;
-    padding: 0.7rem 0.8rem 0.8rem;
+    gap: var(--space-7);
+    padding: var(--section-pad);
   }
 
   .saved {
     display: grid;
     min-height: 0;
     grid-template-rows: auto minmax(0, 1fr);
-    gap: 0.35rem;
+    gap: var(--space-4);
   }
 
   .saved,
@@ -267,62 +263,46 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.28rem 0;
-    border-bottom: 1px solid rgba(191, 215, 235, 0.1);
+    gap: var(--space-3);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--divider);
   }
 
   .saved-row span {
     overflow: hidden;
-    font-size: 0.68rem;
+    font-size: var(--font-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .saved-row button,
-  .form-actions button {
-    padding: 0.24rem 0.48rem;
-    border: 1px solid rgba(94, 157, 248, 0.34);
-    border-radius: 0.25rem;
-    background: rgba(94, 157, 248, 0.12);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.62rem;
-  }
-
-  .saved-row .delete {
-    border-color: rgba(239, 91, 104, 0.34);
-    background: rgba(239, 91, 104, 0.1);
   }
 
   .empty {
     align-self: center;
     color: var(--muted);
-    font-size: 0.68rem;
+    font-size: var(--font-xs);
     text-align: center;
   }
 
   form {
     display: grid;
-    gap: 0.3rem;
-    padding-top: 0.65rem;
-    border-top: 1px solid rgba(191, 215, 235, 0.13);
+    gap: var(--space-3);
+    padding-top: var(--space-7);
+    border-top: 1px solid var(--divider);
   }
 
   label {
     display: grid;
-    gap: 0.18rem;
+    gap: var(--space-2);
     color: var(--muted);
-    font-size: 0.64rem;
+    font-size: var(--font-xs);
   }
 
   input,
   textarea {
     width: 100%;
-    padding: 0.34rem 0.42rem;
-    border: 1px solid rgba(191, 215, 235, 0.2);
-    border-radius: 0.25rem;
-    background: rgba(8, 13, 20, 0.8);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius);
+    background: var(--input-bg);
     color: var(--text);
     font: inherit;
     user-select: text;
@@ -335,21 +315,21 @@
   input:focus-visible,
   textarea:focus-visible,
   button:focus-visible {
-    border-color: rgba(94, 157, 248, 0.72);
+    border-color: var(--accent-focus);
     outline: none;
   }
 
   .error {
     overflow-wrap: anywhere;
-    color: #ff9ca5;
-    font-size: 0.6rem;
+    color: var(--bad);
+    font-size: var(--font-2xs);
   }
 
   .form-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: end;
-    gap: 0.35rem;
-    padding-top: 0.15rem;
+    gap: var(--space-4);
+    padding-top: var(--space-1);
   }
 </style>

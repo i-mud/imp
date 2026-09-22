@@ -23,7 +23,7 @@
   } from '../lib/alerts/evaluator.ts';
   import { DESKTOP_ALERT_EFFECTS } from '../lib/alerts/native.ts';
   import { loadAlertSettings, saveAlertSettings, type AlertSettings } from '../lib/alerts/settings.ts';
-  import { freshnessOf, type HudFreshness, type HudModel } from '../lib/hud/model.ts';
+  import { freshnessOf, type HudModel } from '../lib/hud/model.ts';
   import {
     loadDisplayMode,
     saveDisplayMode,
@@ -37,19 +37,25 @@
     closeWindow,
     compactPanelWindowSize,
     compactWindowSize,
-    expandedWindowSize,
     EXPANDED_SETTINGS_WINDOW_SIZE,
+    EXPANDED_WINDOW_SIZE,
+    EXPANDED_WITH_TARGET_WINDOW_SIZE,
     resizeHudWindow,
   } from '../lib/window.ts';
+  import { applyTheme, loadTheme, saveTheme, type ThemePreference } from '../lib/hud/theme.ts';
+  import ChevronUp from '@lucide/svelte/icons/chevron-up';
+  import X from '@lucide/svelte/icons/x';
 
   let { model, actionSink }: { model: HudModel; actionSink: ActionSink } = $props();
   let displayMode = $state(loadDisplayMode());
+  let theme = $state(loadTheme());
   let alertSettings = $state(loadAlertSettings());
   let actions = $state<ActionDefinition[]>(loadActionDefinitions());
 
   let panel = $state<HTMLElement>();
   let compactRow = $state<HTMLElement>();
   let compactPanel = $state<HTMLDivElement>();
+  let compactControls = $state<HTMLElement>();
   let compactSettingsTrigger = $state<HTMLButtonElement>();
   let compactActionsTrigger = $state<HTMLButtonElement>();
   let settingsOpen = $state(false);
@@ -74,13 +80,7 @@
   const target = $derived(model.state.target);
   const characterName = $derived(character?.name ?? 'TinyScry');
   const showMana = $derived(character?.mana?.max !== 0);
-
-  const STALE_WORDING: Record<Exclude<HudFreshness, 'fresh'>, string> = {
-    reconnecting: 'reconnecting',
-    offline: 'not connected',
-    'feed-down': 'no game feed',
-    'feed-stalled': 'feed stalled',
-  };
+  const expandedBase = $derived(target !== null ? EXPANDED_WITH_TARGET_WINDOW_SIZE : EXPANDED_WINDOW_SIZE);
 
   function setDisplayMode(mode: DisplayMode): void {
     settingsOpen = false;
@@ -93,6 +93,13 @@
     alertSettings = settings;
     saveAlertSettings(settings);
   }
+
+  function setTheme(preference: ThemePreference): void {
+    theme = preference;
+    saveTheme(preference);
+  }
+
+  $effect(() => applyTheme(theme));
 
   function setActions(nextActions: ActionDefinition[]): boolean {
     if (
@@ -148,6 +155,21 @@
     void invokeAction(actionInvocation, actionSink, context, definition);
   }
 
+  function closeOrDismiss(): void {
+    if (settingsOpen) {
+      settingsOpen = false;
+    } else if (actionsOpen) {
+      actionsOpen = false;
+    } else {
+      closeWindow();
+    }
+  }
+
+  const closeLabel = $derived(
+    settingsOpen ? 'Close settings' : actionsOpen ? 'Close actions' : 'Close TinyScry',
+  );
+  const CloseIcon = $derived(settingsOpen || actionsOpen ? ChevronUp : X);
+
   $effect(() => {
     if (actions.length === 0) actionsOpen = false;
   });
@@ -160,11 +182,10 @@
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (
-        !attachedPanel.contains(target) &&
-        !compactActionsTrigger?.contains(target) &&
-        !compactSettingsTrigger?.contains(target)
-      ) {
+      // The controls cluster owns its own open/close behaviour - the close
+      // button dismisses the open panel on click, so an outside-pointer
+      // dismissal here would swallow that state before the click lands.
+      if (!attachedPanel.contains(target) && compactControls?.contains(target) !== true) {
         settingsOpen = false;
         actionsOpen = false;
       }
@@ -212,12 +233,34 @@
     }
 
     if (displayMode === 'expanded') {
-      resizeHudWindow(
-        settingsOpen
-          ? EXPANDED_SETTINGS_WINDOW_SIZE
-          : expandedWindowSize(target !== null, actions.length > 0),
-      );
-      return;
+      if (settingsOpen) {
+        resizeHudWindow(EXPANDED_SETTINGS_WINDOW_SIZE);
+        return;
+      }
+      if (actions.length === 0) {
+        resizeHudWindow(expandedBase);
+        return;
+      }
+
+      const hudPanel = panel;
+      if (hudPanel === undefined) return;
+
+      const resize = () => {
+        const actionBarHeight =
+          hudPanel.querySelector('.action-bar')?.getBoundingClientRect().height ?? ACTION_STRIP_HEIGHT;
+        resizeHudWindow({
+          width: expandedBase.width,
+          height: expandedBase.height + Math.ceil(actionBarHeight),
+        });
+      };
+      const frame = requestAnimationFrame(resize);
+      const observer = new ResizeObserver(resize);
+      const actionBar = hudPanel.querySelector('.action-bar');
+      if (actionBar !== null) observer.observe(actionBar);
+      return () => {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+      };
     }
 
     const row = compactRow;
@@ -255,11 +298,9 @@
 
 <main
   class:compact={displayMode === 'compact' && !actionDialogOpen}
-  class:offline={!isFresh && !actionDialogOpen}
   class="hud"
   aria-label="TinyScry companion HUD"
   data-tauri-drag-region
-  style="--action-strip-height: {ACTION_STRIP_HEIGHT}px"
 >
   {#if actionDialogOpen}
     <ActionDialog
@@ -276,7 +317,7 @@
       class="panel"
     >
       {#if displayMode === 'compact'}
-        <section bind:this={compactRow} class:compact-last-known={!isFresh} class="compact-row">
+        <section bind:this={compactRow} class="compact-row">
           <div class="compact-primary">
             <StatusIndicator {status} label={statusLabel} />
             <span class="compact-name">{characterName}</span>
@@ -286,39 +327,36 @@
             {/if}
             <CompactVital label="MV" vital={character?.moves ?? null} color="var(--moves)" />
           </div>
-          <div class="compact-controls">
-            {#if actions.length > 0}
-              <ActionsMenu
+          <div bind:this={compactControls} class="compact-controls">
+            <span class="control-slot" class:hidden={settingsOpen || actionsOpen}>
+              {#if actions.length > 0}
+                <ActionsMenu
+                  onopen={() => {
+                    settingsOpen = false;
+                  }}
+                  bind:open={actionsOpen}
+                  bind:trigger={compactActionsTrigger}
+                />
+              {/if}
+            </span>
+            <span class="control-slot" class:hidden={settingsOpen || actionsOpen}>
+              <SettingsMenu
+                bind:open={settingsOpen}
+                bind:trigger={compactSettingsTrigger}
                 onopen={() => {
-                  settingsOpen = false;
+                  actionsOpen = false;
                 }}
-                bind:open={actionsOpen}
-                bind:trigger={compactActionsTrigger}
               />
-            {/if}
-            <SettingsMenu
-              bind:open={settingsOpen}
-              bind:trigger={compactSettingsTrigger}
-              onopen={() => {
-                actionsOpen = false;
-              }}
-            />
+            </span>
             <button
-              class="close"
-              aria-label="Close TinyScry"
+              class="close icon-btn"
+              aria-label={closeLabel}
               onclick={(event) => {
                 event.stopPropagation();
-                closeWindow();
-              }}>×</button
+                closeOrDismiss();
+              }}><CloseIcon size={18} /></button
             >
           </div>
-          {#if !isFresh}
-            <span class="sr-only"
-              >{character === null
-                ? 'Waiting for usable game data'
-                : `Last known values — ${freshness === 'fresh' ? 'waiting for update' : STALE_WORDING[freshness]}`}</span
-            >
-          {/if}
         </section>
         {#if settingsOpen}
           <div
@@ -330,8 +368,10 @@
           >
             <SettingsPanel
               mode={displayMode}
+              {theme}
               {alertSettings}
               onmodechange={setDisplayMode}
+              onthemechange={setTheme}
               onalertsettingschange={setAlertSettings}
               onmanageactions={openActionDialog}
             />
@@ -347,15 +387,18 @@
             <div class="compact-action-list">
               {#each actions as definition (definition.id)}
                 <button
+                  class="action-btn"
                   type="button"
                   disabled={actionInvocation.pendingActionId !== null}
                   onclick={() => invokeDefinition(definition)}>{definition.label}</button
                 >
               {/each}
             </div>
-            <div class="compact-action-feedback" aria-live="polite">
-              {actionInvocation.feedback ?? '\u00a0'}
-            </div>
+            {#if actionInvocation.feedback}
+              <div class="compact-action-feedback" aria-live="polite">
+                {actionInvocation.feedback ?? '\u00a0'}
+              </div>
+            {/if}
           </div>
         {/if}
       {:else}
@@ -364,19 +407,21 @@
             <StatusIndicator {status} label={statusLabel} />
             <span>{characterName}</span>
           </div>
-          <SettingsMenu
-            bind:open={settingsOpen}
-            onopen={() => {
-              actionsOpen = false;
-            }}
-          />
+          <span class="control-slot" class:hidden={settingsOpen}>
+            <SettingsMenu
+              bind:open={settingsOpen}
+              onopen={() => {
+                actionsOpen = false;
+              }}
+            />
+          </span>
           <button
-            class="close"
-            aria-label="Close TinyScry"
+            class="close icon-btn"
+            aria-label={closeLabel}
             onclick={(event) => {
               event.stopPropagation();
-              closeWindow();
-            }}>×</button
+              closeOrDismiss();
+            }}><CloseIcon size={18} /></button
           >
         </header>
 
@@ -384,8 +429,10 @@
           <div class="settings-body" role="dialog" aria-label="TinyScry settings">
             <SettingsPanel
               mode={displayMode}
+              {theme}
               {alertSettings}
               onmodechange={setDisplayMode}
+              onthemechange={setTheme}
               onalertsettingschange={setAlertSettings}
               onmanageactions={openActionDialog}
             />
@@ -463,33 +510,29 @@
   }
 
   .hud:not(.compact) .panel.has-actions {
-    grid-template-rows: auto minmax(0, 1fr) var(--action-strip-height);
-  }
-
-  .offline {
-    opacity: 0.82;
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
   .titlebar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-4);
     min-height: 2.05rem;
-    padding: 0 0.52rem 0 0.75rem;
-    border-bottom: 1px solid rgba(191, 215, 235, 0.13);
+    padding: 0 0.52rem 0 var(--space-7);
+    border-bottom: 1px solid var(--divider);
   }
 
   .identity {
     display: flex;
     align-items: center;
     min-width: 0;
-    gap: 0.45rem;
+    gap: var(--space-5);
     min-height: 2.05rem;
     color: var(--text);
-    font-size: 0.75rem;
-    font-weight: 800;
-    letter-spacing: 0.035em;
+    font-size: var(--font-sm);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--tracking-normal);
   }
 
   .identity span:last-child,
@@ -499,61 +542,44 @@
     white-space: nowrap;
   }
 
-  .close {
-    width: 1.35rem;
-    height: 1.35rem;
-    padding: 0 0 3px;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 1.15rem;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .close:hover {
-    background: rgba(91, 180, 239, 0.18);
-    color: #fff;
+  .control-slot.hidden {
+    visibility: hidden;
   }
 
   .settings-body {
     min-height: 0;
     overflow: hidden;
-    padding: 0.4rem 0.65rem 0.5rem;
+    padding: var(--section-pad);
   }
 
   .content {
     display: grid;
     align-content: start;
-    gap: 0.4rem;
-    padding: 0.5rem 0.75rem 0.25rem;
+    gap: var(--space-4);
+    padding: var(--section-pad);
   }
 
   .vitals {
     display: grid;
-    gap: 0.45rem;
+    gap: var(--space-5);
   }
 
   .empty-state {
     display: grid;
     align-content: center;
-    gap: 0.35rem;
-    padding: 1rem 0.8rem;
+    gap: var(--space-4);
+    padding: var(--section-pad);
     color: var(--muted);
     text-align: center;
   }
 
   .empty-state strong {
     color: var(--text);
-    font-size: 0.78rem;
+    font-size: var(--font-md);
   }
 
   .empty-state span {
-    font-size: 0.69rem;
+    font-size: var(--font-xs);
     line-height: 1.35;
   }
 
@@ -562,7 +588,7 @@
     height: max-content;
     align-content: start;
     overflow: hidden;
-    border-radius: var(--radius-compact);
+    border-radius: var(--radius);
   }
 
   .compact .panel.has-compact-panel {
@@ -576,21 +602,21 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
     width: max-content;
     max-width: calc(560px - 2px);
-    min-height: 40px;
-    padding: 0.3rem 0.75rem;
+    min-height: 30px;
+    padding: 0 var(--space-7);
   }
 
   .has-compact-panel .compact-row {
-    border-bottom: 1px solid rgba(191, 215, 235, 0.13);
+    border-bottom: 1px solid var(--divider);
   }
 
   .compact-attached-panel {
     width: 100%;
     min-width: 0;
-    padding: 0.5rem 0.65rem 0.6rem;
+    padding: var(--section-pad);
   }
 
   .compact-actions-panel {
@@ -598,7 +624,7 @@
     display: grid;
     width: 0;
     min-width: 100%;
-    gap: 0.4rem;
+    gap: var(--space-6);
   }
   .compact-action-list {
     display: flex;
@@ -606,46 +632,25 @@
     align-content: flex-start;
     max-height: 12rem;
     min-height: 0;
-    gap: 0.3rem;
+    gap: var(--space-3);
     overflow-x: hidden;
     overflow-y: auto;
-    padding-right: 0.1rem;
+    padding-right: var(--space-1);
   }
 
   .compact-action-list button {
     flex: 0 1 auto;
     max-width: 100%;
-    min-width: 0;
-    padding: 0.28rem 0.5rem;
+    min-width: 3rem;
     overflow-wrap: anywhere;
-    border: 1px solid rgba(94, 157, 248, 0.34);
-    border-radius: 0.3rem;
-    background: rgba(94, 157, 248, 0.12);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.66rem;
     text-align: left;
   }
 
-  .compact-action-list button:hover,
-  .compact-action-list button:focus-visible {
-    background: rgba(94, 157, 248, 0.18);
-    outline: none;
-  }
-
-  .compact-action-list button:disabled {
-    cursor: default;
-    opacity: 0.55;
-  }
-
   .compact-action-feedback {
-    min-height: 1rem;
     overflow: hidden;
     color: var(--muted);
-    font-size: 0.6rem;
-    line-height: 1.3;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: var(--font-2xs);
+    line-height: 1;
   }
 
   .compact-primary {
@@ -653,33 +658,19 @@
     grid-template-columns: auto minmax(2.5rem, 1fr) repeat(3, max-content);
     align-items: center;
     min-width: 0;
-    gap: 0.75rem;
+    gap: var(--space-7);
   }
 
   .compact-name {
     color: var(--text);
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.02em;
+    font-size: var(--font-xs);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--tracking-normal);
   }
 
   .compact-controls {
     display: flex;
     align-items: center;
-    gap: 0.08rem;
-  }
-
-  .compact-last-known {
-    opacity: 0.8;
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    clip-path: inset(50%);
-    white-space: nowrap;
+    gap: var(--space-1);
   }
 </style>

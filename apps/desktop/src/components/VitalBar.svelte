@@ -26,16 +26,16 @@
 <style>
   .vital {
     display: grid;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .labels {
     display: flex;
     justify-content: space-between;
     color: var(--muted);
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.07em;
+    font-size: var(--font-xs);
+    font-weight: var(--weight-label);
+    letter-spacing: var(--tracking-wide);
   }
 
   .numbers {
@@ -49,10 +49,10 @@
   }
 
   .track {
-    height: 0.46rem;
+    height: var(--track-height);
     overflow: hidden;
     border-radius: 99px;
-    background: rgba(198, 219, 237, 0.12);
+    background: var(--track-bg);
   }
 
   .fill {

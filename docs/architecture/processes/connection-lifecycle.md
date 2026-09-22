@@ -66,21 +66,24 @@ second producer session from overlapping the first.
 ## HUD presentation states
 
 `freshnessOf()` in `apps/desktop/src/lib/hud/model.ts` classifies the pipeline;
-the component renders that classification. Values are shown at full confidence
-only when both signals are healthy.
+the component renders that classification through the status indicator. HUD
+content remains at full opacity for every freshness state.
 
-| Situation                                | `freshnessOf`  | Presentation                               |
-| ---------------------------------------- | -------------- | ------------------------------------------ |
-| connected, `feed` live, snapshot         | `fresh`        | full colour, live values                   |
-| connected, `feed` down, earlier snapshot | `feed-down`    | dimmed, last known values, "no game feed"  |
-| connected, `feed` stale                  | `feed-stalled` | dimmed, last known values, "feed stalled"  |
-| reconnecting / connecting                | `reconnecting` | dimmed, last known values, "reconnecting"  |
-| idle / disconnected                      | `offline`      | dimmed, last known values, "not connected" |
-| connected, no snapshot ever              | any            | placeholders, "waiting for game data"      |
+| Situation                                | `freshnessOf`  | Presentation                          |
+| ---------------------------------------- | -------------- | ------------------------------------- |
+| connected, `feed` live, snapshot         | `fresh`        | full-opacity live values              |
+| connected, `feed` down, earlier snapshot | `feed-down`    | full-opacity last known values        |
+| connected, `feed` stale                  | `feed-stalled` | full-opacity last known values        |
+| reconnecting / connecting                | `reconnecting` | full-opacity last known values        |
+| idle / disconnected                      | `offline`      | full-opacity last known values        |
+| connected, no snapshot ever              | any            | placeholders, "waiting for game data" |
+
+Feed freshness is indicated by the status indicator; stale/down states do not
+reduce HUD opacity.
 
 Last known values stay visible rather than blanking, because a HUD that empties
-itself on a one-second network blip is worse than one that marks its values as
-not fresh.
+itself on a one-second network blip is worse than one that retains useful
+context while the status indicator marks it as not fresh.
 
 The `feed-down` row is the one that matters most and the one that was wrong
 first: a relay outliving its producer keeps a perfectly healthy socket, so a

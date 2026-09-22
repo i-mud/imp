@@ -51,11 +51,18 @@ secrets.
 ## Window sizing and interaction
 
 Expanded mode remains 320 pixels wide: 142 or 190 pixels high without actions,
-192 or 240 pixels high with the fixed action strip, and 260 pixels high for
-Settings. Compact width follows the current intrinsic HUD row within the
-280-560 pixel bounds. Its closed height is bounded to 40-160 pixels; an attached
-Settings or Actions panel retains that width and may grow only to the 420-pixel
-panel-height bound.
+and 227 pixels high for Settings. With actions the strip is not a fixed height:
+`Hud.svelte` observes the rendered `.action-bar` and resizes the window to the
+base height plus the measured strip, so a wrapped result message grows the
+window instead of compressing the buttons. `ACTION_STRIP_HEIGHT` remains only as
+the pre-measurement fallback used before the first observation.
+
+Compact width follows the current intrinsic HUD row within the 280-560 pixel
+bounds. The compact sizing helpers floor content height at 30 pixels and bound
+it to 160 pixels; an attached Settings or Actions panel retains that width and
+may grow only to the 420-pixel panel-height bound. Browser measurement observed
+a 30-pixel compact row; the outer framed panel can measure 32 pixels because of
+its borders.
 
 Manage Actions uses the width of the HUD that opened it and a fixed 400-pixel
 height. Expanded mode therefore opens management at 320 pixels. Compact mode
@@ -64,9 +71,12 @@ management measures the restored current content again rather than treating the
 dialog width as a new baseline. The management header remains draggable, while
 its Close button, fields, buttons, list, and scrollbar remain non-drag regions.
 
-The compact Actions trigger is the keyboard-focusable `⚡` icon with accessible
-name `Actions`. Its attached palette wraps label-sized buttons, bounds long
-labels to the panel width, and scrolls vertically without widening the HUD.
+The compact Actions trigger is the keyboard-focusable Lucide `Swords` icon with
+accessible name `Actions`. Its attached palette wraps label-sized buttons, bounds
+long labels to the panel width, and scrolls vertically without widening the HUD.
+While Settings or Actions is open both triggers are hidden but keep their layout
+space, and the Close control dismisses the open panel instead of closing the
+window.
 
 ## Invocation and results
 
@@ -114,6 +124,12 @@ dragging; the bounded wrapped compact palette and icon trigger; keyboard
 Tab/Enter/Escape paths and focus restoration; create/edit/delete persistence;
 native restart persistence; and exact leading/trailing command spaces across a
 restart.
+
+The Windows-native run above predates the desktop polish pass. The
+runtime-measured action strip, the revised Settings height, the panel-dismissing
+Close control, and the icon-button focus state were verified by browser
+measurement against the mock source only; they have not been re-checked on a
+native Windows build.
 
 Live action acceptance sent `look` from the native UI through the real
 `RelayActionSink`, relay, TinyFugue helper, and MUD path. It executed exactly
