@@ -50,6 +50,11 @@ character identity change also establishes a new baseline, so relogging cannot
 turn the first low-HP observation of a different character into a crossing.
 Disabling and re-enabling the low-HP alert likewise re-baselines.
 
+The specialized low-HP model is current behavior, not the final alert
+architecture. Slice 10 is planned to generalize it into configurable
+notification triggers; see [`../../roadmap.md`](../../roadmap.md). That work has
+not started, so this card continues to describe only the implementation above.
+
 ## Suppression boundary
 
 The evaluator resets its crossing baseline whenever alert evaluation is not

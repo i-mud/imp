@@ -28,13 +28,13 @@ monitors that endpoint instead of spawning over it, and takes the forward over
 with its own supervised child once the endpoint is gone. External tunnel mode
 remains the default and remains supported.
 
-| Component                 | State                                                                                                                               |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/protocol`       | Version 2 complete: context-bound state/actions, fail-closed dual decoders, shared accept/reject corpus.                            |
-| `services/relay`          | Loopback-only contextual state relay plus Origin policy and single-flight action broker.                                            |
-| `apps/desktop` (frontend) | Configurable local action UI implemented; Windows-native interaction and live action-path acceptance complete.                      |
-| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks. |
-| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, and fixed-macro action helper implemented.               |
+| Component                 | State                                                                                                                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`       | Version 2 complete: context-bound state/actions, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                                     |
+| `services/relay`          | Loopback-only contextual state relay plus Origin policy and single-flight action broker.                                                                                                                                                     |
+| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and low-HP alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
+| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks.                                                                                                          |
+| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, and fixed-macro action helper implemented.                                                                                                                        |
 
 ## Verification
 
@@ -64,7 +64,7 @@ infrastructure and remain separate from CI:
 
 | Evidence                  | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows Tauri runtime     | Verified on Windows 11: clean launch and console, close, topmost, drag, transparency, live updates, and a non-maximizable HUD. Slice 8 verified expanded/compact Settings and Actions sizing/restoration, width-preserving attached panels, originating-width management and its drag region, the bounded wrapped compact palette and icon trigger, native restart persistence, and keyboard focus paths.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Windows Tauri runtime     | Verified on Windows 11: clean launch and console, close, topmost, drag, transparency, live updates, and a non-maximizable HUD. Slice 8 verified expanded/compact Settings and Actions sizing/restoration, width-preserving attached panels, originating-width management and its drag region, the bounded wrapped compact palette and icon trigger, native restart persistence, and keyboard focus paths. The final post-PR #6 polish/theme smoke re-checked theme switching, compact/expanded behavior, Settings, Manage Actions, native sizing, drag, non-maximizable behavior, keyboard/focus paths, and general polish. It did not add live MUD action-path or VPS evidence.                                                                                                                                                                                                                                                                                                                                                |
 | Actual OpenSSH child      | Verified in native managed mode for a child TinyScry already owned: its tunnel dropped during a real VPS reboot and recovered automatically without a TinyScry restart. That run does not cover startup adoption of a pre-existing relay endpoint.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Adopted-endpoint takeover | Verified on Windows 11 after the flap fix. A manual SSH forward exposing the remote TinyScry relay was running first; TinyScry started in managed mode, logged `using existing TinyScry relay on 127.0.0.1:8787`, owned no SSH child, and showed no transient `local port 127.0.0.1:8787 is unavailable` while that forward remained. Terminating the manual forward made the same running app log `127.0.0.1:8787 is free again`, then `SSH tunnel starting (avatar -> 127.0.0.1:8787)` and `SSH tunnel established`: a new listener appeared on `127.0.0.1:8787`, `/healthz` was reachable, and the spawned process carried the exact managed argv (`-N -T`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ServerAliveInterval=15`, `ServerAliveCountMax=3`, `-L 127.0.0.1:8787:127.0.0.1:8787`, `-- avatar`). No TinyScry restart was needed. `feed:"stale"` during the run was expected and unrelated. No VPS reboot was performed for this acceptance, and the spawned child's parent PID was not independently confirmed. |
 | Real VPS/systemd behavior | Verified on a real VPS reboot: `Linger=yes` preserved the user manager; `tinyscry-feed` and `tinyscry-relay` returned before interactive login.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -197,16 +197,16 @@ each is the kind that comes back.
    Some rapid login/world transitions can produce later GMCP without another
    authoritative full `Char.Status.character_name` packet, leaving TinyScry
    without character identity. The MUD documents no refresh request and later
-   status packets may be deltas. This predates and is not attributed to Slice 8;
-   no speculative identity inference is planned.
+   status packets may be deltas; no speculative identity inference is planned.
 2. **Separate TinyFugue runtime crash.** One upstream/runtime failure printed
    `Internal error: socket.c, line 3717` followed by `resize freed string`.
    Memory pressure and OOM were ruled out. This is tracked separately from the
    TinyScry action UI and transport.
-3. **Minor visual polish.** Further margin, padding, font-size, and Edit/Delete
-   icon treatment is deferred.
+3. **Raw/ANSI GMCP parsing robustness.** Some captured GMCP material with raw
+   ANSI/control bytes has produced `invalid_raw_json`. The correct
+   capture/parsing/normalization boundary remains to be investigated.
 
-## Current milestone
+## Completed implementation
 
 Slices 5 (`hud-ui-refinement`) and 6 (`alerts-window-polish`) are complete.
 Their native Windows evidence is recorded above. Slice 6 delivered
@@ -271,3 +271,23 @@ the forward over with its own supervised `ssh` child - established, listening,
 and serving `/healthz` - without a restart. That acceptance involved no VPS
 reboot; the reboot was the earlier event that exposed the original defect, and
 the child's parent PID was not independently confirmed.
+
+### Post-Slice 9 desktop polish and theming - complete
+
+The HUD now has refined compact and expanded presentations, shared UI styling
+cleanup, Lucide icon controls, improved light-theme contrast, and Dark, Light,
+and System themes. Theme preference is persisted locally; System mode follows
+live OS-theme changes. The action strip is measured at runtime, Settings uses
+its current sizing, and panel/focus behavior was tightened for accessibility.
+
+HUD content remains full opacity while live, stale, down, reconnecting, or
+offline. The status indicator remains the authority for freshness; retained
+last-known values do not become actionable when the context is cleared.
+
+Browser and deterministic checks passed, followed by a Windows-native smoke of
+theme switching; compact/expanded behavior; Settings; Manage Actions; native
+sizing; drag; non-maximizable behavior; keyboard/focus paths; and general
+polish. That smoke did not deliberately manufacture a stale/down transport
+failure, re-test the live MUD action path, or verify new VPS behavior.
+
+For planned work, including Slice 10, see [`roadmap.md`](roadmap.md).

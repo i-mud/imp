@@ -19,18 +19,19 @@ MUD <-> GMCP <-> TinyFugue <-> TinyScry TF adapter <-> relay (loopback) <-> SSH 
 
 ## Where things live
 
-| Concern                      | Path                        |
-| ---------------------------- | --------------------------- |
-| Wire protocol + validation   | `packages/protocol/`        |
-| Protocol reference           | `packages/protocol/SPEC.md` |
-| Desktop HUD (Tauri + Svelte) | `apps/desktop/`             |
-| Relay service (Python)       | `services/relay/`           |
-| TinyFugue integration        | `integrations/tinyfugue/`   |
-| VPS systemd units, install   | `deploy/`                   |
-| Cross-component e2e check    | `tests/e2e/`                |
-| Commands, prerequisites      | `README.md`                 |
-| Platform/build strategy      | `docs/development.md`       |
-| Implementation status, next  | `docs/status.md`            |
+| Concern                                 | Path                        |
+| --------------------------------------- | --------------------------- |
+| Wire protocol + validation              | `packages/protocol/`        |
+| Protocol reference                      | `packages/protocol/SPEC.md` |
+| Desktop HUD (Tauri + Svelte)            | `apps/desktop/`             |
+| Relay service (Python)                  | `services/relay/`           |
+| TinyFugue integration                   | `integrations/tinyfugue/`   |
+| VPS systemd units, install              | `deploy/`                   |
+| Cross-component e2e check               | `tests/e2e/`                |
+| Commands, prerequisites                 | `README.md`                 |
+| Platform/build strategy                 | `docs/development.md`       |
+| Current implementation and verification | `docs/status.md`            |
+| Planned slices and deferred future work | `docs/roadmap.md`           |
 
 ## Map entries
 
