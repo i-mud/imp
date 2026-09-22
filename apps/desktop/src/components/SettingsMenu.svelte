@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Settings from '@lucide/svelte/icons/settings';
+
   let {
     onopen,
     open = $bindable(false),
@@ -13,7 +15,7 @@
 <div class="settings">
   <button
     bind:this={trigger}
-    class="settings-button"
+    class="settings-button icon-btn"
     aria-label="Settings"
     aria-expanded={open}
     aria-haspopup="dialog"
@@ -21,27 +23,6 @@
       event.stopPropagation();
       if (!open) onopen();
       open = !open;
-    }}>⚙</button
+    }}><Settings size={14} /></button
   >
 </div>
-
-<style>
-  .settings-button {
-    width: 1.35rem;
-    height: 1.35rem;
-    padding: 0 0 3px;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 0.9rem;
-    line-height: 1;
-  }
-
-  .settings-button:hover,
-  .settings-button[aria-expanded='true'] {
-    background: rgba(91, 180, 239, 0.18);
-    color: var(--text);
-  }
-</style>

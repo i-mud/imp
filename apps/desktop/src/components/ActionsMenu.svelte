@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Swords from '@lucide/svelte/icons/swords';
+
   let {
     onopen,
     open = $bindable(false),
@@ -13,7 +15,7 @@
 <div class="actions-menu">
   <button
     bind:this={trigger}
-    class="actions-button"
+    class="icon-btn"
     type="button"
     aria-label="Actions"
     aria-expanded={open}
@@ -22,30 +24,6 @@
       event.stopPropagation();
       if (!open) onopen();
       open = !open;
-    }}>⚡</button
+    }}><Swords size={14} /></button
   >
 </div>
-
-<style>
-  .actions-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.35rem;
-    height: 1.35rem;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 0.78rem;
-    line-height: 1;
-  }
-
-  .actions-button:hover,
-  .actions-button[aria-expanded='true'] {
-    background: rgba(91, 180, 239, 0.18);
-    color: var(--text);
-  }
-</style>

@@ -1,10 +1,12 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  color: #ecf3fa;
+  color: var(--text);
   background: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 
+  /* Dark is the default theme; [data-theme='light'] below overrides exactly
+     these colour tokens. Everything outside this block is theme-independent. */
   --panel: rgba(12, 18, 27, 0.94);
   --panel-edge: rgba(104, 133, 156, 0.2);
   --muted: #91a1b2;
@@ -15,10 +17,142 @@
   --moves: #58c994;
   --target: #e5ab54;
   --good: #58c994;
+  --good-rgb: 88, 201, 148;
   --warn: #e5ab54;
+  --warn-rgb: 229, 171, 84;
   --bad: #ef5b68;
+  --bad-rgb: 239, 91, 104;
+  --accent-rgb: 94, 157, 248;
+  --divider: rgba(191, 215, 235, 0.13);
+  --input-border: rgba(191, 215, 235, 0.2);
+  --input-bg: rgba(8, 13, 20, 0.8);
+  --track-bg: rgba(198, 219, 237, 0.12);
+
   --radius: 4px;
-  --radius-compact: 20px;
+
+  /* Spacing scale - every gap/padding in the HUD draws from these steps. */
+  --space-1: 0.1rem;
+  --space-2: 0.2rem;
+  --space-3: 0.3rem;
+  --space-4: 0.4rem;
+  --space-5: 0.45rem;
+  --space-6: 0.5rem;
+  --space-7: 0.75rem;
+  --space-8: 1rem;
+
+  /* Type scale */
+  --font-2xs: 0.6rem;
+  --font-xs: 0.66rem;
+  --font-sm: 0.75rem;
+  --font-md: 0.8rem;
+  --weight-label: 700;
+  --weight-strong: 800;
+  --tracking-normal: 0.03em;
+  --tracking-wide: 0.06em;
+
+  /* Derived from the themeable channels above, so they follow the theme. */
+  --accent: rgb(var(--accent-rgb));
+  --accent-subtle: rgba(var(--accent-rgb), 0.12);
+  --accent-hover: rgba(var(--accent-rgb), 0.18);
+  --accent-border: rgba(var(--accent-rgb), 0.34);
+  --accent-focus: rgba(var(--accent-rgb), 0.72);
+  --danger-subtle: rgba(var(--bad-rgb), 0.12);
+  --danger-hover: rgba(var(--bad-rgb), 0.18);
+  --danger-border: rgba(var(--bad-rgb), 0.34);
+
+  --track-height: 0.46rem;
+  --track-height-compact: 0.2rem;
+  --icon-button-size: 1.35rem;
+  --section-pad: var(--space-6) var(--space-7);
+  --opacity-disabled: 0.55;
+}
+
+/* `system` is resolved to one of these two values in lib/hud/theme.ts, so the
+   stylesheet never has to describe a third state. */
+:root[data-theme='light'] {
+  --panel: rgba(247, 249, 252, 0.96);
+  --panel-edge: rgba(23, 38, 54, 0.22);
+  --muted: #5a6b7c;
+  --dimmed: #566676;
+  --text: #16222e;
+  --hp: #cf3242;
+  --mana: #2f6fd0;
+  --moves: #12855a;
+  --target: #8a5510;
+  --good: #12855a;
+  --good-rgb: 18, 133, 90;
+  --warn: #a86c14;
+  --warn-rgb: 168, 108, 20;
+  --bad: #cf3242;
+  --bad-rgb: 207, 50, 66;
+  --accent-rgb: 47, 111, 208;
+  --divider: rgba(23, 38, 54, 0.16);
+  --input-border: rgba(23, 38, 54, 0.26);
+  --input-bg: rgba(255, 255, 255, 0.85);
+  --track-bg: rgba(23, 38, 54, 0.12);
+}
+
+/*
+ * Shared "pill" button: every saved/manage action button (expanded action
+ * strip, compact action panel, action-manager dialog) renders from this one
+ * rule so the three surfaces can never drift apart again.
+ */
+.action-btn {
+  padding: var(--space-3) var(--space-6);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-subtle);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--font-xs);
+}
+
+.action-btn:hover,
+.action-btn:focus-visible {
+  border-color: var(--accent-focus);
+  background: var(--accent-hover);
+  outline: none;
+}
+
+.action-btn:disabled {
+  cursor: default;
+  opacity: var(--opacity-disabled);
+}
+
+.action-btn.danger {
+  border-color: var(--danger-border);
+  background: var(--danger-subtle);
+}
+
+.action-btn.danger:hover,
+.action-btn.danger:focus-visible {
+  border-color: var(--danger-border);
+  background: var(--danger-hover);
+}
+
+/*
+ * Shared circular icon button: settings/actions triggers and every close
+ * control render from this one rule.
+ */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-button-size);
+  height: var(--icon-button-size);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible,
+.icon-btn[aria-expanded='true'] {
+  background: var(--accent-hover);
+  color: var(--text);
 }
 
 html,

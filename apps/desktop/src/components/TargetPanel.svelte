@@ -19,16 +19,16 @@
 <style>
   .target {
     display: grid;
-    gap: 0.32rem;
-    padding-top: 0.35rem;
-    border-top: 1px solid rgba(191, 215, 235, 0.14);
+    gap: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--divider);
   }
 
   .target-name {
     overflow: hidden;
     color: var(--text);
-    font-size: 0.74rem;
-    font-weight: 650;
+    font-size: var(--font-sm);
+    font-weight: var(--weight-strong);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -36,17 +36,17 @@
   .health-row {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--space-6);
     color: var(--target);
-    font-size: 0.64rem;
+    font-size: var(--font-xs);
     font-variant-numeric: tabular-nums;
   }
   .track {
     flex: 1;
-    height: 0.34rem;
+    height: var(--track-height);
     overflow: hidden;
     border-radius: 99px;
-    background: rgba(229, 171, 84, 0.15);
+    background: var(--track-bg);
   }
   .fill {
     height: 100%;
@@ -56,6 +56,6 @@
   }
   .unknown {
     color: var(--dimmed);
-    font-size: 0.65rem;
+    font-size: var(--font-xs);
   }
 </style>
