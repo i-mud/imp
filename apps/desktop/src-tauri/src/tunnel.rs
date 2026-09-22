@@ -24,8 +24,21 @@ use serde::Serialize;
 
 pub const LOCAL_PORT: u16 = 8787;
 const CONNECT_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+/// An adopted endpoint is normally reached through an SSH forward, so its
+/// `/healthz` round trip pays real network latency while the local connect
+/// costs nothing - `ssh` accepts immediately whatever the far side is doing.
+/// Reading the answer therefore must not share the connect probe's window: a
+/// slow but valid relay read as "not a relay" makes a healthy adopted
+/// endpoint flap between diagnostics.
+const HEALTH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Cap on what an unknown listener can make this process read.
+const HEALTH_RESPONSE_BYTES: usize = 4096;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(150);
+/// How often an occupied local port is re-probed while managed mode waits
+/// for it: slow enough not to busy-loop, quick enough that a vanished relay
+/// is taken over in about a second.
+const PORT_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const STDERR_TAIL_BYTES: usize = 4096;
@@ -35,13 +48,12 @@ const STDERR_TAIL_BYTES: usize = 4096;
 pub enum TunnelDiagnostic {
     /// Managed mode is off; TinyScry does not own a tunnel.
     External,
-    /// The configured local port already had a listener before TinyScry
-    /// started, and it answers like a usable relay endpoint; TinyScry does
-    /// not spawn its own child on top of it.
+    /// The local port is held by something that answers like a usable relay
+    /// endpoint. Managed mode adopts it: no child is spawned on top of it,
+    /// and it is monitored so the forward can be taken over when it goes.
     ExternalPortInUse,
-    /// The configured local port is occupied by something that does not
-    /// look like a usable relay endpoint. TinyScry refuses to start rather
-    /// than kill the owning process.
+    /// The local port is occupied by something that does not look like a
+    /// usable relay endpoint. TinyScry waits rather than kill the owner.
     LocalPortUnavailable,
     /// A managed SSH child could not establish or keep the forward.
     SshUnavailable,
@@ -80,10 +92,12 @@ impl TunnelSupervisor {
         })
     }
 
-    /// Managed mode: spawn and supervise `ssh` in the background. If the
-    /// local port is already occupied, this never kills the owning process -
-    /// it classifies the port as an existing usable endpoint or a genuine
-    /// conflict and never starts a child in either case.
+    /// Managed mode: spawn and supervise `ssh` in the background. TinyScry
+    /// never kills whatever already owns the local port. An existing usable
+    /// relay endpoint is adopted - reported, monitored, and left alone - and
+    /// the worker takes the forward over only once that endpoint is gone and
+    /// the port is free again. An unrelated listener at startup is a refusal:
+    /// no child, no supervision.
     pub fn managed(ssh_target: String, local_port: u16) -> Arc<Self> {
         let supervisor = Arc::new(Self {
             status: Mutex::new(TunnelStatus {
@@ -101,11 +115,10 @@ impl TunnelSupervisor {
         }
 
         if probe_relay_healthz(local_port) {
+            // Classified here so the diagnostic is already accurate when this
+            // returns; the worker re-probes and owns it from then on.
             supervisor.set_diagnostic(TunnelDiagnostic::ExternalPortInUse);
-            eprintln!("tinyscry: using existing TinyScry relay on 127.0.0.1:{local_port}");
-            return supervisor;
-        }
-        if probe_open(local_port) {
+        } else if probe_open(local_port) {
             supervisor.set_diagnostic(TunnelDiagnostic::LocalPortUnavailable);
             eprintln!("tinyscry: local port 127.0.0.1:{local_port} is unavailable");
             return supervisor;
@@ -124,9 +137,9 @@ impl TunnelSupervisor {
 
     /// Terminates the child this supervisor owns, if any, and joins its
     /// worker thread. Idempotent; a no-op on an external-mode instance, and
-    /// on a managed instance that never started a worker (e.g. a local-port
-    /// conflict at construction) - neither case owns anything to report as
-    /// newly `Down`.
+    /// on a managed instance that never started a worker (an unrelated
+    /// listener already held the local port at construction) - neither case
+    /// owns anything to report as newly `Down`.
     pub fn shutdown(&self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(mut child) = self.child.lock().take() {
@@ -146,6 +159,10 @@ impl TunnelSupervisor {
     fn run(self: Arc<Self>, ssh_target: String, local_port: u16, stop: Arc<AtomicBool>) {
         let mut backoff = INITIAL_BACKOFF;
         while !stop.load(Ordering::SeqCst) {
+            self.await_free_local_port(local_port, &stop);
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
             self.set_diagnostic(TunnelDiagnostic::Reconnecting);
             eprintln!("tinyscry: SSH tunnel starting ({ssh_target} -> 127.0.0.1:{local_port})");
 
@@ -182,6 +199,49 @@ impl TunnelSupervisor {
         }
     }
 
+    /// Holds the forward back for as long as another process owns the local
+    /// port, and returns only when it is free. A usable relay endpoint is
+    /// adopted rather than replaced: it is reported as `ExternalPortInUse`
+    /// and re-probed until it disappears, at which point managed mode takes
+    /// the forward over without an application restart. Anything else keeps
+    /// the port classified unavailable. Neither branch signals a process this
+    /// supervisor did not spawn.
+    ///
+    /// Each cycle classifies the port once and then applies a single
+    /// diagnostic transition, so a healthy adopted endpoint can never be
+    /// published as a conflict in passing.
+    fn await_free_local_port(&self, local_port: u16, stop: &AtomicBool) {
+        let mut reported: Option<LocalPortState> = None;
+        while !stop.load(Ordering::SeqCst) {
+            let state = classify_local_port(local_port);
+            let previous = reported.replace(state);
+            let changed = previous != Some(state);
+            match state {
+                LocalPortState::RelayEndpoint => {
+                    if changed {
+                        eprintln!(
+                            "tinyscry: using existing TinyScry relay on 127.0.0.1:{local_port}"
+                        );
+                    }
+                    self.set_diagnostic(TunnelDiagnostic::ExternalPortInUse);
+                }
+                LocalPortState::Foreign => {
+                    if changed {
+                        eprintln!("tinyscry: local port 127.0.0.1:{local_port} is unavailable");
+                    }
+                    self.set_diagnostic(TunnelDiagnostic::LocalPortUnavailable);
+                }
+                LocalPortState::Free => {
+                    if previous.is_some() {
+                        eprintln!("tinyscry: 127.0.0.1:{local_port} is free again");
+                    }
+                    return;
+                }
+            }
+            sleep_unless_stopped(PORT_WATCH_INTERVAL, stop);
+        }
+    }
+
     /// Blocks until the owned child exits on its own, or `shutdown()` takes
     /// and kills it. Polling `try_wait()` is the boring, portable choice:
     /// `Child` exposes no readiness primitive to block on across platforms.
@@ -214,6 +274,29 @@ fn local_addr(local_port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], local_port))
 }
 
+/// What the local port looked like in one watch cycle. The probes are ordered
+/// here, once, so a caller never has to sequence them itself - and never
+/// publishes an intermediate answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalPortState {
+    /// Held by something that answers like a usable TinyScry relay.
+    RelayEndpoint,
+    /// Held by something else; not ours to bind over or kill.
+    Foreign,
+    /// Nothing is listening; managed mode may take the forward.
+    Free,
+}
+
+fn classify_local_port(local_port: u16) -> LocalPortState {
+    if probe_relay_healthz(local_port) {
+        LocalPortState::RelayEndpoint
+    } else if probe_open(local_port) {
+        LocalPortState::Foreign
+    } else {
+        LocalPortState::Free
+    }
+}
+
 /// True if something already accepts connections on the local port.
 fn probe_open(local_port: u16) -> bool {
     TcpStream::connect_timeout(&local_addr(local_port), CONNECT_PROBE_TIMEOUT).is_ok()
@@ -229,20 +312,29 @@ fn probe_relay_healthz(local_port: u16) -> bool {
     else {
         return false;
     };
-    if stream
-        .set_read_timeout(Some(CONNECT_PROBE_TIMEOUT))
-        .is_err()
-    {
-        return false;
-    }
+    let deadline = Instant::now() + HEALTH_RESPONSE_TIMEOUT;
     let request = format!(
         "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1:{local_port}\r\nConnection: close\r\n\r\n"
     );
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
+    // Reads to EOF within one overall deadline rather than giving up on the
+    // first short read: a tunnelled relay may answer in several segments.
     let mut response = Vec::new();
-    let _ = stream.read_to_end(&mut response);
+    let mut chunk = [0u8; 512];
+    while response.len() < HEALTH_RESPONSE_BYTES {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        if stream.set_read_timeout(Some(remaining)).is_err() {
+            return false;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => response.extend_from_slice(&chunk[..read]),
+        }
+    }
     let Some(body_start) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
         return false;
     };
@@ -360,6 +452,7 @@ fn sleep_unless_stopped(duration: Duration, stop: &AtomicBool) {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn external_mode_owns_no_child() {
@@ -423,30 +516,347 @@ mod tests {
         let _ = accept_thread.join();
     }
 
-    #[test]
-    fn managed_mode_recognizes_an_existing_relay_endpoint_on_the_local_port() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            use std::io::{Read, Write};
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 512];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"feed\":\"down\",\"producer_count\":0,\"has_snapshot\":false,\"seq\":null}",
-                );
+    const RELAY_HEALTHZ: &str = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"feed\":\"down\",\"producer_count\":0,\"has_snapshot\":false,\"seq\":null}";
+    const RELAY_HEALTHZ_HEAD: &str = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
+    const STALE_RELAY_BODY: &str =
+        "{\"feed\":\"stale\",\"producer_count\":1,\"has_snapshot\":true,\"seq\":7}";
+    const NOT_A_RELAY: &str = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nnope";
+    /// Long enough that headers and body cannot land in one read.
+    const SEGMENT_GAP: Duration = Duration::from_millis(150);
+
+    #[derive(Clone, Copy)]
+    enum Reply {
+        /// One write, as a loopback relay answers.
+        Whole(&'static str),
+        /// Headers then body, as a relay behind an SSH forward may arrive.
+        Segmented(&'static str, &'static str),
+        /// Accepts and then answers nothing, holding the connection open.
+        Stall,
+    }
+
+    /// A loopback listener standing in for a process TinyScry does not own.
+    /// It answers every request with the current reply, so a test can change
+    /// how an adopted endpoint behaves without releasing the port: the port
+    /// stays occupied throughout, leaving no window in which a takeover could
+    /// race the test.
+    struct ForeignListener {
+        port: u16,
+        reply: Arc<Mutex<Reply>>,
+        requests: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+        server: Option<thread::JoinHandle<()>>,
+    }
+
+    impl ForeignListener {
+        fn start(body: &'static str) -> Self {
+            Self::slow(body, Duration::ZERO)
+        }
+
+        /// Answers after `delay`, standing in for an endpoint reached through
+        /// an SSH forward rather than on loopback.
+        fn slow(body: &'static str, delay: Duration) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let reply = Arc::new(Mutex::new(Reply::Whole(body)));
+            let requests = Arc::new(AtomicUsize::new(0));
+            let stop = Arc::new(AtomicBool::new(false));
+            let replies = Arc::clone(&reply);
+            let served = Arc::clone(&requests);
+            let serving = Arc::clone(&stop);
+            let server = thread::spawn(move || {
+                use std::io::{Read, Write};
+                while !serving.load(Ordering::SeqCst) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        thread::sleep(Duration::from_millis(20));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                    let _ = stream.read(&mut [0u8; 512]);
+                    let reply = *replies.lock();
+                    served.fetch_add(1, Ordering::SeqCst);
+                    thread::sleep(delay);
+                    match reply {
+                        Reply::Whole(body) => {
+                            let _ = stream.write_all(body.as_bytes());
+                        }
+                        Reply::Segmented(head, body) => {
+                            let _ = stream.write_all(head.as_bytes());
+                            let _ = stream.flush();
+                            thread::sleep(SEGMENT_GAP);
+                            let _ = stream.write_all(body.as_bytes());
+                        }
+                        Reply::Stall => {
+                            while !serving.load(Ordering::SeqCst) {
+                                thread::sleep(Duration::from_millis(20));
+                            }
+                        }
+                    }
+                }
+            });
+            Self {
+                port,
+                reply,
+                requests,
+                stop,
+                server: Some(server),
             }
-        });
+        }
 
-        let supervisor = TunnelSupervisor::managed("unreachable-alias-for-test".into(), port);
-        let status = supervisor.status();
+        fn reply(&self, reply: Reply) {
+            *self.reply.lock() = reply;
+        }
 
-        assert_eq!(status.diagnostic, TunnelDiagnostic::ExternalPortInUse);
-        assert!(
-            supervisor.worker.lock().is_none(),
-            "no child should have been spawned"
+        /// How many requests this listener has read so far; lets a test wait
+        /// for a probe to be in flight instead of sleeping for one.
+        fn requests(&self) -> usize {
+            self.requests.load(Ordering::SeqCst)
+        }
+
+        /// Releases the port, as a vanishing relay endpoint would.
+        fn stop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(server) = self.server.take() {
+                server.join().unwrap();
+            }
+        }
+    }
+
+    impl Drop for ForeignListener {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    fn wait_for_diagnostic(
+        supervisor: &TunnelSupervisor,
+        wanted: TunnelDiagnostic,
+        timeout: Duration,
+    ) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if supervisor.status().diagnostic == wanted {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        false
+    }
+
+    #[test]
+    fn managed_mode_adopts_an_existing_relay_endpoint_without_owning_it() {
+        let relay = ForeignListener::start(RELAY_HEALTHZ);
+
+        let supervisor =
+            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::ExternalPortInUse
         );
-        let _ = server.join();
+        thread::sleep(PORT_WATCH_INTERVAL * 2 + POLL_INTERVAL);
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::ExternalPortInUse,
+            "a healthy endpoint stays adopted across watch cycles"
+        );
+        assert!(
+            supervisor.child.lock().is_none(),
+            "an adopted endpoint is never owned as a child"
+        );
+        assert!(
+            probe_relay_healthz(relay.port),
+            "the external endpoint must be left running"
+        );
+
+        supervisor.shutdown();
+    }
+
+    #[test]
+    fn classify_local_port_distinguishes_a_relay_a_foreign_owner_and_a_free_port() {
+        let relay = ForeignListener::start(RELAY_HEALTHZ);
+        for _ in 0..5 {
+            assert_eq!(
+                classify_local_port(relay.port),
+                LocalPortState::RelayEndpoint,
+                "a healthy endpoint classifies the same way every cycle"
+            );
+        }
+
+        relay.reply(Reply::Whole(NOT_A_RELAY));
+        assert_eq!(classify_local_port(relay.port), LocalPortState::Foreign);
+
+        let free = TcpListener::bind("127.0.0.1:0").unwrap();
+        let free_port = free.local_addr().unwrap().port();
+        drop(free);
+        assert_eq!(classify_local_port(free_port), LocalPortState::Free);
+    }
+
+    #[test]
+    fn a_segmented_stale_health_response_is_still_a_relay_endpoint() {
+        let relay = ForeignListener::start(RELAY_HEALTHZ);
+        relay.reply(Reply::Segmented(RELAY_HEALTHZ_HEAD, STALE_RELAY_BODY));
+
+        assert_eq!(
+            classify_local_port(relay.port),
+            LocalPortState::RelayEndpoint,
+            "headers and body in separate reads, and a stale feed, are both still an adoptable relay"
+        );
+    }
+
+    #[test]
+    fn shutdown_during_a_stalled_health_read_stays_within_the_probe_bound() {
+        let relay = ForeignListener::start(RELAY_HEALTHZ);
+        let supervisor =
+            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::ExternalPortInUse
+        );
+
+        // Wait for a probe the listener has read but will never answer, so
+        // shutdown lands squarely inside an outstanding health read.
+        relay.reply(Reply::Stall);
+        let before = relay.requests();
+        while relay.requests() == before {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let started = Instant::now();
+        supervisor.shutdown();
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed <= Duration::from_secs(3),
+            "shutdown must stay within the health-response bound, took {elapsed:?}"
+        );
+        assert_eq!(supervisor.status().diagnostic, TunnelDiagnostic::Down);
+        assert!(
+            supervisor.child.lock().is_none(),
+            "no owned SSH child may remain"
+        );
+        assert!(
+            TcpStream::connect(("127.0.0.1", relay.port)).is_ok(),
+            "the external listener must be left running"
+        );
+    }
+
+    #[test]
+    fn a_slow_adopted_endpoint_never_reports_a_transient_conflict() {
+        // Answers well past the connect-probe window, like a relay reached
+        // through an SSH forward: slow is not the same as foreign.
+        let relay = ForeignListener::slow(RELAY_HEALTHZ, Duration::from_millis(800));
+        assert_eq!(
+            classify_local_port(relay.port),
+            LocalPortState::RelayEndpoint
+        );
+
+        let supervisor =
+            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+
+        let deadline = Instant::now() + PORT_WATCH_INTERVAL * 2;
+        while Instant::now() < deadline {
+            assert_eq!(
+                supervisor.status().diagnostic,
+                TunnelDiagnostic::ExternalPortInUse,
+                "a healthy adopted endpoint must stay adopted, never flap to a conflict"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(supervisor.child.lock().is_none());
+
+        supervisor.shutdown();
+    }
+
+    #[test]
+    fn managed_mode_takes_over_after_the_adopted_endpoint_disappears() {
+        let mut relay = ForeignListener::start(RELAY_HEALTHZ);
+        let supervisor =
+            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::ExternalPortInUse
+        );
+
+        relay.stop(); // the pre-existing forward goes away, e.g. a VPS reboot
+
+        // The same supervisor, never reconstructed, must leave the adopted
+        // state and start its own child. The target is deliberately
+        // unresolvable, so the attempt fails fast instead of needing real
+        // infrastructure - reaching `SshUnavailable` proves it spawned.
+        let took_over = wait_for_diagnostic(
+            &supervisor,
+            TunnelDiagnostic::SshUnavailable,
+            Duration::from_secs(10),
+        );
+        supervisor.shutdown();
+
+        assert!(
+            took_over,
+            "managed mode must take the forward over without an application restart"
+        );
+    }
+
+    #[test]
+    fn managed_mode_never_takes_over_a_port_another_process_still_holds() {
+        let relay = ForeignListener::start(RELAY_HEALTHZ);
+        let supervisor =
+            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::ExternalPortInUse
+        );
+
+        relay.reply(Reply::Whole(NOT_A_RELAY)); // still bound; no longer a usable relay
+
+        assert!(wait_for_diagnostic(
+            &supervisor,
+            TunnelDiagnostic::LocalPortUnavailable,
+            Duration::from_secs(5)
+        ));
+        thread::sleep(PORT_WATCH_INTERVAL + POLL_INTERVAL);
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::LocalPortUnavailable,
+            "an occupied port never becomes ours"
+        );
+        assert!(
+            supervisor.child.lock().is_none(),
+            "nothing may be spawned over a port another process owns"
+        );
+        assert!(
+            TcpStream::connect(("127.0.0.1", relay.port)).is_ok(),
+            "the owning listener must be left alone"
+        );
+
+        supervisor.shutdown();
+    }
+
+    #[test]
+    fn shutdown_while_monitoring_an_adopted_endpoint_is_prompt_and_leaves_it_running() {
+        let relay = ForeignListener::start(RELAY_HEALTHZ);
+        let supervisor =
+            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        assert_eq!(
+            supervisor.status().diagnostic,
+            TunnelDiagnostic::ExternalPortInUse
+        );
+
+        let started = Instant::now();
+        supervisor.shutdown();
+        supervisor.shutdown(); // must not panic or hang on a second call
+
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "shutdown must not wait out a watch interval"
+        );
+        assert_eq!(supervisor.status().diagnostic, TunnelDiagnostic::Down);
+        assert!(supervisor.child.lock().is_none());
+        assert!(
+            probe_relay_healthz(relay.port),
+            "shutdown must not touch the external endpoint"
+        );
     }
 
     #[test]
