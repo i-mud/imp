@@ -125,11 +125,12 @@ Tab/Enter/Escape paths and focus restoration; create/edit/delete persistence;
 native restart persistence; and exact leading/trailing command spaces across a
 restart.
 
-The Windows-native run above predates the desktop polish pass. The
-runtime-measured action strip, the revised Settings height, the panel-dismissing
-Close control, and the icon-button focus state were verified by browser
-measurement against the mock source only; they have not been re-checked on a
-native Windows build.
+The post-PR #6 Windows-native smoke re-smoked the runtime-measured action
+strip, revised Settings sizing, panel-dismissal behavior, icon-button focus
+state, and compact/expanded panel behavior. It also covered theme switching,
+native sizing, dragging, and non-maximizable behavior. It did not re-run live
+action delivery; the earlier live action evidence remains valid and separate
+below.
 
 Live action acceptance sent `look` from the native UI through the real
 `RelayActionSink`, relay, TinyFugue helper, and MUD path. It executed exactly

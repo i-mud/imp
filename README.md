@@ -3,16 +3,17 @@
 A small always-on-top companion HUD for MUDs.
 
 TinyScry reads character vitals out of a running [TinyFugue](https://github.com/ingwarsw/tinyfugue)
-session on a remote VPS and renders them in a compact, frameless, dark window
-that sits over your MUD client: HP, mana, movement, and the current target's
-health.
+session on a remote VPS and renders them in a compact, frameless, themeable
+window that supports Dark, Light, and System themes. It sits over your MUD
+client: HP, mana, movement, and the current target's health.
 
 The MUD never talks to the HUD directly. TinyFugue-side Python normalizes state
 into a protocol TinyScry owns, and the HUD reads it over an SSH tunnel.
 
 - Architecture and change impact: [`docs/architecture/CONTEXT.md`](docs/architecture/CONTEXT.md)
 - Wire protocol: [`packages/protocol/SPEC.md`](packages/protocol/SPEC.md)
-- Implementation status and next milestone: [`docs/status.md`](docs/status.md)
+- Current implementation and verification: [`docs/status.md`](docs/status.md)
+- Planned and future work: [`docs/roadmap.md`](docs/roadmap.md)
 - Platform/build strategy: [`docs/development.md`](docs/development.md)
 
 ## Data flow
@@ -239,9 +240,10 @@ npm run check          # everything below, in order
 
 `npm run lint:fix` applies ESLint and Prettier fixes.
 
-## Status
+## Status and roadmap
 
-Implemented, verified, and the next milestone: [`docs/status.md`](docs/status.md).
+Current implementation and verification: [`docs/status.md`](docs/status.md).
+Planned and future work: [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Security
 

@@ -41,8 +41,10 @@ in WSL2 gets most of the iteration speed without any of that.
   `npm run tauri:dev` needs the native toolchain and therefore does not run in
   this WSL2 environment as provisioned.
 - To build natively on Windows: install Rust (MSVC host) and Microsoft C++
-  Build Tools, then run the Tauri commands from Windows. Prefer a checkout or
-  worktree on the Windows filesystem; building across `\\wsl$` is slow.
+  Build Tools, then run the Tauri commands from the disposable Windows-native
+  mirror at `C:\src\tinyscry-native`. Refresh it from the canonical WSL2 tree
+  with `npm run native:sync` or `npm run native:watch`; building across
+  `\\wsl$` is slow.
 - To build on Linux: `webkit2gtk-4.1`, `libgtk-3`, `librsvg2` and
   `libayatana-appindicator3` development packages are required, which needs
   root on this machine.

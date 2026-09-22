@@ -15,35 +15,26 @@ here is behaviour the relay path will produce.
 behaviour: always-on-top, transparency, dragging, capabilities, or Rust code.
 Requires the platform toolchain.
 
-## Canonical checkout and WSL2
+## Canonical checkout and Windows-native mirror
 
 The canonical checkout is `~/src/tinyscry` inside WSL2. Everything except the
 native Tauri build runs there.
 
 For native Windows builds, **do not build through `\\wsl$`**. Cargo on the 9P
-filesystem is dramatically slower and file watching is unreliable. Once the
-repository has committed history, prefer a separate clone or worktree on the
-Windows filesystem.
+filesystem is dramatically slower and file watching is unreliable. The native
+Windows tree at `C:\src\tinyscry-native` is a disposable execution mirror, not
+a Git checkout or source of truth. Make all source edits in WSL2; never edit
+the mirror.
 
-For the initial native verification, the canonical tree contained uncommitted
-bootstrap work, so a disposable, secret-excluding mirror was used instead:
+Use `npm run native:sync` in WSL2 for a one-shot mirror refresh. It copies the
+canonical tree to the Windows tree while excluding Git metadata, dependency and
+build directories, local environment files, and private-key material.
 
-```powershell
-$source = "\\wsl.localhost\<distro>\home\<user>\src\tinyscry"
-$destination = "C:\src\tinyscry-native"
-New-Item -ItemType Directory -Force $destination | Out-Null
-robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 `
-  /XD .git node_modules dist target .venv venv __pycache__ .pytest_cache `
-      .mypy_cache .ruff_cache .vite .idea `
-  /XF .env .env.* *.pem *.key id_rsa* id_ed25519* known_hosts .DS_Store Thumbs.db
-if ($LASTEXITCODE -gt 7) { exit $LASTEXITCODE }
-Set-Location $destination
-npm ci
-npm run tauri:dev
-```
-
-The WSL tree remains authoritative. Make source edits there and rerun the copy;
-do not edit the disposable mirror.
+For active native development, run `npm run native:watch` in WSL2. It performs
+an initial synchronization, then refreshes the mirror after source changes.
+Run `npm ci` and `npm run tauri:dev` from the Windows mirror, where Cargo,
+WebView2, and file watching stay on the native filesystem. The mirror needs no
+Git or GitHub authentication.
 
 ### Windows prerequisites
 
