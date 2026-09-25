@@ -1,3 +1,5 @@
+mod topmost;
+mod tray;
 mod tunnel;
 mod tunnel_config;
 
@@ -16,12 +18,37 @@ fn tunnel_status(supervisor: tauri::State<'_, Arc<TunnelSupervisor>>) -> TunnelS
     supervisor.status()
 }
 
+#[tauri::command]
+fn alerts_muted(state: tauri::State<'_, tray::AlertMuteState>) -> bool {
+    state.is_muted()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![tunnel_status])
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::POSITION)
+                .build(),
+        )
+        .invoke_handler(tauri::generate_handler![tunnel_status, alerts_muted])
         .setup(|app| {
+            app.manage(tray::AlertMuteState::default());
+            tray::install(app)?;
+
+            if let Some(hud) = app.get_webview_window("hud") {
+                topmost::install(&hud)?;
+
+                let app_handle = app.handle().clone();
+                hud.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        app_handle.exit(0);
+                    }
+                });
+            }
+
             let config_path = app.path().app_config_dir()?.join("tunnel.json");
             let config = tunnel_config::load_or_init(&config_path);
             let supervisor = match config.mode {
