@@ -63,8 +63,9 @@
     /else \
         /eval \
             /let _connection=%%{tinyscry_connection_%{_world}}%%; \
-            /if (!strlen(_connection)) \
-                /tinyscry_reset_world %{1}%%; \
+            /if (!strlen(_connection) | !is_connected(textdecode(_world))) \
+                /test fwrite("~/.local/state/tinyscry/spool", \
+                    strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " 0 - ", time()))%%; \
             /else \
                 /test fwrite("~/.local/state/tinyscry/spool", \
                     strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " ", \
@@ -74,7 +75,6 @@
     /endif
 
 /def -Fp2 -ag -h"CONNECT" tinyscry_capture_connect = /tinyscry_reset_world %{1}
-/def -Fp2 -ag -h"GMCP_LOGIN" tinyscry_capture_gmcp_login = /tinyscry_reset_world %{1}
 /def -Fp2 -ag -h"WORLD" tinyscry_capture_world = /tinyscry_select_world %{1}
 
 /def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp = \

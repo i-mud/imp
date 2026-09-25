@@ -464,8 +464,10 @@ The base hook contract was established against TinyFugue
 5.2.2-3-g4f0ff34 additionally provides the `GMCP_LOGIN` hook the operator's
 login scripts need (see
 [identity bootstrap prerequisite](#identity-bootstrap-prerequisite)).
-`GMCP`, `CONNECT`, `GMCP_LOGIN`, and `WORLD` supply the package/world events
-used by the versioned hook. `fwrite(filename, data)` appends data and a newline
+`GMCP`, `CONNECT`, and `WORLD` supply the package/world events used by the
+versioned hook. `GMCP_LOGIN` remains required by the operator's login scripts
+for GMCP negotiation and identity bootstrap, but TinyScry does not treat it as
+a new connection-generation boundary. `fwrite(filename, data)` appends data and a newline
 to a fixed filename; `time()` supplies epoch seconds with six fractional
 digits.
 

@@ -498,7 +498,7 @@ def test_tf_eval_locals_never_escape_single_command_eval() -> None:
     assert source.count("tinyscry_connection_serial :=") == 1
 
 
-def test_select_world_initializes_missing_generation_without_duplicate_consumer() -> None:
+def test_select_world_deselects_until_known_generation_is_connected() -> None:
     source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
     macro = source.split("/def -i tinyscry_select_world = \\\n", 1)[1].split("\n\n/def", 1)[0]
     lookup = "/let _connection=%%{tinyscry_connection_%{_world}}%%;"
@@ -510,21 +510,34 @@ def test_select_world_initializes_missing_generation_without_duplicate_consumer(
 
     scope = macro.index("/eval \\", changed_end)
     first_lookup = macro.index(lookup, scope)
-    missing = macro.index("/if (!strlen(_connection))", first_lookup)
-    reset = macro.index("/tinyscry_reset_world %{1}%%;", missing)
-    alternative = macro.index("/else", reset)
+    unavailable = macro.index(
+        "/if (!strlen(_connection) | !is_connected(textdecode(_world)))",
+        first_lookup,
+    )
+    deselect = macro.index(
+        'strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " 0 - ", time()))%%;',
+        unavailable,
+    )
+    alternative = macro.index("/else", deselect)
     event = macro.index('strcat("TS2 S "', alternative)
     consumer = macro.index("/tinyscry_start_consumer %%{_connection} %{_world}%%;", event)
     missing_end = macro.index("/endif", consumer)
 
     assert changed < increment < selected < changed_end < scope
-    assert scope < first_lookup < missing < reset < alternative
+    assert scope < first_lookup < unavailable < deselect < alternative
     assert alternative < event < consumer < missing_end
     assert macro.count(lookup) == 1
-    assert macro.count("/tinyscry_reset_world") == 1
+    assert "/tinyscry_reset_world" not in macro
     assert macro.count("/tinyscry_start_consumer") == 1
     assert "/let _world=$[textencode({1})]" in macro
     assert '_connection, " ", _world' in macro[event:consumer]
+
+
+def test_connect_owns_connection_generation_not_gmcp_login() -> None:
+    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
+
+    assert '/def -Fp2 -ag -h"CONNECT" tinyscry_capture_connect = /tinyscry_reset_world %{1}' in source
+    assert '/def -Fp2 -ag -h"GMCP_LOGIN" tinyscry_capture_gmcp_login' not in source
 
 
 def test_gmcp_preserves_known_generation_and_initializes_only_missing() -> None:
