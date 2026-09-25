@@ -498,7 +498,7 @@ def test_tf_eval_locals_never_escape_single_command_eval() -> None:
     assert source.count("tinyscry_connection_serial :=") == 1
 
 
-def test_select_world_preserves_known_generation_and_initializes_only_missing() -> None:
+def test_select_world_initializes_missing_generation_without_duplicate_consumer() -> None:
     source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
     macro = source.split("/def -i tinyscry_select_world = \\\n", 1)[1].split("\n\n/def", 1)[0]
     lookup = "/let _connection=%%{tinyscry_connection_%{_world}}%%;"
@@ -507,20 +507,22 @@ def test_select_world_preserves_known_generation_and_initializes_only_missing() 
     increment = macro.index("tinyscry_foreground := tinyscry_foreground + 1", changed)
     selected = macro.index("/set tinyscry_selected_world=%{_world}", increment)
     changed_end = macro.index("/endif%;", selected)
+
     scope = macro.index("/eval \\", changed_end)
     first_lookup = macro.index(lookup, scope)
     missing = macro.index("/if (!strlen(_connection))", first_lookup)
     reset = macro.index("/tinyscry_reset_world %{1}%%;", missing)
-    second_lookup = macro.index(lookup, first_lookup + len(lookup))
-    missing_end = macro.index("/endif%%;", second_lookup)
-    event = macro.index('strcat("TS2 S "', missing_end)
-    consumer = macro.index("/tinyscry_start_consumer %%{_connection} %{_world}%;", event)
+    alternative = macro.index("/else", reset)
+    event = macro.index('strcat("TS2 S "', alternative)
+    consumer = macro.index("/tinyscry_start_consumer %%{_connection} %{_world}%%;", event)
+    missing_end = macro.index("/endif", consumer)
 
     assert changed < increment < selected < changed_end < scope
-    assert scope < first_lookup < missing < reset < second_lookup < missing_end
-    assert missing_end < event < consumer
-    assert macro.count(lookup) == 2
+    assert scope < first_lookup < missing < reset < alternative
+    assert alternative < event < consumer < missing_end
+    assert macro.count(lookup) == 1
     assert macro.count("/tinyscry_reset_world") == 1
+    assert macro.count("/tinyscry_start_consumer") == 1
     assert "/let _world=$[textencode({1})]" in macro
     assert '_connection, " ", _world' in macro[event:consumer]
 

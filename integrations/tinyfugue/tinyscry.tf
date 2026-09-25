@@ -65,12 +65,12 @@
             /let _connection=%%{tinyscry_connection_%{_world}}%%; \
             /if (!strlen(_connection)) \
                 /tinyscry_reset_world %{1}%%; \
-                /let _connection=%%{tinyscry_connection_%{_world}}%%; \
-            /endif%%; \
-            /test fwrite("~/.local/state/tinyscry/spool", \
-                strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " ", \
-                    _connection, " ", _world, " ", time()))%%; \
-            /tinyscry_start_consumer %%{_connection} %{_world}%; \
+            /else \
+                /test fwrite("~/.local/state/tinyscry/spool", \
+                    strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " ", \
+                        _connection, " ", _world, " ", time()))%%; \
+                /tinyscry_start_consumer %%{_connection} %{_world}%%; \
+            /endif%; \
     /endif
 
 /def -Fp2 -ag -h"CONNECT" tinyscry_capture_connect = /tinyscry_reset_world %{1}
