@@ -106,8 +106,10 @@ snapshot; later `Char.Status` messages are deltas that may omit
 `character_name`. Loading is additive: TinyScry does not own or replace the
 operator's GMCP negotiation or connection macros. Repeated loads replace the
 named TinyScry definitions rather than duplicating them.
-The `GMCP`, `CONNECT`, `GMCP_LOGIN`, and `WORLD` hooks are defined at priority 2
+The TinyScry `GMCP`, `CONNECT`, and `WORLD` hooks are defined at priority 2
 with fall-through (`-Fp2`) so they observe without consuming operator events.
+`GMCP_LOGIN` remains an operator login-script prerequisite but is not a
+TinyScry capture hook.
 TinyScry runs ahead of default priority-1 handlers such as `received-gmcp`; the
 `-F` flag lets those handlers run afterward. Two same-priority
 non-fall-through GMCP hooks previously lost whole events intermittently. Do
