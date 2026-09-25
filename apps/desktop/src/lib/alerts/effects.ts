@@ -6,6 +6,7 @@ export interface LowHpAlertEvent {
 }
 
 export interface DesktopAlertEffects {
+  alertsMuted?(): Promise<boolean> | boolean;
   playLowHpSound(event: LowHpAlertEvent): Promise<void> | void;
   showLowHpNotification(event: LowHpAlertEvent): Promise<void> | void;
 }
@@ -16,6 +17,7 @@ export async function dispatchLowHpAlert(
   effects: DesktopAlertEffects,
 ): Promise<void> {
   if (!settings.lowHpEnabled) return;
+  if (await effects.alertsMuted?.()) return;
 
   const pending: Promise<unknown>[] = [];
 

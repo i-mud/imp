@@ -16,6 +16,22 @@ describe('dispatchLowHpAlert', () => {
     expect(showLowHpNotification).toHaveBeenCalledOnce();
   });
 
+  it('suppresses all effects while alerts are temporarily muted', async () => {
+    const alertsMuted = vi.fn(() => true);
+    const playLowHpSound = vi.fn();
+    const showLowHpNotification = vi.fn();
+
+    await dispatchLowHpAlert(event, DEFAULT_ALERT_SETTINGS, {
+      alertsMuted,
+      playLowHpSound,
+      showLowHpNotification,
+    });
+
+    expect(alertsMuted).toHaveBeenCalledOnce();
+    expect(playLowHpSound).not.toHaveBeenCalled();
+    expect(showLowHpNotification).not.toHaveBeenCalled();
+  });
+
   it('suppresses both effects when the low-HP alert is disabled', async () => {
     const playLowHpSound = vi.fn();
     const showLowHpNotification = vi.fn();

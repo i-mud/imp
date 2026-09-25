@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
 import lowHpSoundUrl from '../../assets/low-hp.wav?url';
@@ -8,6 +9,16 @@ let permissionRequested = false;
 
 function isTauriRuntime(): boolean {
   return '__TAURI_INTERNALS__' in globalThis;
+}
+
+async function alertsMuted(): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+
+  try {
+    return await invoke<boolean>('alerts_muted');
+  } catch {
+    return false;
+  }
 }
 
 async function playLowHpSound(): Promise<void> {
@@ -49,6 +60,7 @@ async function showLowHpNotification(event: LowHpAlertEvent): Promise<void> {
 }
 
 export const DESKTOP_ALERT_EFFECTS: DesktopAlertEffects = {
+  alertsMuted,
   playLowHpSound,
   showLowHpNotification,
 };
