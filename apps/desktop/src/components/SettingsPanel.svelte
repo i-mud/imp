@@ -3,25 +3,31 @@
   import Moon from '@lucide/svelte/icons/moon';
   import Sun from '@lucide/svelte/icons/sun';
 
-  import { boundedThresholdPercent, type AlertSettings } from '../lib/alerts/settings.ts';
+  import {
+    boundedThresholdPercent,
+    type AlertDefinition,
+    type VitalAlertDefinition,
+  } from '../lib/alerts/definitions.ts';
   import type { DisplayMode } from '../lib/hud/presentation.ts';
   import type { ThemePreference } from '../lib/hud/theme.ts';
 
   let {
     mode,
     theme,
-    alertSettings,
+    alertDefinitions,
+    alertSaveError,
     onmodechange,
     onthemechange,
-    onalertsettingschange,
+    onalertdefinitionschange,
     onmanageactions,
   }: {
     mode: DisplayMode;
     theme: ThemePreference;
-    alertSettings: AlertSettings;
+    alertDefinitions: readonly AlertDefinition[];
+    alertSaveError: string | null;
     onmodechange: (mode: DisplayMode) => void;
     onthemechange: (theme: ThemePreference) => void;
-    onalertsettingschange: (settings: AlertSettings) => void;
+    onalertdefinitionschange: (definitions: AlertDefinition[]) => boolean;
     onmanageactions: (invoker: HTMLButtonElement) => void;
   } = $props();
 
@@ -31,8 +37,25 @@
     { value: 'system', label: 'System', icon: Monitor },
   ] as const;
 
-  function updateAlertSettings(patch: Partial<AlertSettings>): void {
-    onalertsettingschange({ ...alertSettings, ...patch });
+  const lowHealthAlert = $derived(
+    alertDefinitions.find(
+      (definition): definition is VitalAlertDefinition =>
+        definition.id === 'low-health' && definition.kind === 'vital' && definition.vital === 'health',
+    ) ?? null,
+  );
+
+  function updateLowHealthAlert(
+    patch: Partial<
+      Pick<VitalAlertDefinition, 'enabled' | 'thresholdPercent' | 'soundEnabled' | 'notificationEnabled'>
+    >,
+  ): void {
+    if (lowHealthAlert === null) return;
+
+    onalertdefinitionschange(
+      alertDefinitions.map((definition) =>
+        definition.id === lowHealthAlert.id ? { ...lowHealthAlert, ...patch } : definition,
+      ),
+    );
   }
 </script>
 
@@ -81,57 +104,66 @@
 
   <section class="settings-section alerts" aria-labelledby="alert-settings-title">
     <div id="alert-settings-title" class="menu-title">Alerts</div>
-    <label class="toggle primary-toggle">
-      <input
-        type="checkbox"
-        checked={alertSettings.lowHpEnabled}
-        onchange={(event) => updateAlertSettings({ lowHpEnabled: event.currentTarget.checked })}
-      />
-      <span>Low HP alert</span>
-    </label>
 
-    <div class:disabled={!alertSettings.lowHpEnabled} class="alert-details">
-      <label class="threshold-row">
-        <span>Threshold</span>
-        <span class="threshold-input">
-          <input
-            type="number"
-            min="1"
-            max="100"
-            step="1"
-            value={alertSettings.lowHpThresholdPercent}
-            disabled={!alertSettings.lowHpEnabled}
-            onchange={(event) =>
-              updateAlertSettings({
-                lowHpThresholdPercent: boundedThresholdPercent(event.currentTarget.valueAsNumber),
-              })}
-          />
-          <span aria-hidden="true">%</span>
-        </span>
+    {#if lowHealthAlert !== null}
+      <label class="toggle primary-toggle">
+        <input
+          type="checkbox"
+          checked={lowHealthAlert.enabled}
+          onchange={(event) => updateLowHealthAlert({ enabled: event.currentTarget.checked })}
+        />
+        <span>Low HP alert</span>
       </label>
 
-      <div class="toggle-row">
-        <label class="toggle">
-          <input
-            type="checkbox"
-            checked={alertSettings.soundEnabled}
-            disabled={!alertSettings.lowHpEnabled}
-            onchange={(event) => updateAlertSettings({ soundEnabled: event.currentTarget.checked })}
-          />
-          <span>Sound</span>
+      <div class:disabled={!lowHealthAlert.enabled} class="alert-details">
+        <label class="threshold-row">
+          <span>Threshold</span>
+          <span class="threshold-input">
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={lowHealthAlert.thresholdPercent}
+              disabled={!lowHealthAlert.enabled}
+              onchange={(event) =>
+                updateLowHealthAlert({
+                  thresholdPercent: boundedThresholdPercent(event.currentTarget.valueAsNumber),
+                })}
+            />
+            <span aria-hidden="true">%</span>
+          </span>
         </label>
 
-        <label class="toggle">
-          <input
-            type="checkbox"
-            checked={alertSettings.notificationEnabled}
-            disabled={!alertSettings.lowHpEnabled}
-            onchange={(event) => updateAlertSettings({ notificationEnabled: event.currentTarget.checked })}
-          />
-          <span>Notification</span>
-        </label>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={lowHealthAlert.soundEnabled}
+              disabled={!lowHealthAlert.enabled}
+              onchange={(event) => updateLowHealthAlert({ soundEnabled: event.currentTarget.checked })}
+            />
+            <span>Sound</span>
+          </label>
+
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={lowHealthAlert.notificationEnabled}
+              disabled={!lowHealthAlert.enabled}
+              onchange={(event) => updateLowHealthAlert({ notificationEnabled: event.currentTarget.checked })}
+            />
+            <span>Notification</span>
+          </label>
+        </div>
       </div>
-    </div>
+    {:else}
+      <p class="alert-empty">No low-health trigger configured.</p>
+    {/if}
+
+    {#if alertSaveError !== null}
+      <p class="alert-save-error" role="alert">{alertSaveError}</p>
+    {/if}
   </section>
 
   <section class="settings-section" aria-labelledby="action-settings-title">
@@ -252,6 +284,21 @@
 
   .alerts {
     gap: var(--space-2);
+  }
+
+  .alert-empty,
+  .alert-save-error {
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--font-xs);
+  }
+
+  .alert-empty {
+    color: var(--muted);
+  }
+
+  .alert-save-error {
+    color: var(--bad);
   }
 
   .toggle,

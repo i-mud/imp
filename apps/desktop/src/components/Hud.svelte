@@ -15,14 +15,15 @@
   } from '../lib/action/definitions.ts';
   import { invokeAction, type ActionInvocationState } from '../lib/action/invocation.ts';
   import type { ActionSink } from '../lib/action/types.ts';
-  import { dispatchLowHpAlert } from '../lib/alerts/effects.ts';
   import {
-    INITIAL_LOW_HP_ALERT_STATE,
-    evaluateLowHpAlert,
-    type LowHpAlertState,
-  } from '../lib/alerts/evaluator.ts';
+    commitAlertDefinitions,
+    loadAlertDefinitions,
+    type AlertDefinition,
+  } from '../lib/alerts/definitions.ts';
+  import { dispatchAlert, vitalAlertEvent } from '../lib/alerts/effects.ts';
   import { DESKTOP_ALERT_EFFECTS } from '../lib/alerts/native.ts';
-  import { loadAlertSettings, saveAlertSettings, type AlertSettings } from '../lib/alerts/settings.ts';
+  import { evaluateVitalAlerts } from '../lib/alerts/runtime.ts';
+  import type { VitalAlertState } from '../lib/alerts/vitals.ts';
   import { freshnessOf, type HudModel } from '../lib/hud/model.ts';
   import {
     loadDisplayMode,
@@ -49,7 +50,7 @@
   let { model, actionSink }: { model: HudModel; actionSink: ActionSink } = $props();
   let displayMode = $state(loadDisplayMode());
   let theme = $state(loadTheme());
-  let alertSettings = $state(loadAlertSettings());
+  let alertDefinitions = $state<AlertDefinition[]>(loadAlertDefinitions());
   let actions = $state<ActionDefinition[]>(loadActionDefinitions());
 
   let panel = $state<HTMLElement>();
@@ -63,13 +64,14 @@
   let actionDialogOpen = $state(false);
   let actionDialogWidth = $state(EXPANDED_SETTINGS_WINDOW_SIZE.width);
   let actionSaveError = $state<string | null>(null);
+  let alertSaveError = $state<string | null>(null);
   let actionDialogInvoker: HTMLButtonElement | null = null;
   const actionInvocation = $state<ActionInvocationState>({
     pendingActionId: null,
     feedback: null,
   });
-  const lowHpAlertMemory: { current: LowHpAlertState } = {
-    current: INITIAL_LOW_HP_ALERT_STATE,
+  const vitalAlertMemory: { current: Map<string, VitalAlertState> } = {
+    current: new Map(),
   };
 
   const freshness = $derived(freshnessOf(model));
@@ -89,9 +91,18 @@
     saveDisplayMode(mode);
   }
 
-  function setAlertSettings(settings: AlertSettings): void {
-    alertSettings = settings;
-    saveAlertSettings(settings);
+  function setAlertDefinitions(nextDefinitions: AlertDefinition[]): boolean {
+    if (
+      !commitAlertDefinitions(nextDefinitions, (committed) => {
+        alertDefinitions = committed;
+      })
+    ) {
+      alertSaveError = 'Could not save alerts locally.';
+      return false;
+    }
+
+    alertSaveError = null;
+    return true;
   }
 
   function setTheme(preference: ThemePreference): void {
@@ -206,21 +217,15 @@
   });
 
   $effect(() => {
-    const hp = character?.hp ?? null;
-    const evaluation = evaluateLowHpAlert(lowHpAlertMemory.current, {
-      enabled: alertSettings.lowHpEnabled,
-      thresholdPercent: alertSettings.lowHpThresholdPercent,
-      fresh: isFresh,
-      subjectKey: character?.name ?? null,
-      currentHp: hp?.current ?? null,
-      maxHp: hp?.max ?? null,
-    });
-    lowHpAlertMemory.current = evaluation.state;
+    const evaluation = evaluateVitalAlerts(vitalAlertMemory.current, alertDefinitions, character, isFresh);
+    vitalAlertMemory.current = evaluation.states;
 
-    if (evaluation.triggered && evaluation.hpPercent !== null && character !== null) {
-      void dispatchLowHpAlert(
-        { characterName: character.name, hpPercent: evaluation.hpPercent },
-        alertSettings,
+    if (character === null) return;
+
+    for (const trigger of evaluation.triggered) {
+      void dispatchAlert(
+        vitalAlertEvent(trigger.definition, character.name, trigger.percent),
+        trigger.definition,
         DESKTOP_ALERT_EFFECTS,
       );
     }
@@ -369,10 +374,11 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
-              {alertSettings}
+              {alertDefinitions}
+              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
-              onalertsettingschange={setAlertSettings}
+              onalertdefinitionschange={setAlertDefinitions}
               onmanageactions={openActionDialog}
             />
           </div>
@@ -430,10 +436,11 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
-              {alertSettings}
+              {alertDefinitions}
+              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
-              onalertsettingschange={setAlertSettings}
+              onalertdefinitionschange={setAlertDefinitions}
               onmanageactions={openActionDialog}
             />
           </div>
