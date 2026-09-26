@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { dispatchAlert, vitalAlertEvent } from '../src/lib/alerts/effects.ts';
+import { dispatchAlert, textAlertEvent, vitalAlertEvent } from '../src/lib/alerts/effects.ts';
 import type { VitalAlertDefinition } from '../src/lib/alerts/definitions.ts';
 
 const definition: VitalAlertDefinition = {
@@ -14,7 +14,10 @@ const definition: VitalAlertDefinition = {
   notificationEnabled: true,
 };
 
-const event = { body: 'Low mana — Ivrin is at 24%' };
+const event = {
+  alertId: 'low-mana',
+  body: 'Low mana — Ivrin is at 24%',
+};
 
 describe('dispatchAlert', () => {
   it('runs sound and notification once when both are enabled', async () => {
@@ -88,7 +91,28 @@ describe('dispatchAlert', () => {
 describe('vitalAlertEvent', () => {
   it('formats a generalized vital notification from the configured label', () => {
     expect(vitalAlertEvent(definition, 'Ivrin', 24.4)).toEqual({
+      alertId: 'low-mana',
       body: 'Low mana — Ivrin is at 24%',
+    });
+  });
+});
+
+describe('textAlertEvent', () => {
+  it('contains only the stable alert id and configured label', () => {
+    expect(
+      textAlertEvent({
+        id: 'tell',
+        kind: 'text',
+        label: 'Incoming tell',
+        enabled: true,
+        pattern: 'tells you',
+        caseSensitive: false,
+        soundEnabled: true,
+        notificationEnabled: true,
+      }),
+    ).toEqual({
+      alertId: 'tell',
+      body: 'Incoming tell',
     });
   });
 });

@@ -1,6 +1,11 @@
 import type { Character, Target, Vital } from '@tinyscry/protocol';
 
-import type { AlertDefinition, AlertVital, VitalAlertDefinition } from './definitions.ts';
+import type {
+  AlertDefinition,
+  AlertVital,
+  TextAlertDefinition,
+  VitalAlertDefinition,
+} from './definitions.ts';
 import { INITIAL_VITAL_ALERT_STATE, evaluateVitalAlert, type VitalAlertState } from './vitals.ts';
 
 export interface TriggeredVitalAlert {
@@ -12,6 +17,30 @@ export interface TriggeredVitalAlert {
 export interface VitalAlertsEvaluation {
   readonly states: Map<string, VitalAlertState>;
   readonly triggered: readonly TriggeredVitalAlert[];
+}
+
+export interface TriggeredTextAlert {
+  readonly definition: TextAlertDefinition;
+}
+
+export function evaluateTextAlerts(
+  definitions: readonly AlertDefinition[],
+  text: string,
+): readonly TriggeredTextAlert[] {
+  const triggered: TriggeredTextAlert[] = [];
+  let lowerText: string | null = null;
+
+  for (const definition of definitions) {
+    if (definition.kind !== 'text' || !definition.enabled) continue;
+
+    const matches = definition.caseSensitive
+      ? text.includes(definition.pattern)
+      : (lowerText ??= text.toLowerCase()).includes(definition.pattern.toLowerCase());
+
+    if (matches) triggered.push({ definition });
+  }
+
+  return triggered;
 }
 
 interface AlertSample {

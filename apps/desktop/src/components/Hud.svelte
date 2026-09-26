@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+
   import ActionBar from './ActionBar.svelte';
   import ActionDialog from './ActionDialog.svelte';
   import AlertDialog from './AlertDialog.svelte';
@@ -21,11 +23,12 @@
     loadAlertDefinitions,
     type AlertDefinition,
   } from '../lib/alerts/definitions.ts';
-  import { dispatchAlert, vitalAlertEvent } from '../lib/alerts/effects.ts';
+  import { dispatchAlert, textAlertEvent, vitalAlertEvent } from '../lib/alerts/effects.ts';
   import { DESKTOP_ALERT_EFFECTS } from '../lib/alerts/native.ts';
-  import { evaluateVitalAlerts } from '../lib/alerts/runtime.ts';
+  import { evaluateTextAlerts, evaluateVitalAlerts } from '../lib/alerts/runtime.ts';
   import type { VitalAlertState } from '../lib/alerts/vitals.ts';
   import { freshnessOf, type HudModel } from '../lib/hud/model.ts';
+  import type { TextSourceListener } from '../lib/hud/store.svelte.ts';
   import {
     loadDisplayMode,
     saveDisplayMode,
@@ -48,7 +51,15 @@
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import X from '@lucide/svelte/icons/x';
 
-  let { model, actionSink }: { model: HudModel; actionSink: ActionSink } = $props();
+  let {
+    model,
+    actionSink,
+    subscribeText,
+  }: {
+    model: HudModel;
+    actionSink: ActionSink;
+    subscribeText: (listener: TextSourceListener) => () => void;
+  } = $props();
   let displayMode = $state(loadDisplayMode());
   let theme = $state(loadTheme());
   let alertDefinitions = $state<AlertDefinition[]>(loadAlertDefinitions());
@@ -76,6 +87,14 @@
   const vitalAlertMemory: { current: Map<string, VitalAlertState> } = {
     current: new Map(),
   };
+
+  onMount(() =>
+    subscribeText((event) => {
+      for (const trigger of evaluateTextAlerts(alertDefinitions, event.text)) {
+        void dispatchAlert(textAlertEvent(trigger.definition), trigger.definition, DESKTOP_ALERT_EFFECTS);
+      }
+    }),
+  );
 
   const freshness = $derived(freshnessOf(model));
   const isFresh = $derived(freshness === 'fresh' && model.hasData);

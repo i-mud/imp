@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { Character } from '@tinyscry/protocol';
 
-import type { AlertDefinition, VitalAlertDefinition } from '../src/lib/alerts/definitions.ts';
-import { evaluateVitalAlerts } from '../src/lib/alerts/runtime.ts';
+import type {
+  AlertDefinition,
+  TextAlertDefinition,
+  VitalAlertDefinition,
+} from '../src/lib/alerts/definitions.ts';
+import { evaluateTextAlerts, evaluateVitalAlerts } from '../src/lib/alerts/runtime.ts';
 
 const character = (hp: number, mana: number, moves = 100): Character => ({
   name: 'Aria',
@@ -153,5 +157,73 @@ describe('evaluateVitalAlerts', () => {
 
     expect(stale.triggered).toEqual([]);
     expect([...stale.states.values()].every((state) => !state.hasBaseline)).toBe(true);
+  });
+});
+
+describe('evaluateTextAlerts', () => {
+  const tell: TextAlertDefinition = {
+    id: 'tell',
+    kind: 'text',
+    label: 'Incoming tell',
+    enabled: true,
+    pattern: 'tells you',
+    caseSensitive: false,
+    soundEnabled: true,
+    notificationEnabled: true,
+  };
+
+  const exact: TextAlertDefinition = {
+    id: 'exact',
+    kind: 'text',
+    label: 'Exact marker',
+    enabled: true,
+    pattern: '[ALERT]',
+    caseSensitive: true,
+    soundEnabled: false,
+    notificationEnabled: true,
+  };
+
+  it('matches literal substrings in definition order', () => {
+    expect(
+      evaluateTextAlerts([tell, exact], 'Aria TELLS YOU something [ALERT]').map((item) => item.definition.id),
+    ).toEqual(['tell', 'exact']);
+  });
+
+  it('honors case sensitivity and ignores disabled definitions', () => {
+    expect(
+      evaluateTextAlerts([exact, { ...tell, enabled: false }], 'aria tells you something [alert]'),
+    ).toEqual([]);
+  });
+
+  it('treats patterns literally rather than as regular expressions', () => {
+    const literal: TextAlertDefinition = {
+      ...tell,
+      id: 'literal',
+      pattern: '.*',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([literal], 'anything')).toEqual([]);
+    expect(evaluateTextAlerts([literal], 'literal .* marker')).toEqual([{ definition: literal }]);
+  });
+
+  it('allows several definitions to match the same received line', () => {
+    const second: TextAlertDefinition = {
+      ...tell,
+      id: 'second',
+      pattern: 'Aria',
+      caseSensitive: true,
+    };
+
+    expect(
+      evaluateTextAlerts([tell, second], 'Aria tells you hello.').map((item) => item.definition.id),
+    ).toEqual(['tell', 'second']);
+  });
+
+  it('has no crossing memory, so identical lines match repeatedly', () => {
+    const line = 'Aria tells you hello.';
+
+    expect(evaluateTextAlerts([tell], line)).toEqual([{ definition: tell }]);
+    expect(evaluateTextAlerts([tell], line)).toEqual([{ definition: tell }]);
   });
 });

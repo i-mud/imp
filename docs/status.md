@@ -28,13 +28,13 @@ monitors that endpoint instead of spawning over it, and takes the forward over
 with its own supervised child once the endpoint is gone. External tunnel mode
 remains the default and remains supported.
 
-| Component                 | State                                                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/protocol`       | Version 2 complete: context-bound state/actions, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                                     |
-| `services/relay`          | Loopback-only contextual state relay plus Origin policy and single-flight action broker.                                                                                                                                                     |
-| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and low-HP alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
-| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks.                                                                                                          |
-| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, and fixed-macro action helper implemented.                                                                                                                        |
+| Component                 | State                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`       | Version 2 complete: context-bound state/actions plus transient received text, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                         |
+| `services/relay`          | Loopback-only contextual state relay, transient current-subscriber text broadcast, Origin policy, and single-flight action broker.                                                                                                                            |
+| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and configurable vital/text alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
+| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks.                                                                                                                           |
+| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, transient selected-world received-text capture, and fixed-macro action helper implemented.                                                                                         |
 
 ## Verification
 
@@ -81,6 +81,23 @@ infrastructure and remain separate from CI:
 | TinyFugue GMCP login hook | Required and verified: the operator build must expose the `GMCP_LOGIN` hook its login scripts use to negotiate GMCP and send `Char.Login`. Tested with `5.2.2-3-g4f0ff34`; a version number alone does not prove `GMCP_LOGIN` is compiled in, so the capability is the invariant.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Outbound action path      | The Slice 7 connectionless fence procedure passed on pinned TinyFugue build `5.2.2-3-g4f0ff34` (`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`). Slice 8 then live-verified native UI `look` through `RelayActionSink` -> relay -> TinyFugue -> MUD with one independently observed execution. Consumer removal rejected without execution; restoration did not replay the rejected action; one fresh action executed once. `forwarded` still proves only the fixed bridge write and flush.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+### Slice 10 transient-text and alert evidence
+
+- A normal received AVATAR line traversed TinyFugue capture, the private spool,
+  feed context fencing, transient publisher, relay, and a current `/state`
+  subscriber with the exact selected context.
+- A line actually received on a background TinyFugue echo world was visible in
+  that world's history but did not reach the selected-context subscriber.
+- A newly connected subscriber received none of the previous unique text
+  markers (`REPLAY_COUNT=0`), confirming that received text is not retained or
+  replayed.
+- Windows-native alert acceptance created and edited a received-text alert,
+  verified persistence, repeated identical matches, case-sensitive and
+  case-insensitive matching, and literal non-regex matching.
+- Native sound and notification effects fired as configured. The notification
+  body contained only the configured alert label and did not expose the raw
+  received MUD line.
 
 ### Slice 8 native and live action evidence
 

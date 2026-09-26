@@ -6,9 +6,9 @@
     alertLabelError,
     alertThresholdError,
     MAX_ALERT_DEFINITIONS,
+    textPatternError,
     type AlertDefinition,
     type AlertVital,
-    type VitalAlertDefinition,
   } from '../lib/alerts/definitions.ts';
 
   let {
@@ -24,15 +24,19 @@
   } = $props();
 
   let editingId = $state<string | null>(null);
+  let kind = $state<AlertDefinition['kind']>('vital');
   let label = $state('');
   let vital = $state<AlertVital>('health');
   let thresholdPercent = $state(25);
+  let pattern = $state('');
+  let caseSensitive = $state(false);
   let enabled = $state(true);
   let soundEnabled = $state(true);
   let notificationEnabled = $state(true);
 
   let labelError = $state<string | null>(null);
   let thresholdError = $state<string | null>(null);
+  let patternError = $state<string | null>(null);
   let limitError = $state<string | null>(null);
   let labelInput = $state<HTMLInputElement>();
 
@@ -49,28 +53,51 @@
 
   function resetForm(): void {
     editingId = null;
+    kind = 'vital';
     label = '';
     vital = 'health';
     thresholdPercent = 25;
+    pattern = '';
+    caseSensitive = false;
     enabled = true;
     soundEnabled = true;
     notificationEnabled = true;
     labelError = null;
     thresholdError = null;
+    patternError = null;
     limitError = null;
     requestAnimationFrame(() => labelInput?.focus());
   }
 
-  function editDefinition(definition: VitalAlertDefinition): void {
+  function setKind(nextKind: AlertDefinition['kind']): void {
+    kind = nextKind;
+    thresholdError = null;
+    patternError = null;
+  }
+
+  function editDefinition(definition: AlertDefinition): void {
     editingId = definition.id;
+    kind = definition.kind;
     label = definition.label;
-    vital = definition.vital;
-    thresholdPercent = definition.thresholdPercent;
     enabled = definition.enabled;
     soundEnabled = definition.soundEnabled;
     notificationEnabled = definition.notificationEnabled;
+
+    if (definition.kind === 'vital') {
+      vital = definition.vital;
+      thresholdPercent = definition.thresholdPercent;
+      pattern = '';
+      caseSensitive = false;
+    } else {
+      vital = 'health';
+      thresholdPercent = 25;
+      pattern = definition.pattern;
+      caseSensitive = definition.caseSensitive;
+    }
+
     labelError = null;
     thresholdError = null;
+    patternError = null;
     limitError = null;
     requestAnimationFrame(() => labelInput?.focus());
   }
@@ -85,9 +112,10 @@
 
   function saveDefinition(): void {
     labelError = alertLabelError(label);
-    thresholdError = alertThresholdError(thresholdPercent);
+    thresholdError = kind === 'vital' ? alertThresholdError(thresholdPercent) : null;
+    patternError = kind === 'text' ? textPatternError(pattern) : null;
 
-    if (labelError !== null || thresholdError !== null) return;
+    if (labelError !== null || thresholdError !== null || patternError !== null) return;
 
     if (editingId === null && definitions.length >= MAX_ALERT_DEFINITIONS) {
       limitError = `You can save up to ${MAX_ALERT_DEFINITIONS} alerts.`;
@@ -96,16 +124,28 @@
 
     limitError = null;
 
-    const definition: VitalAlertDefinition = {
+    const base = {
       id: editingId ?? crypto.randomUUID(),
-      kind: 'vital',
       label: label.trim(),
       enabled,
-      vital,
-      thresholdPercent,
       soundEnabled,
       notificationEnabled,
     };
+
+    const definition: AlertDefinition =
+      kind === 'vital'
+        ? {
+            ...base,
+            kind: 'vital',
+            vital,
+            thresholdPercent,
+          }
+        : {
+            ...base,
+            kind: 'text',
+            pattern,
+            caseSensitive,
+          };
 
     const saved = onchange(
       editingId === null
@@ -161,22 +201,17 @@
                   {#if definition.kind === 'vital'}
                     {vitalLabel(definition.vital)} ≤ {definition.thresholdPercent}%
                   {:else}
-                    Text trigger — pending text transport
+                    <span title={definition.pattern}>
+                      Text contains: {definition.pattern} ·
+                      {definition.caseSensitive ? 'case-sensitive' : 'case-insensitive'}
+                    </span>
                   {/if}
                 </small>
               </div>
 
-              {#if definition.kind === 'vital'}
-                <button
-                  class="manager-btn secondary"
-                  type="button"
-                  onclick={() => editDefinition(definition)}
-                >
-                  Edit
-                </button>
-              {:else}
-                <span class="pending">Pending</span>
-              {/if}
+              <button class="manager-btn secondary" type="button" onclick={() => editDefinition(definition)}>
+                Edit
+              </button>
 
               <button
                 class="manager-btn danger"
@@ -197,7 +232,7 @@
         saveDefinition();
       }}
     >
-      <h3>{editingId === null ? 'Define threshold alert' : 'Edit threshold alert'}</h3>
+      <h3>{editingId === null ? 'Define alert' : 'Edit alert'}</h3>
 
       <label>
         <span>Label</span>
@@ -214,39 +249,73 @@
         <span id="alert-label-error" class="error">{labelError}</span>
       {/if}
 
-      <div class="condition-row">
+      <label>
+        <span>Trigger</span>
+        <select
+          value={kind}
+          onchange={(event) => {
+            setKind(event.currentTarget.value === 'text' ? 'text' : 'vital');
+          }}
+        >
+          <option value="vital">Vital threshold</option>
+          <option value="text">Received text</option>
+        </select>
+      </label>
+
+      {#if kind === 'vital'}
+        <div class="condition-row">
+          <label>
+            <span>Metric</span>
+            <select bind:value={vital}>
+              <option value="health">Health</option>
+              <option value="mana">Mana</option>
+              <option value="moves">Moves</option>
+              <option value="target-health">Target health</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Threshold</span>
+            <div class="threshold-input">
+              <input
+                type="number"
+                min="1"
+                max="100"
+                step="1"
+                value={thresholdPercent}
+                aria-invalid={thresholdError !== null}
+                aria-describedby={thresholdError === null ? undefined : 'alert-threshold-error'}
+                oninput={(event) => {
+                  thresholdPercent = event.currentTarget.valueAsNumber;
+                }}
+              />
+              <span aria-hidden="true">%</span>
+            </div>
+          </label>
+        </div>
+
+        {#if thresholdError !== null}
+          <span id="alert-threshold-error" class="error">{thresholdError}</span>
+        {/if}
+      {:else}
         <label>
-          <span>Metric</span>
-          <select bind:value={vital}>
-            <option value="health">Health</option>
-            <option value="mana">Mana</option>
-            <option value="moves">Moves</option>
-            <option value="target-health">Target health</option>
-          </select>
+          <span>Text to match</span>
+          <input
+            bind:value={pattern}
+            type="text"
+            aria-invalid={patternError !== null}
+            aria-describedby={patternError === null ? undefined : 'alert-pattern-error'}
+          />
         </label>
 
-        <label>
-          <span>Threshold</span>
-          <div class="threshold-input">
-            <input
-              type="number"
-              min="1"
-              max="100"
-              step="1"
-              value={thresholdPercent}
-              aria-invalid={thresholdError !== null}
-              aria-describedby={thresholdError === null ? undefined : 'alert-threshold-error'}
-              oninput={(event) => {
-                thresholdPercent = event.currentTarget.valueAsNumber;
-              }}
-            />
-            <span aria-hidden="true">%</span>
-          </div>
-        </label>
-      </div>
+        {#if patternError !== null}
+          <span id="alert-pattern-error" class="error">{patternError}</span>
+        {/if}
 
-      {#if thresholdError !== null}
-        <span id="alert-threshold-error" class="error">{thresholdError}</span>
+        <label class="toggle">
+          <input type="checkbox" bind:checked={caseSensitive} />
+          <span>Case sensitive</span>
+        </label>
       {/if}
 
       <div class="toggles">
@@ -362,12 +431,20 @@
     white-space: nowrap;
   }
 
-  .saved-description small,
-  .pending {
-    flex: 0 0 auto;
+  .saved-description small {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
     color: var(--muted);
     font-size: var(--font-2xs);
+    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .saved-description small span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .empty {

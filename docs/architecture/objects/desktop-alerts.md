@@ -7,26 +7,27 @@ state has already crossed the protocol and freshness boundaries. Alerts are a
 presentation-side behavior; they do not publish state, dispatch actions, or
 send commands toward the MUD.
 
-The Slice 10 implementation is currently being generalized from the original
-single low-HP rule. The active runtime in this checkpoint supports configurable
-threshold definitions for health, mana, moves, and target health. Text-trigger
-definitions have a validated persisted shape, but received-MUD-text transport
-and text matching are not implemented yet.
+Slice 10 generalizes the original single low-HP rule into configurable
+vital-threshold and received-text alerts. Vital alerts operate on normalized
+state. Text alerts operate on transient, context-bound received-text events
+that are never retained in `GameState` or `HudModel`.
 
 Data flow:
 
-    normalized GameState + existing desktop freshness
-                        |
-                        v
-           configured vital definitions
-                        |
-                        v
-              per-trigger evaluator state
-                        |
-                 threshold crossing
-                   /           \
-                  v             v
-            bundled sound   native notification
+    normalized GameState                 transient received text
+            |                                      |
+            v                                      v
+    configured vital definitions          configured text definitions
+            |                                      |
+            v                                      v
+    per-trigger crossing state              literal substring match
+            |                                      |
+            +------------------+-------------------+
+                               |
+                         alert event
+                         /         \
+                        v           v
+                  bundled sound  native notification
 
 ## Source
 
@@ -35,14 +36,19 @@ Data flow:
 - `apps/desktop/src/lib/alerts/vitals.ts` owns the pure reusable
   vital-threshold crossing state machine.
 - `apps/desktop/src/lib/alerts/runtime.ts` maps configured vital definitions to
-  normalized character vitals and keeps independent evaluator state per
-  definition.
+  normalized character vitals, keeps independent evaluator state per vital
+  definition, and performs stateless literal matching for text definitions.
 - `apps/desktop/src/lib/alerts/effects.ts` owns generalized best-effort effect
   dispatch.
 - `apps/desktop/src/lib/alerts/native.ts` owns the bundled audio and Tauri
   notification integrations.
+- `apps/desktop/src/lib/hud/store.svelte.ts` fans transient text events out
+  synchronously without storing a last line or adding text to `HudModel`.
 - `apps/desktop/src/components/Hud.svelte` supplies normalized character state
-  plus the existing `freshnessOf(model)` / `hasData` usability boundary.
+  plus the existing `freshnessOf(model)` / `hasData` usability boundary and
+  dispatches matching transient text alerts.
+- `apps/desktop/src/components/AlertDialog.svelte` creates and edits both vital
+  and received-text definitions.
 
 No alert code publishes state or invokes the desktop `ActionSink`.
 
@@ -72,10 +78,9 @@ of 100.
 
 Every threshold is an integer percentage in the inclusive range 1-100.
 
-The persisted model also defines bounded literal text-trigger configuration for
-Slice 10's later text path. Persisting such a definition does not currently
-make it executable: no received-text transport or text evaluator exists in
-this checkpoint.
+Text definitions contain a bounded literal pattern and a case-sensitivity
+flag. They consume only the transient received-text stream; the incoming line
+is not added to persisted alert configuration or retained desktop state.
 
 If the generalized store does not yet exist, TinyScry reads the previous
 `tinyscry.alert-settings` low-HP preferences and materializes them in memory as
@@ -83,12 +88,8 @@ the default `low-health` vital definition. Once generalized definitions are
 saved, that store takes precedence, including an intentionally empty list.
 
 The settings surface exposes a dedicated alert manager. Operators can create,
-edit, delete, enable, and disable threshold alerts and independently select
-sound and desktop-notification effects.
-
-The manager currently creates threshold alerts only. Persisted text-trigger
-definitions remain visible but are not editable until Slice 10's received-text
-path exists.
+edit, delete, enable, and disable both threshold and received-text alerts and
+independently select sound and desktop-notification effects.
 
 ## Vital threshold semantics
 
@@ -116,6 +117,25 @@ the identical name cannot be distinguished as a new subject.
 
 Multiple definitions are independent and may therefore fire on the same state
 update.
+
+## Text trigger semantics
+
+Text patterns are literal substrings, not regular expressions. Matching can be
+case-sensitive or case-insensitive. Case-insensitive matching uses deterministic
+string lowercasing rather than locale-specific comparison.
+
+Every enabled matching definition fires independently in definition order, so
+one received line may trigger several alerts. Text matching has no threshold
+crossing or debounce memory: repeated identical received lines are distinct
+events and may alert repeatedly.
+
+The alert event contains the stable configured alert id and configured label.
+Raw received MUD text is never copied into the native notification body.
+
+The received-text path remains transient end to end. A text event is delivered
+only to subscribers connected at that moment, is not retained or replayed by
+the relay, is not incorporated into `GameState`, and is not retained by
+`HudStore`.
 
 ## Suppression boundary
 
@@ -163,8 +183,9 @@ Alerts remain outbound-silent:
 - they never execute shell or TinyFugue source; and
 - they do not weaken the `StateSource` / `ActionSink` separation.
 
-The later text-trigger path must preserve the same rule while treating received
-MUD text as bounded untrusted input.
+Received MUD text is bounded untrusted input. It is used only for literal
+matching and is never interpreted as a command, expression, regular expression,
+or executable source.
 
 ## Verification
 
@@ -180,12 +201,18 @@ Deterministic desktop tests cover:
 - removed-definition state cleanup;
 - per-definition sound/notification selection;
 - tray mute suppression; and
-- effect failure isolation.
+- effect failure isolation;
+- synchronous transient-text fan-out without `HudModel` retention;
+- literal substring text matching and case-sensitivity behavior;
+- repeated identical line handling and multiple-definition matching; and
+- stable alert ids with configured-label-only text notification bodies.
 
-Real notification/audio behavior remains a native acceptance concern.
+Native/live acceptance additionally verified creation and editing of a
+received-text alert, persistence after reopening the manager, repeated
+identical matches, case-sensitive and case-insensitive behavior, literal
+non-regex matching, sound and notification delivery, and that the notification
+body contains only the configured label rather than raw received MUD text.
 
-The received-text path, text matching, and live text-path acceptance are still
-pending Slice 10 work.
-
-Status: verified for the generalized vitals checkpoint
-Verified against: desktop unit tests and strict Svelte/TypeScript checking.
+Status: verified for configurable vital and received-text alerts
+Verified against: desktop unit tests, strict Svelte/TypeScript checking, and
+Windows-native live text-alert acceptance.

@@ -1,6 +1,7 @@
-import type { AlertDefinition, VitalAlertDefinition } from './definitions.ts';
+import type { AlertDefinition, TextAlertDefinition, VitalAlertDefinition } from './definitions.ts';
 
 export interface AlertEvent {
+  readonly alertId: string;
   readonly body: string;
 }
 
@@ -16,7 +17,15 @@ export function vitalAlertEvent(
   percent: number,
 ): AlertEvent {
   return {
+    alertId: definition.id,
     body: `${definition.label} — ${characterName} is at ${Math.round(percent)}%`,
+  };
+}
+
+export function textAlertEvent(definition: TextAlertDefinition): AlertEvent {
+  return {
+    alertId: definition.id,
+    body: definition.label,
   };
 }
 
