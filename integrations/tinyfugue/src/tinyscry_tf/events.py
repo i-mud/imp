@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Final
 
-from tinyscry_relay.protocol import StateContext
+from tinyscry_relay.protocol import LIMITS, StateContext
 
 from tinyscry_tf.records import MAX_EPOCH_MS, MAX_RECORD_CHARS, Record, parse_record
 
@@ -25,6 +25,15 @@ class GmcpEvent:
     connection: int
     world: str
     record: Record
+
+
+@dataclass(frozen=True)
+class TextEvent:
+    session: str
+    connection: int
+    world: str
+    at: int
+    text: str
 
 
 @dataclass(frozen=True)
@@ -50,7 +59,7 @@ class SelectEvent:
         return StateContext(self.session, self.foreground, self.connection)
 
 
-type FeedEvent = GmcpEvent | ResetEvent | SelectEvent
+type FeedEvent = GmcpEvent | TextEvent | ResetEvent | SelectEvent
 
 
 @dataclass(frozen=True)
@@ -71,9 +80,7 @@ def _invalid(error: str) -> EventResult:
     return EventResult(None, error)
 
 
-def decode_tf_token(token: str) -> str | None:
-    """Decode TinyFugue textencode.tf output without accepting loose variants."""
-
+def _decode_tf_token_value(token: str) -> str | None:
     decoded: list[str] = []
     index = 0
     while index < len(token):
@@ -95,10 +102,32 @@ def decode_tf_token(token: str) -> str | None:
             return None
         decoded.append(chr(codepoint))
         index = end + 1
+
     value = "".join(decoded)
-    if not value or len(value) > _MAX_WORLD_CHARS:
+    if not value:
         return None
     if any(ord(char) <= 0x1F or 0x7F <= ord(char) <= 0x9F for char in value):
+        return None
+    return value
+
+
+def decode_tf_token(token: str) -> str | None:
+    """Decode a bounded TinyFugue textencode.tf world token."""
+
+    value = _decode_tf_token_value(token)
+    if value is None or len(value) > _MAX_WORLD_CHARS:
+        return None
+    return value
+
+
+def decode_tf_text_token(token: str) -> str | None:
+    """Decode one bounded, control-free received-text token."""
+
+    value = _decode_tf_token_value(token)
+    if value is None:
+        return None
+    utf16_length = len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+    if utf16_length > LIMITS["maxTextEventChars"]:
         return None
     return value
 
@@ -162,6 +191,19 @@ def parse_tf_event(line: str) -> EventResult:
         if not parsed.ok or parsed.record is None:
             return _invalid(parsed.error or "invalid_raw_event")
         return EventResult(GmcpEvent(session, generation, world, parsed.record), None)
+
+    if kind == "T":
+        if len(fields) != 7:
+            return _invalid("invalid_text_event")
+        _, _, session, connection, world_token, timestamp, text_token = fields
+        header = _header(session, connection, world_token, timestamp)
+        if header is None:
+            return _invalid("invalid_text_event")
+        generation, world, at = header
+        text = decode_tf_text_token(text_token)
+        if text is None:
+            return _invalid("invalid_text_event")
+        return EventResult(TextEvent(session, generation, world, at, text), None)
 
     if kind == "R":
         if len(fields) != 6:

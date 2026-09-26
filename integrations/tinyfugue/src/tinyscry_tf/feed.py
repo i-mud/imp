@@ -19,7 +19,7 @@ from tinyscry_relay.protocol import GameState, StateContext, decode_game_state
 
 from tinyscry_tf.context import write_context_marker
 from tinyscry_tf.diagnostics import DiagnosticCapture
-from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, parse_tf_event
+from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, TextEvent, parse_tf_event
 from tinyscry_tf.normalize import Normalizer
 from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
 from tinyscry_tf.records import JsonValue, Record
@@ -41,6 +41,8 @@ class StatePublisher(Protocol):
     async def select(self, context: StateContext | None, state: GameState) -> None: ...
 
     async def publish(self, context: StateContext, state: GameState) -> None: ...
+
+    async def text(self, context: StateContext, at: int, text: str) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -195,14 +197,20 @@ async def run_feed(
     selected_world: str | None = None
     received = rejected = 0
     published_count = [0]
+    text_forwarded = 0
+    text_dropped = 0
     delivery: asyncio.Task[None] | None = None
 
     try:
         while stop is None or not stop.is_set():
             for line in source.read_lines():
                 received += 1
-                if diagnostics is not None:
+
+                # Received MUD text is deliberately transient. Even explicit
+                # diagnostic capture must never persist TS2 T payloads.
+                if diagnostics is not None and not line.startswith("TS2 T "):
                     diagnostics.write(line)
+
                 parsed = parse_tf_event(line)
                 if not parsed.ok or parsed.event is None:
                     rejected += 1
@@ -254,6 +262,19 @@ async def run_feed(
                             published_count,
                         )
 
+                elif isinstance(event, TextEvent):
+                    if (
+                        selected_world == event.world
+                        and selected_context is not None
+                        and selected_context.connection == event.connection
+                    ):
+                        if await publisher.text(selected_context, event.at, event.text):
+                            text_forwarded += 1
+                        else:
+                            text_dropped += 1
+                    else:
+                        text_dropped += 1
+
                 elif isinstance(event, GmcpEvent):
                     runtime = worlds.get(event.world)
                     if runtime is not None and event.connection < runtime.connection:
@@ -276,7 +297,7 @@ async def run_feed(
                             published_count,
                         )
 
-                if checkpoint is not None and session is not None:
+                if checkpoint is not None and session is not None and not isinstance(event, TextEvent):
                     checkpoint(_checkpoint(session, worlds))
 
             if stop is None:
@@ -290,10 +311,12 @@ async def run_feed(
             with suppress(asyncio.CancelledError):
                 await delivery
         LOGGER.info(
-            "feed stopped: received=%d rejected=%d published=%d dropped=%d",
+            "feed stopped: received=%d rejected=%d published=%d text_forwarded=%d text_dropped=%d dropped=%d",
             received,
             rejected,
             published_count[0],
+            text_forwarded,
+            text_dropped,
             source.dropped,
         )
 

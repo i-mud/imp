@@ -129,6 +129,14 @@ export class RelayStateSource implements StateSource {
       case 'status':
         this.emit({ kind: 'feed', status: decoded.value.feed, detail: decoded.value.detail });
         break;
+      case 'text':
+        this.emit({
+          kind: 'text',
+          context: decoded.value.context,
+          at: decoded.value.at,
+          text: decoded.value.text,
+        });
+        break;
     }
   }
 

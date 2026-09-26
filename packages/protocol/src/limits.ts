@@ -21,6 +21,8 @@ export const LIMITS = {
   maxRelayIdentChars: 64,
   /** Opaque TinyFugue session identifier. */
   maxContextSessionChars: 128,
+  /** One received MUD text line carried as a transient event. */
+  maxTextEventChars: 1024,
   /** One command forwarded to TinyFugue. */
   maxActionChars: 512,
   /** Relay-generated action dispatch identifier. */

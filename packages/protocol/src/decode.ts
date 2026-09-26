@@ -234,6 +234,15 @@ export function decodeServerMessage(raw: string): DecodeResult<ServerMessage> {
       if (!detail.ok) return detail;
       return ok({ type, protocol, at: at.value, feed: feed.value, detail: detail.value });
     }
+    case 'text': {
+      const context = readContext(body['context'], 'context');
+      if (!context.ok) return context;
+      const at = readInteger(body['at'], 'at', 0, Number.MAX_SAFE_INTEGER);
+      if (!at.ok) return at;
+      const text = readText(body['text'], 'text', LIMITS.maxTextEventChars);
+      if (!text.ok) return text;
+      return ok({ type, protocol, context: context.value, at: at.value, text: text.value });
+    }
     case 'action-result': {
       const status = readActionStatus(body['status'], 'status');
       if (!status.ok) return status;
@@ -280,6 +289,15 @@ export function decodeClientMessage(raw: string): DecodeResult<ClientMessage> {
       const state = decodeGameState(body['state']);
       if (!state.ok) return state;
       return ok({ type, protocol, context: context.value, state: state.value });
+    }
+    case 'text': {
+      const context = readContext(body['context'], 'context');
+      if (!context.ok) return context;
+      const at = readInteger(body['at'], 'at', 0, Number.MAX_SAFE_INTEGER);
+      if (!at.ok) return at;
+      const text = readText(body['text'], 'text', LIMITS.maxTextEventChars);
+      if (!text.ok) return text;
+      return ok({ type, protocol, context: context.value, at: at.value, text: text.value });
     }
     case 'action': {
       const context = readContext(body['context'], 'context');

@@ -39,6 +39,14 @@ function createSource(sockets: FakeWebSocket[]): RelayStateSource {
   });
 }
 
+const textFrame = JSON.stringify({
+  type: 'text',
+  protocol: 2,
+  context: { session: 'session1', foreground: 1, connection: 1 },
+  at: 150,
+  text: 'The ancient troll snarls.',
+});
+
 const snapshotFrame = JSON.stringify({
   type: 'snapshot',
   protocol: 2,
@@ -73,6 +81,26 @@ describe('RelayStateSource', () => {
         target: null,
       },
     });
+    source.stop();
+  });
+
+  it('emits transient received text without turning it into state', () => {
+    const sockets: FakeWebSocket[] = [];
+    const events: SourceEvent[] = [];
+    const source = createSource(sockets);
+    source.start((event) => events.push(event));
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('expected relay socket');
+
+    socket.emit('message', new MessageEvent('message', { data: textFrame }));
+
+    expect(events).toContainEqual({
+      kind: 'text',
+      context: { session: 'session1', foreground: 1, connection: 1 },
+      at: 150,
+      text: 'The ancient troll snarls.',
+    });
+
     source.stop();
   });
 

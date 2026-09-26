@@ -1,0 +1,6 @@
+{
+  "description": "relay may deliver one bounded transient text event",
+  "direction": "server",
+  "expect": "accept",
+  "frame": "{\"type\":\"text\",\"protocol\":2,\"context\":{\"session\":\"session1\",\"foreground\":2,\"connection\":3},\"at\":1234,\"text\":\"The ancient troll snarls.\"}"
+}

@@ -42,6 +42,14 @@ export interface StatusMessage {
   readonly detail: string | null;
 }
 
+export interface TextMessage {
+  readonly type: 'text';
+  readonly protocol: number;
+  readonly context: StateContext;
+  readonly at: number;
+  readonly text: string;
+}
+
 export interface ActionResultMessage {
   readonly type: 'action-result';
   readonly protocol: number;
@@ -67,6 +75,7 @@ export type ServerMessage =
   | HelloMessage
   | SnapshotMessage
   | StatusMessage
+  | TextMessage
   | ActionResultMessage
   | ConsumerReadyMessage
   | DispatchMessage;
@@ -106,4 +115,4 @@ export interface ConsumerResultMessage {
 }
 
 export type ClientMessage =
-  SelectMessage | PublishMessage | ActionMessage | ConsumerMessage | ConsumerResultMessage;
+  SelectMessage | PublishMessage | TextMessage | ActionMessage | ConsumerMessage | ConsumerResultMessage;

@@ -43,8 +43,9 @@ Selected by:
 
 Consumed by:
 
-- `apps/desktop/src/lib/hud/store.svelte.ts`, which forwards every event to the
-  pure reducer in `model.ts`
+- `apps/desktop/src/lib/hud/store.svelte.ts`, which forwards events to the
+  pure reducer in `model.ts`. Retained state/status events update `HudModel`;
+  transient received-text events deliberately leave that model unchanged.
 
 ## Why this seam exists
 

@@ -77,6 +77,19 @@
 /def -Fp2 -ag -h"CONNECT" tinyscry_capture_connect = /tinyscry_reset_world %{1}
 /def -Fp2 -ag -h"WORLD" tinyscry_capture_world = /tinyscry_select_world %{1}
 
+/def -Fpmaxpri -q -mregexp -t"(.*)" tinyscry_capture_text = \
+    /let _world_name=$[world_info()]%; \
+    /let _world=$[textencode(_world_name)]%; \
+    /if (_world =~ tinyscry_selected_world & strlen({*}) > 0 & strlen({*}) <= 1024) \
+        /eval \
+            /let _connection=%%{tinyscry_connection_%{_world}}%%; \
+            /if (strlen(_connection)) \
+                /test fwrite("~/.local/state/tinyscry/spool", \
+                    strcat("TS2 T ", tinyscry_session, " ", _connection, " ", \
+                        _world, " ", time(), " ", textencode({*})))%%; \
+            /endif%; \
+    /endif
+
 /def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp = \
     /let _world_name=$[world_info()]%; \
     /let _world=$[textencode(_world_name)]%; \

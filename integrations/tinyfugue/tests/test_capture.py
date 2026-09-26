@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 
 from tinyscry_tf.capture import convert_lines, encode_record, parse_raw_gmcp
-from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, decode_tf_token, parse_tf_event
+from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, TextEvent, decode_tf_token, parse_tf_event
 from tinyscry_tf.records import MAX_RECORD_CHARS
 
 
@@ -35,6 +36,25 @@ def test_event_parser_distinguishes_gmcp_reset_selection_and_no_world() -> None:
     assert isinstance(no_world.event, SelectEvent) and no_world.event.context is None
 
 
+def test_text_event_decodes_bounded_visible_received_text() -> None:
+    parsed = parse_tf_event("TS2 T s1 3 Avatar 12 Incoming_32_text_33_")
+
+    assert isinstance(parsed.event, TextEvent)
+    assert parsed.event.session == "s1"
+    assert parsed.event.connection == 3
+    assert parsed.event.world == "Avatar"
+    assert parsed.event.at == 12000
+    assert parsed.event.text == "Incoming text!"
+
+
+def test_text_event_rejects_controls_and_overlong_text() -> None:
+    control = parse_tf_event("TS2 T s1 3 Avatar 12 bad_10_line")
+    overlong = parse_tf_event("TS2 T s1 3 Avatar 12 " + ("A" * 1025))
+
+    assert control.error == "invalid_text_event"
+    assert overlong.error == "invalid_text_event"
+
+
 def test_textencode_tokens_decode_strictly() -> None:
     assert decode_tf_token("Avatar_32_World_95_2") == "Avatar World_2"
     assert decode_tf_token("bad_under_score") is None
@@ -59,3 +79,17 @@ def test_malformed_events_are_rejected_without_stopping_conversion() -> None:
     assert stats.rejected == 5
     assert stats.written == 1
     assert output.getvalue() == '{"at":2000,"package":"Char.Vitals","payload":{"hp":"9"}}\n'
+
+
+def test_text_capture_is_high_priority_fallthrough_bounded_and_context_fenced() -> None:
+    hook = (Path(__file__).resolve().parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
+
+    definition = '/def -Fpmaxpri -q -mregexp -t"(.*)" tinyscry_capture_text ='
+    assert definition in hook
+
+    body = hook.split(definition, 1)[1]
+    assert "_world =~ tinyscry_selected_world" in body
+    assert "strlen({*}) > 0" in body
+    assert "strlen({*}) <= 1024" in body
+    assert 'strcat("TS2 T "' in body
+    assert "textencode({*})" in body

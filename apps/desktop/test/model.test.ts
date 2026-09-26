@@ -56,6 +56,25 @@ describe('applyEvent', () => {
     expect(next.state).toEqual(secondState);
   });
 
+  it('does not retain transient received text in the HUD model', () => {
+    const withState = applyEvent(applyEvent(INITIAL_MODEL, connected), {
+      kind: 'snapshot',
+      seq: 1,
+      at: 10,
+      context,
+      state: firstState,
+    });
+
+    const afterText = applyEvent(withState, {
+      kind: 'text',
+      context,
+      at: 11,
+      text: 'A transient MUD line',
+    });
+
+    expect(afterText).toBe(withState);
+  });
+
   it('records protocol errors without changing state', () => {
     const withState = applyEvent(applyEvent(INITIAL_MODEL, connected), {
       kind: 'snapshot',

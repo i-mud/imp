@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeGameState, decodeServerMessage } from '../src/decode.ts';
+import { decodeClientMessage, decodeGameState, decodeServerMessage } from '../src/decode.ts';
 import { LIMITS, isSafeText } from '../src/limits.ts';
 import { describeError } from '../src/result.ts';
 import { EMPTY_STATE, vitalFraction } from '../src/state.ts';
@@ -104,5 +104,53 @@ describe('EMPTY_STATE', () => {
   it('round-trips through the decoder', () => {
     const result = decodeGameState(EMPTY_STATE);
     expect(result.ok && result.value).toEqual(EMPTY_STATE);
+  });
+});
+
+describe('transient text events', () => {
+  const frame = JSON.stringify({
+    type: 'text',
+    protocol: 2,
+    context: { session: 'session1', foreground: 2, connection: 3 },
+    at: 1234,
+    text: 'The ancient troll snarls at you.',
+  });
+
+  it('decodes the same bounded shape in both directions', () => {
+    const server = decodeServerMessage(frame);
+    const client = decodeClientMessage(frame);
+
+    expect(server.ok && server.value).toEqual({
+      type: 'text',
+      protocol: 2,
+      context: { session: 'session1', foreground: 2, connection: 3 },
+      at: 1234,
+      text: 'The ancient troll snarls at you.',
+    });
+    expect(client.ok && client.value).toEqual(server.ok ? server.value : null);
+  });
+
+  it('rejects unsafe and overlong text', () => {
+    const unsafe = decodeServerMessage(
+      JSON.stringify({
+        type: 'text',
+        protocol: 2,
+        context: { session: 'session1', foreground: 2, connection: 3 },
+        at: 1234,
+        text: 'hello\u001b[31m',
+      }),
+    );
+    expect(unsafe.ok ? null : unsafe.error.path).toBe('text');
+
+    const overlong = decodeServerMessage(
+      JSON.stringify({
+        type: 'text',
+        protocol: 2,
+        context: { session: 'session1', foreground: 2, connection: 3 },
+        at: 1234,
+        text: 'x'.repeat(LIMITS.maxTextEventChars + 1),
+      }),
+    );
+    expect(overlong.ok ? null : overlong.error.path).toBe('text');
   });
 });
