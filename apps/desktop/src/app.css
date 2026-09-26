@@ -65,6 +65,29 @@
   --icon-button-size: 1.35rem;
   --section-pad: var(--space-6) var(--space-7);
   --opacity-disabled: 0.55;
+
+  /* Shared management-dialog geometry. Five rows exactly fill the list. */
+  --manager-row-height: 26px;
+  --manager-visible-rows: 5;
+  --manager-list-height: calc(var(--manager-row-height) * var(--manager-visible-rows));
+
+  --manager-button-height: 19px;
+  --manager-button-pad-x: var(--space-5);
+  --manager-button-radius: var(--radius);
+  --manager-button-font-size: var(--font-xs);
+
+  --manager-primary-bg: var(--accent-subtle);
+  --manager-primary-border: var(--accent-border);
+  --manager-primary-hover-bg: var(--accent-hover);
+  --manager-primary-hover-border: var(--accent-focus);
+
+  --manager-secondary-bg: transparent;
+  --manager-secondary-border: var(--divider);
+  --manager-secondary-color: var(--muted);
+
+  --manager-danger-bg: var(--danger-subtle);
+  --manager-danger-border: var(--danger-border);
+  --manager-danger-hover-bg: var(--danger-hover);
 }
 
 /* `system` is resolved to one of these two values in lib/hud/theme.ts, so the
@@ -128,6 +151,129 @@
 .action-btn.danger:focus-visible {
   border-color: var(--danger-border);
   background: var(--danger-hover);
+}
+
+.manager-dialog .dialog-content {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto;
+  align-content: start;
+  gap: 0;
+  padding: var(--section-pad);
+}
+
+.manager-dialog .saved {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: max-content;
+  grid-template-rows: auto auto;
+  align-self: start;
+  align-content: start;
+  gap: var(--space-4);
+}
+
+.manager-dialog .saved-row > * {
+  min-height: 0;
+}
+
+.manager-dialog .empty {
+  padding-bottom: var(--space-4);
+}
+
+.manager-dialog .saved-list {
+  display: grid;
+  width: 100%;
+  height: max-content;
+  max-height: var(--manager-list-height);
+  grid-auto-rows: var(--manager-row-height);
+  align-self: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-shadow: inset 0 1px 0 var(--divider);
+  scroll-behavior: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.manager-dialog .saved-row {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  height: var(--manager-row-height);
+  min-height: var(--manager-row-height);
+  max-height: var(--manager-row-height);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid var(--divider);
+  line-height: 1;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+.manager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--manager-button-height);
+  padding: 0 var(--manager-button-pad-x);
+  border: 1px solid;
+  border-radius: var(--manager-button-radius);
+  font-size: var(--manager-button-font-size);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.manager-btn.primary {
+  border-color: var(--manager-primary-border);
+  background: var(--manager-primary-bg);
+  color: var(--text);
+}
+
+.manager-btn.primary:hover,
+.manager-btn.primary:focus-visible {
+  border-color: var(--manager-primary-hover-border);
+  background: var(--manager-primary-hover-bg);
+  outline: none;
+}
+
+.manager-btn.secondary {
+  border-color: var(--manager-secondary-border);
+  background: var(--manager-secondary-bg);
+  color: var(--manager-secondary-color);
+}
+
+.manager-btn.secondary:hover,
+.manager-btn.secondary:focus-visible {
+  border-color: var(--manager-primary-border);
+  background: var(--accent-subtle);
+  color: var(--text);
+  outline: none;
+}
+
+.manager-btn.danger {
+  border-color: var(--manager-danger-border);
+  background: var(--manager-danger-bg);
+  color: var(--text);
+}
+
+.manager-btn.danger:hover,
+.manager-btn.danger:focus-visible {
+  border-color: var(--manager-danger-border);
+  background: var(--manager-danger-hover-bg);
+  outline: none;
+}
+
+.manager-dialog .dialog-close {
+  width: var(--manager-button-height);
+  height: var(--manager-button-height);
 }
 
 /*
@@ -198,6 +344,8 @@ button {
 .action-bar *,
 .action-dialog,
 .action-dialog *,
+.alert-dialog,
+.alert-dialog *,
 button.close {
   app-region: no-drag;
 }
@@ -209,10 +357,14 @@ button.close {
 
 .action-dialog .dialog-titlebar,
 .action-dialog .dialog-title,
-.action-dialog .dialog-title * {
+.action-dialog .dialog-title *,
+.alert-dialog .dialog-titlebar,
+.alert-dialog .dialog-title,
+.alert-dialog .dialog-title * {
   app-region: drag;
 }
 
-.action-dialog .dialog-close {
+.action-dialog .dialog-close,
+.alert-dialog .dialog-close {
   app-region: no-drag;
 }

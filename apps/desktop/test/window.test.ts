@@ -35,19 +35,22 @@ describe('expanded window sizes', () => {
 });
 
 describe('actionDialogWindowSize', () => {
-  it('uses the expanded HUD width and fixed management height', () => {
-    expect(actionDialogWindowSize(320)).toEqual({ width: 320, height: 400 });
+  it('uses the measured management content height', () => {
+    expect(actionDialogWindowSize(320, 301.2)).toEqual({
+      width: 320,
+      height: 302,
+    });
   });
 
   it('preserves compact baseline widths including both supported bounds', () => {
-    expect(actionDialogWindowSize(280)).toEqual({ width: 280, height: 400 });
-    expect(actionDialogWindowSize(380)).toEqual({ width: 380, height: 400 });
-    expect(actionDialogWindowSize(560)).toEqual({ width: 560, height: 400 });
+    expect(actionDialogWindowSize(280, 250)).toEqual({ width: 280, height: 250 });
+    expect(actionDialogWindowSize(380, 250)).toEqual({ width: 380, height: 250 });
+    expect(actionDialogWindowSize(560, 250)).toEqual({ width: 560, height: 250 });
   });
 
-  it('clamps management width to the compact window bounds', () => {
-    expect(actionDialogWindowSize(1)).toEqual({ width: 280, height: 400 });
-    expect(actionDialogWindowSize(800)).toEqual({ width: 560, height: 400 });
+  it('clamps management width while preserving measured height', () => {
+    expect(actionDialogWindowSize(1, 275.1)).toEqual({ width: 280, height: 276 });
+    expect(actionDialogWindowSize(800, 275.1)).toEqual({ width: 560, height: 276 });
   });
 });
 

@@ -1,6 +1,6 @@
 import { isSafeText } from '@tinyscry/protocol';
 
-export type AlertVital = 'health' | 'mana' | 'moves';
+export type AlertVital = 'health' | 'mana' | 'moves' | 'target-health';
 
 interface AlertDefinitionBase {
   readonly id: string;
@@ -105,7 +105,12 @@ function persistedDefinition(value: unknown): AlertDefinition | null {
   if (base === null) return null;
 
   if (value.kind === 'vital') {
-    if (value.vital !== 'health' && value.vital !== 'mana' && value.vital !== 'moves') {
+    if (
+      value.vital !== 'health' &&
+      value.vital !== 'mana' &&
+      value.vital !== 'moves' &&
+      value.vital !== 'target-health'
+    ) {
       return null;
     }
     const thresholdPercent = persistedThreshold(value.thresholdPercent);
@@ -137,6 +142,17 @@ function persistedDefinition(value: unknown): AlertDefinition | null {
 
 function cloneDefaults(): AlertDefinition[] {
   return DEFAULT_ALERT_DEFINITIONS.map((definition) => ({ ...definition }));
+}
+
+export function alertThresholdError(value: number): string | null {
+  if (
+    !Number.isInteger(value) ||
+    value < MIN_ALERT_THRESHOLD_PERCENT ||
+    value > MAX_ALERT_THRESHOLD_PERCENT
+  ) {
+    return `Threshold must be a whole number from ${MIN_ALERT_THRESHOLD_PERCENT} to ${MAX_ALERT_THRESHOLD_PERCENT}.`;
+  }
+  return null;
 }
 
 export function boundedThresholdPercent(value: number): number {

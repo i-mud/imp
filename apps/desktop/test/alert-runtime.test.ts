@@ -44,6 +44,7 @@ describe('evaluateVitalAlerts', () => {
       {
         definition: mana,
         percent: 20,
+        subjectLabel: 'Aria',
       },
     ]);
   });
@@ -76,8 +77,47 @@ describe('evaluateVitalAlerts', () => {
       {
         definition: moves,
         percent: 15,
+        subjectLabel: 'Aria',
       },
     ]);
+  });
+
+  it('evaluates target health and re-baselines when the target changes', () => {
+    const targetHealth: VitalAlertDefinition = {
+      id: 'target-health',
+      kind: 'vital',
+      label: 'Low target',
+      enabled: true,
+      vital: 'target-health',
+      thresholdPercent: 25,
+      soundEnabled: false,
+      notificationEnabled: true,
+    };
+
+    const first = evaluateVitalAlerts(new Map(), [targetHealth], character(80, 80), true, {
+      name: 'a frost giant',
+      healthPercent: 80,
+    });
+
+    const crossing = evaluateVitalAlerts(first.states, [targetHealth], character(80, 80), true, {
+      name: 'a frost giant',
+      healthPercent: 20,
+    });
+
+    expect(crossing.triggered).toEqual([
+      {
+        definition: targetHealth,
+        percent: 20,
+        subjectLabel: 'a frost giant',
+      },
+    ]);
+
+    const replacement = evaluateVitalAlerts(crossing.states, [targetHealth], character(80, 80), true, {
+      name: 'a shadow hound',
+      healthPercent: 10,
+    });
+
+    expect(replacement.triggered).toEqual([]);
   });
 
   it('drops evaluator memory for removed definitions', () => {

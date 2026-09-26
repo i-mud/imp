@@ -92,7 +92,12 @@
   }
 </script>
 
-<div class="action-dialog" role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
+<div
+  class="action-dialog manager-dialog"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="action-dialog-title"
+>
   <header class="dialog-titlebar" data-tauri-drag-region>
     <div class="dialog-title" data-tauri-drag-region>
       <h2 id="action-dialog-title">Saved actions</h2>
@@ -116,9 +121,10 @@
           {#each definitions as definition (definition.id)}
             <div class="saved-row">
               <span title={definition.label}>{definition.label}</span>
-              <button class="action-btn" type="button" onclick={() => editDefinition(definition)}>Edit</button
+              <button class="manager-btn secondary" type="button" onclick={() => editDefinition(definition)}
+                >Edit</button
               >
-              <button class="action-btn danger" type="button" onclick={() => deleteDefinition(definition.id)}
+              <button class="manager-btn danger" type="button" onclick={() => deleteDefinition(definition.id)}
                 >Delete</button
               >
             </div>
@@ -166,8 +172,8 @@
       {/if}
 
       <div class="form-actions">
-        <button class="action-btn" type="submit">Save</button>
-        <button class="action-btn" type="button" onclick={onclose}>Cancel</button>
+        <button class="manager-btn primary" type="submit">Save</button>
+        <button class="manager-btn secondary" type="button" onclick={onclose}>Close</button>
       </div>
     </form>
   </div>
@@ -176,8 +182,8 @@
 <style>
   .action-dialog {
     display: grid;
-    height: 100%;
-    grid-template-rows: auto minmax(0, 1fr);
+    height: max-content;
+    grid-template-rows: auto auto;
     overflow: hidden;
     border: 1px solid var(--panel-edge);
     border-radius: var(--radius);
@@ -230,42 +236,11 @@
     flex: 0 0 auto;
   }
 
-  .dialog-content {
-    display: grid;
-    min-width: 0;
-    min-height: 0;
-    grid-template-rows: minmax(5rem, 1fr) auto;
-    gap: var(--space-7);
-    padding: var(--section-pad);
-  }
-
-  .saved {
-    display: grid;
-    min-height: 0;
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: var(--space-4);
-  }
-
   .saved,
   .saved-row,
   form,
   label {
     min-width: 0;
-  }
-
-  .saved-list {
-    min-height: 0;
-    max-height: 9rem;
-    overflow-y: auto;
-  }
-
-  .saved-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) 0;
-    border-bottom: 1px solid var(--divider);
   }
 
   .saved-row span {

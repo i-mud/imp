@@ -4,6 +4,7 @@ import {
   DEFAULT_ALERT_DEFINITIONS,
   MAX_ALERT_DEFINITIONS,
   alertDefinitionsFromPersisted,
+  alertThresholdError,
   commitAlertDefinitions,
   legacyAlertDefinitionsFromPersisted,
   loadAlertDefinitions,
@@ -164,6 +165,31 @@ describe('alert definition persistence', () => {
 
     expect(saveAlertDefinitions(definitions, { setItem })).toBe(false);
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it('round-trips target-health threshold definitions', () => {
+    const targetHealth: AlertDefinition = {
+      id: 'target-health-20',
+      kind: 'vital',
+      label: 'Finish target',
+      enabled: true,
+      vital: 'target-health',
+      thresholdPercent: 20,
+      soundEnabled: false,
+      notificationEnabled: true,
+    };
+
+    expect(alertDefinitionsFromPersisted(serializeAlertDefinitions([targetHealth]))).toEqual([targetHealth]);
+  });
+
+  it('validates vital thresholds for the management UI', () => {
+    expect(alertThresholdError(1)).toBeNull();
+    expect(alertThresholdError(25)).toBeNull();
+    expect(alertThresholdError(100)).toBeNull();
+    expect(alertThresholdError(0)).not.toBeNull();
+    expect(alertThresholdError(101)).not.toBeNull();
+    expect(alertThresholdError(12.5)).not.toBeNull();
+    expect(alertThresholdError(Number.NaN)).not.toBeNull();
   });
 
   it('validates bounded safe literal text patterns', () => {

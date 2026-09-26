@@ -9,7 +9,7 @@ send commands toward the MUD.
 
 The Slice 10 implementation is currently being generalized from the original
 single low-HP rule. The active runtime in this checkpoint supports configurable
-vital-threshold definitions for health, mana, and moves. Text-trigger
+threshold definitions for health, mana, moves, and target health. Text-trigger
 definitions have a validated persisted shape, but received-MUD-text transport
 and text matching are not implemented yet.
 
@@ -59,13 +59,18 @@ A definition has:
 - independent sound and desktop-notification flags; and
 - a trigger-specific body.
 
-Vital definitions select one normalized vital:
+Threshold definitions select one normalized metric:
 
 - `health`;
 - `mana`;
 - `moves`;
+- `target-health`.
 
-and an integer threshold percentage in the inclusive range 1-100.
+Health, mana, and moves use normalized current/max character vitals. Target
+health uses the already-normalized target health percentage against a maximum
+of 100.
+
+Every threshold is an integer percentage in the inclusive range 1-100.
 
 The persisted model also defines bounded literal text-trigger configuration for
 Slice 10's later text path. Persisting such a definition does not currently
@@ -77,9 +82,13 @@ If the generalized store does not yet exist, TinyScry reads the previous
 the default `low-health` vital definition. Once generalized definitions are
 saved, that store takes precedence, including an intentionally empty list.
 
-The current settings surface temporarily continues to expose the migrated
-`low-health` definition directly. The dedicated alert-management UI is a later
-Slice 10 checkpoint.
+The settings surface exposes a dedicated alert manager. Operators can create,
+edit, delete, enable, and disable threshold alerts and independently select
+sound and desktop-notification effects.
+
+The manager currently creates threshold alerts only. Persisted text-trigger
+definitions remain visible but are not editable until Slice 10's received-text
+path exists.
 
 ## Vital threshold semantics
 
@@ -94,9 +103,16 @@ crossing from `> threshold` to `<= threshold`. Remaining at or below the
 threshold does not repeat. Returning above the threshold re-arms that
 definition.
 
-Changing the threshold, selected vital, or character identity re-baselines
+Changing the threshold, selected metric, or subject identity re-baselines
 rather than synthesizing a crossing. Disabling a definition also clears its
 baseline. Removing a definition removes its evaluator memory.
+
+For character metrics, the subject identity is the normalized character name.
+For target health, the subject identity is the normalized target name. Losing
+the target resets the baseline, and a differently named replacement
+re-baselines without alerting. The current normalized target model has no
+stable per-creature identifier, so a direct replacement by another target with
+the identical name cannot be distinguished as a new subject.
 
 Multiple definitions are independent and may therefore fire on the same state
 update.
@@ -157,7 +173,9 @@ Deterministic desktop tests cover:
 - persisted-definition validation and bounds;
 - legacy low-HP preference migration;
 - independent vital crossing state;
-- health, mana, and moves selection;
+- health, mana, moves, and target-health selection;
+- target-health crossing and target-change re-baselining;
+- alert-management threshold validation;
 - stale/reconnect and identity re-baselining;
 - removed-definition state cleanup;
 - per-definition sound/notification selection;
@@ -166,8 +184,8 @@ Deterministic desktop tests cover:
 
 Real notification/audio behavior remains a native acceptance concern.
 
-The received-text path, text matching, alert-management UI, and live text-path
-acceptance are still pending Slice 10 work.
+The received-text path, text matching, and live text-path acceptance are still
+pending Slice 10 work.
 
 Status: verified for the generalized vitals checkpoint
 Verified against: desktop unit tests and strict Svelte/TypeScript checking.

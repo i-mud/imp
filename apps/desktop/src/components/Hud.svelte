@@ -1,6 +1,7 @@
 <script lang="ts">
   import ActionBar from './ActionBar.svelte';
   import ActionDialog from './ActionDialog.svelte';
+  import AlertDialog from './AlertDialog.svelte';
   import ActionsMenu from './ActionsMenu.svelte';
   import CompactVital from './CompactVital.svelte';
   import SettingsMenu from './SettingsMenu.svelte';
@@ -62,10 +63,12 @@
   let settingsOpen = $state(false);
   let actionsOpen = $state(false);
   let actionDialogOpen = $state(false);
+  let alertDialogOpen = $state(false);
   let actionDialogWidth = $state(EXPANDED_SETTINGS_WINDOW_SIZE.width);
   let actionSaveError = $state<string | null>(null);
   let alertSaveError = $state<string | null>(null);
   let actionDialogInvoker: HTMLButtonElement | null = null;
+  let alertDialogInvoker: HTMLButtonElement | null = null;
   const actionInvocation = $state<ActionInvocationState>({
     pendingActionId: null,
     feedback: null,
@@ -141,6 +144,7 @@
 
     actionDialogInvoker = invoker;
     actionSaveError = null;
+    alertDialogOpen = false;
     settingsOpen = false;
     actionsOpen = false;
     actionDialogOpen = true;
@@ -158,6 +162,43 @@
           document.querySelector<HTMLButtonElement>('button.close'));
       target?.focus();
       actionDialogInvoker = null;
+    });
+  }
+
+  function openAlertDialog(invoker: HTMLButtonElement): void {
+    if (displayMode === 'compact') {
+      const row = compactRow;
+      const hudPanel = panel;
+      if (row !== undefined && hudPanel !== undefined) {
+        const rowBounds = row.getBoundingClientRect();
+        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
+        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
+      }
+    } else {
+      actionDialogWidth = EXPANDED_SETTINGS_WINDOW_SIZE.width;
+    }
+
+    alertDialogInvoker = invoker;
+    actionDialogOpen = false;
+    settingsOpen = false;
+    actionsOpen = false;
+    alertDialogOpen = true;
+  }
+
+  function closeAlertDialog(): void {
+    alertDialogOpen = false;
+    settingsOpen = true;
+
+    const invoker = alertDialogInvoker;
+    requestAnimationFrame(() => {
+      const target = invoker?.isConnected
+        ? invoker
+        : (document.querySelector<HTMLButtonElement>('[data-alert-manager-trigger]') ??
+          document.querySelector<HTMLButtonElement>('.settings-button') ??
+          document.querySelector<HTMLButtonElement>('button.close'));
+
+      target?.focus();
+      alertDialogInvoker = null;
     });
   }
 
@@ -217,14 +258,18 @@
   });
 
   $effect(() => {
-    const evaluation = evaluateVitalAlerts(vitalAlertMemory.current, alertDefinitions, character, isFresh);
+    const evaluation = evaluateVitalAlerts(
+      vitalAlertMemory.current,
+      alertDefinitions,
+      character,
+      isFresh,
+      target,
+    );
     vitalAlertMemory.current = evaluation.states;
-
-    if (character === null) return;
 
     for (const trigger of evaluation.triggered) {
       void dispatchAlert(
-        vitalAlertEvent(trigger.definition, character.name, trigger.percent),
+        vitalAlertEvent(trigger.definition, trigger.subjectLabel, trigger.percent),
         trigger.definition,
         DESKTOP_ALERT_EFFECTS,
       );
@@ -232,9 +277,29 @@
   });
 
   $effect(() => {
-    if (actionDialogOpen) {
-      resizeHudWindow(actionDialogWindowSize(actionDialogWidth));
-      return;
+    if (actionDialogOpen || alertDialogOpen) {
+      const observer = new ResizeObserver(() => resize());
+
+      const resize = () => {
+        const dialog = document.querySelector<HTMLElement>('.manager-dialog');
+        if (dialog === null) return;
+
+        const bounds = dialog.getBoundingClientRect();
+        resizeHudWindow(actionDialogWindowSize(actionDialogWidth, bounds.height));
+      };
+
+      const frame = requestAnimationFrame(() => {
+        const dialog = document.querySelector<HTMLElement>('.manager-dialog');
+        if (dialog === null) return;
+
+        observer.observe(dialog);
+        resize();
+      });
+
+      return () => {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+      };
     }
 
     if (displayMode === 'expanded') {
@@ -302,7 +367,7 @@
 </script>
 
 <main
-  class:compact={displayMode === 'compact' && !actionDialogOpen}
+  class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen}
   class="hud"
   aria-label="TinyScry companion HUD"
   data-tauri-drag-region
@@ -313,6 +378,13 @@
       onchange={setActions}
       saveError={actionSaveError}
       onclose={closeActionDialog}
+    />
+  {:else if alertDialogOpen}
+    <AlertDialog
+      definitions={alertDefinitions}
+      onchange={setAlertDefinitions}
+      saveError={alertSaveError}
+      onclose={closeAlertDialog}
     />
   {:else}
     <div
@@ -374,11 +446,10 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
-              {alertDefinitions}
               {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
-              onalertdefinitionschange={setAlertDefinitions}
+              onmanagealerts={openAlertDialog}
               onmanageactions={openActionDialog}
             />
           </div>
@@ -436,11 +507,10 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
-              {alertDefinitions}
               {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
-              onalertdefinitionschange={setAlertDefinitions}
+              onmanagealerts={openAlertDialog}
               onmanageactions={openActionDialog}
             />
           </div>
