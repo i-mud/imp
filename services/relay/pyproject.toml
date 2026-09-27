@@ -12,6 +12,7 @@ dependencies = ["websockets>=16.0,<17"]
 
 [project.scripts]
 tinyscry-relay = "tinyscry_relay.__main__:main"
+tinyscry-gateway = "tinyscry_relay.gateway_main:main"
 
 [dependency-groups]
 dev = ["mypy>=1.19", "pytest>=9.0", "ruff>=0.15"]
