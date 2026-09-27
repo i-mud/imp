@@ -1,7 +1,14 @@
 # 0001 - The relay binds to loopback and remote access uses SSH
 
-Status: accepted
+Status: accepted; amended by ADR 0010
 Date: 2026-09-15
+
+Amendment (2026-09-27): ADR 0010 adds authenticated Direct WSS as a second
+supported remote desktop transport through a separate loopback gateway. This
+record remains authoritative for the relay itself: it stays loopback-only,
+unauthenticated, and valid for SSH transport. Statements below that describe
+SSH as the sole remote-access method are historical to this decision and are
+superseded only in that respect by ADR 0010.
 
 ## Context
 
