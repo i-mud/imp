@@ -155,6 +155,29 @@ Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
 
 ## Verification
 
+### Slice 11 authenticated WSS live verification — 2026-09-27
+
+Live operator verification covered both desktop transport modes:
+
+- The public TLS edge exposed only port 443 through Caddy. The relay remained
+  bound to `127.0.0.1:8787` and the authenticated gateway remained bound to
+  `127.0.0.1:8788`.
+- A publicly trusted TLS certificate was used for the Direct WSS endpoint.
+  `/healthz` succeeded through the public edge, while `/ingest` and
+  `/action-consumer` returned `404`.
+- With no Windows listener on local port 8787, an invalid pairing token was
+  rejected with WebSocket close code `1008`. A valid token received
+  `hello`, retained `snapshot`, and `status` frames through Direct WSS.
+- The Windows Tauri application loaded current character state through Direct
+  WSS, received live state changes, and successfully sent an outbound action.
+- Stopping the gateway and starting it again caused the running desktop to
+  disconnect and recover automatically. State and outbound actions worked
+  again without restarting the application.
+- Restoring the previous managed-SSH desktop configuration re-established the
+  local SSH forward and restored live state and outbound actions without any
+  relay or feed reconfiguration.
+- The relay, feed, and gateway user services were left enabled for boot.
+
 Status: verified for the established service/tunnel lifecycle, including
 adopted-endpoint takeover - a Windows-native run adopted a manual SSH forward
 exposing the remote TinyScry relay and, when that forward was terminated, took
