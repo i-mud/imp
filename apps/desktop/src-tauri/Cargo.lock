@@ -3793,6 +3793,7 @@ dependencies = [
 name = "tinyscry-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "parking_lot",
  "raw-window-handle",
  "serde",
@@ -3801,6 +3802,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-window-state",
+ "url",
  "windows-sys 0.61.2",
 ]
 

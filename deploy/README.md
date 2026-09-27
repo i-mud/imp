@@ -1,10 +1,16 @@
 # VPS deployment
 
-Runs `services/relay` and `integrations/tinyfugue`'s live feed as `systemd --user`
-services, so the pipeline survives a VPS reboot and an administrator's SSH
-session ending, without a root-owned service and without exposing anything
-beyond loopback. Everything below runs **on the VPS** unless labelled
-otherwise.
+Runs `services/relay`, the authenticated remote gateway, and
+`integrations/tinyfugue`'s live feed as `systemd --user` services, so the
+pipeline survives a VPS reboot and an administrator's SSH session ending
+without root-owned TinyScry services.
+
+The relay, feed-facing endpoints, and gateway all remain loopback-only. SSH may
+still expose the relay to one workstation as before. Direct WSS instead uses a
+separate TLS reverse proxy in front of the authenticated gateway; the reverse
+proxy never forwards the relay itself.
+
+Everything below runs **on the VPS** unless labelled otherwise.
 
 Loopback prevents remote network access but is not same-user isolation. Any
 local OS user or process in the VPS network namespace can reach the relay, and
@@ -52,10 +58,58 @@ the TinyFugue hook; action text is pipe data and never argv.
 mkdir -p ~/.config/systemd/user
 cp ~/tinyscry/deploy/systemd/tinyscry-relay.service ~/.config/systemd/user/
 cp ~/tinyscry/deploy/systemd/tinyscry-feed.service ~/.config/systemd/user/
+cp ~/tinyscry/deploy/systemd/tinyscry-gateway.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 ```
 
-## 4. Enable lingering (on VPS, once)
+## 4. Configure the authenticated gateway (on VPS)
+
+Direct WSS access uses one 256-bit pairing token. TinyScry's gateway stores only
+the SHA-256 digest of the token. The plaintext token is copied once to the
+desktop configuration later; do not put it in a URL, shell history, service
+unit, repository file, or reverse-proxy configuration.
+
+For Slice 11 verification, generate a token and its digest manually:
+
+```bash
+mkdir -p ~/.config/tinyscry
+chmod 700 ~/.config/tinyscry
+
+read -r token digest <<EOF
+$(python3 - <<'PY2'
+import base64
+import hashlib
+import secrets
+
+token = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+print(token, digest)
+PY2
+)
+EOF
+
+printf 'TINYSCRY_GATEWAY_TOKEN_SHA256=%s\n' "$digest" > ~/.config/tinyscry/gateway.env
+chmod 600 ~/.config/tinyscry/gateway.env
+
+printf 'Pairing token: %s\n' "$token"
+```
+
+Record the displayed pairing token in the intended desktop configuration and
+then clear the shell variables:
+
+```bash
+unset token digest
+```
+
+`gateway.env` contains only the digest, not the plaintext pairing token. The
+gateway refuses to start without a valid 64-hex-character digest.
+
+The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
+`ws://127.0.0.1:8787`. A TLS reverse proxy may later expose the gateway over
+`wss:`. Never proxy port 8787 or the relay's `/ingest` or `/action-consumer`
+endpoints to the Internet.
+
+## 5. Enable lingering (on VPS, once)
 
 Without lingering, `systemd --user` (and everything it manages) stops the
 moment your last session logs out, and `$XDG_RUNTIME_DIR` may not exist at
@@ -66,18 +120,25 @@ loginctl enable-linger "$USER"
 loginctl show-user "$USER" -p Linger   # expect: Linger=yes
 ```
 
-## 5. Enable and start the services (on VPS)
+## 6. Enable and start the services (on VPS)
 
 ```bash
-systemctl --user enable --now tinyscry-relay.service tinyscry-feed.service
-systemctl --user status tinyscry-relay.service tinyscry-feed.service
+systemctl --user enable --now \
+  tinyscry-relay.service \
+  tinyscry-feed.service \
+  tinyscry-gateway.service
+
+systemctl --user status \
+  tinyscry-relay.service \
+  tinyscry-feed.service \
+  tinyscry-gateway.service
 ```
 
 `tinyscry-feed.service` `Wants=` (not `Requires=`) the relay: if the relay is
 briefly down, the feed keeps running and reconnects with the publisher's
 existing bounded backoff rather than failing.
 
-## 6. Install the TinyFugue hook (on VPS)
+## 7. Install the TinyFugue hook (on VPS)
 
 Copy the unchanged hook to TinyScry's config directory:
 
@@ -128,7 +189,7 @@ changes when the feed restarts. See
 [`integrations/tinyfugue/README.md`](../integrations/tinyfugue/README.md) for
 why this is a plain drained file rather than a FIFO.
 
-## 7. Confirm the TinyFugue GMCP login prerequisite (on VPS)
+## 8. Confirm the TinyFugue GMCP login prerequisite (on VPS)
 
 Because that identity message is sent once, capture depends on the operator's
 TinyFugue performing GMCP login sequencing at the right negotiation point. The
@@ -158,19 +219,31 @@ never modifies them and sends no GMCP itself.
 ## Verifying the deployment
 
 ```bash
-# Relay listens on loopback only
-ss -ltnp | grep 8787
-# expect exactly: 127.0.0.1:8787, no 0.0.0.0 or :: entry
+# Relay and gateway listen on loopback only
+ss -ltnp | grep -E ':(8787|8788)[[:space:]]'
+# expect 127.0.0.1:8787 and 127.0.0.1:8788,
+# with no 0.0.0.0 listener for either service
 
-# Both services are active
-systemctl --user is-active tinyscry-relay.service tinyscry-feed.service
+# TinyScry user services are active
+systemctl --user is-active \
+  tinyscry-relay.service \
+  tinyscry-feed.service \
+  tinyscry-gateway.service
+
+# Gateway health contains process health only
+curl -s http://127.0.0.1:8788/healthz
+# expect: {"status":"ok"}
 
 # The feed created the runtime spool, hook symlink, and private context marker
 ls -l ~/.local/state/tinyscry/spool
 stat -c '%a %n' ~/.local/state/tinyscry/context   # 600 after a world selection
 
 # Recent lifecycle logs, never raw GMCP or action text
-journalctl --user -u tinyscry-relay.service -u tinyscry-feed.service -n 50
+journalctl --user \
+  -u tinyscry-relay.service \
+  -u tinyscry-feed.service \
+  -u tinyscry-gateway.service \
+  -n 50
 ```
 
 ## Common failure diagnostics

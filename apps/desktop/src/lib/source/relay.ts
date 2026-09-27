@@ -5,6 +5,7 @@ import type { SourceEvent, StateSource } from './types.ts';
 export interface WebSocketLike {
   addEventListener(type: string, listener: (event: Event) => void): void;
   close(): void;
+  send(data: string): void;
 }
 
 export type WebSocketFactory = (url: string) => WebSocketLike;
@@ -17,6 +18,7 @@ export interface RelaySourceOptions {
     readonly factor: number;
   };
   readonly webSocketFactory?: WebSocketFactory;
+  readonly authenticationToken?: string;
   /**
    * Best-known transport-level reason for the current unavailability, e.g.
    * from a managed SSH tunnel supervisor. Called only when a socket-level
@@ -78,10 +80,34 @@ export class RelayStateSource implements StateSource {
     }
 
     this.socket = socket;
-    socket.addEventListener('open', () => {
-      if (!this.running || this.socket !== socket) return;
+
+    let confirmed = false;
+    const confirmConnected = (): void => {
+      if (confirmed) return;
+      confirmed = true;
       this.nextDelayMs = this.options.reconnect.initialDelayMs;
       this.emit({ kind: 'connection', phase: 'connected', detail: null });
+    };
+
+    socket.addEventListener('open', () => {
+      if (!this.running || this.socket !== socket) return;
+
+      if (this.options.authenticationToken !== undefined) {
+        try {
+          socket.send(
+            JSON.stringify({
+              type: 'auth',
+              token: this.options.authenticationToken,
+            }),
+          );
+        } catch {
+          socket.close();
+          this.reconnect('Unable to authenticate relay connection.');
+          return;
+        }
+      } else {
+        confirmConnected();
+      }
     });
     socket.addEventListener('message', (event) => {
       if (!this.running || this.socket !== socket || !(event instanceof MessageEvent)) return;
@@ -93,7 +119,7 @@ export class RelayStateSource implements StateSource {
         socket.close();
         return;
       }
-      this.handleFrame(socket, event.data);
+      this.handleFrame(socket, event.data, confirmConnected);
     });
     socket.addEventListener('error', () => {
       if (this.socket === socket) this.reconnect('Relay connection failed.');
@@ -103,7 +129,7 @@ export class RelayStateSource implements StateSource {
     });
   }
 
-  private handleFrame(socket: WebSocketLike, frame: string): void {
+  private handleFrame(socket: WebSocketLike, frame: string, confirmConnected: () => void): void {
     const decoded = decodeServerMessage(frame);
     if (!decoded.ok) {
       if (decoded.error.code !== 'unknown_type') {
@@ -115,6 +141,7 @@ export class RelayStateSource implements StateSource {
 
     switch (decoded.value.type) {
       case 'hello':
+        confirmConnected();
         this.emit({ kind: 'hello', relay: decoded.value.relay });
         break;
       case 'snapshot':

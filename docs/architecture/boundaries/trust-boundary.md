@@ -24,16 +24,24 @@ Bounds and character rules are specified once in `packages/protocol/SPEC.md`.
 
 Loopback prevents remote network access; it does not enforce UID or same-user
 ownership. On the VPS, any process in the relay's network namespace, including
-one owned by another local OS user, can reach its loopback listener. On the
-workstation, any process that can reach the local forwarded listener has the
-same access to state and action endpoints.
+one owned by another local OS user, can reach its loopback listener. The relay
+itself remains unauthenticated.
 
-`Origin` checks are browser defense-in-depth against cross-site requests. An
-`Origin` header is not process identity and is not authentication. TinyScry
-provides no per-user authentication on either host's loopback endpoints.
-Supported deployment therefore requires a single-user workstation and VPS, or
-mutual trust among every host-local user and process. An untrusted multi-user
-host is outside TinyScry's supported trust boundary.
+The authenticated remote gateway is a separate loopback process. Remote WSS
+clients must authenticate before the gateway opens a relay connection, but a
+host-local process can still reach the relay directly and bypass the gateway.
+Gateway authentication therefore protects the remote network boundary; it does
+not turn loopback into same-user isolation.
+
+In SSH mode, any process that can reach the workstation's local forwarded
+listener has the same state/action access as the desktop.
+
+`Origin` checks remain browser defense-in-depth against cross-site requests.
+An `Origin` header is not process identity and is not authentication.
+
+Supported deployment therefore still requires a single-user workstation and
+VPS, or mutual trust among every host-local user and process. An untrusted
+multi-user host is outside TinyScry's supported trust boundary.
 
 ## Why validation is repeated
 
@@ -109,16 +117,34 @@ into argv requires investigation.
 
 ## Credentials and local command text
 
-TinyScry does not request, manage, or persist authentication tokens, SSH
-passwords, or private keys.
+TinyScry supports two remote desktop transports with different credential
+boundaries.
 
-- Loopback plus SSH prevents remote unauthenticated access but deliberately
-  provides no per-user authentication
-  (`docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md`).
-- SSH remains the operator's existing `ssh` client with its existing agent,
-  keys, host verification, and configuration.
-- `.gitignore` covers key material and `.env` files so a stray local file
-  cannot be committed.
+SSH mode still requests, stores, and manages no SSH password or private key.
+The system OpenSSH client retains ownership of its existing agent, keys, host
+verification, and configuration.
+
+Direct WSS mode uses one 256-bit pairing token for the authenticated remote
+gateway:
+
+- the gateway receives only the SHA-256 digest of the textual pairing token;
+- the plaintext token is never a URL, query parameter, fragment, WebSocket
+  subprotocol, build-time `VITE_*` value, reverse-proxy credential, or log
+  field;
+- the native desktop configuration owns the persisted plaintext token;
+- the renderer may hold it transiently only to authenticate a direct WSS
+  connection;
+- possession of the token grants remote state observation and context-bound
+  action requests for that TinyScry installation, so compromise requires
+  rotation.
+
+The relay itself remains unauthenticated and permanently loopback-only.
+`/ingest` and `/action-consumer` are not exposed by the gateway. See
+`docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md` and
+`docs/architecture/decisions/0010-authenticated-remote-gateway.md`.
+
+`.gitignore` covers key material and `.env` files so a stray local file cannot
+be committed.
 
 Saved desktop action definitions are a separate class of data: operator-authored
 local application configuration. Their exact command strings are stored in

@@ -6,6 +6,7 @@ import type { SourceEvent } from '../src/lib/source/types.ts';
 class FakeWebSocket implements WebSocketLike {
   private readonly listeners = new Map<string, Array<(event: Event) => void>>();
   readonly url: string;
+  readonly sent: string[] = [];
   closed = false;
 
   constructor(url: string) {
@@ -20,6 +21,10 @@ class FakeWebSocket implements WebSocketLike {
 
   close(): void {
     this.closed = true;
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
   }
 
   emit(type: string, event: Event): void {
@@ -60,6 +65,61 @@ const snapshotFrame = JSON.stringify({
 });
 
 describe('RelayStateSource', () => {
+  it('sends authentication as the first frame when configured', () => {
+    const sockets: FakeWebSocket[] = [];
+    const events: SourceEvent[] = [];
+    const source = new RelayStateSource({
+      url: 'wss://example.test/state',
+      authenticationToken: 'pairing-token',
+      reconnect: { initialDelayMs: 100, maxDelayMs: 1_000, factor: 2 },
+      webSocketFactory: (url) => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    source.start((event) => events.push(event));
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('expected relay socket');
+
+    expect(socket.sent).toEqual([]);
+
+    socket.emit('open', new Event('open'));
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
+      {
+        type: 'auth',
+        token: 'pairing-token',
+      },
+    ]);
+    expect(events).not.toContainEqual({
+      kind: 'connection',
+      phase: 'connected',
+      detail: null,
+    });
+
+    socket.emit(
+      'message',
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'hello',
+          protocol: 2,
+          at: 100,
+          relay: { name: 'tinyscry-relay', version: '0.1.0' },
+        }),
+      }),
+    );
+
+    expect(events).toContainEqual({
+      kind: 'connection',
+      phase: 'connected',
+      detail: null,
+    });
+
+    source.stop();
+  });
+
   it('turns valid relay frames into source events', () => {
     const sockets: FakeWebSocket[] = [];
     const events: SourceEvent[] = [];

@@ -15,6 +15,7 @@ never owns or daemonizes the operator's interactive TinyFugue session.
 | per-dispatch action helper                    | TinyFugue `/quote`             | reader loss or one line ends it; guarded macro replaces it |
 | spool, per-world normalize, selected publish  | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`                   |
 | loopback state/action relay                   | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`                     |
+| authenticated remote gateway                  | `tinyscry-gateway.service`     | loopback user service; state/action only                   |
 | local SSH forward                             | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process               |
 | pre-existing relay endpoint on the local port | whoever started it             | adopted and monitored; never owned, signalled or replaced  |
 | WebSocket reconnect and public HUD state      | `RelayStateSource` / HUD model | unchanged freshness presentation                           |
@@ -52,7 +53,9 @@ interactive TinyFugue
   -> private $XDG_RUNTIME_DIR/tinyscry/spool
   -> tinyscry-feed (strict parse -> per-world normalize -> selected publish)
   -> tinyscry-relay on 127.0.0.1:8787
-  -> system OpenSSH local forward
+  -> either:
+       system OpenSSH local forward
+       or authenticated gateway on 127.0.0.1:8788 -> TLS reverse proxy -> WSS
   -> RelayStateSource / separate one-shot ActionSink
 ```
 
@@ -120,7 +123,8 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 
 | Failure                                | Recovery / visible result                                                                                                                                                                                                                            |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| relay process exits                    | systemd restarts it; feed publisher reconnects                                                                                                                                                                                                       |
+| relay process exits                    | systemd restarts it; feed publisher reconnects; gateway state clients disconnect and reconnect from the desktop                                                                                                                                      |
+| gateway process exits                  | systemd restarts it; relay/feed continue unaffected; direct-WSS desktop reconnects                                                                                                                                                                   |
 | feed process exits                     | lock releases with the process; systemd starts one replacement                                                                                                                                                                                       |
 | normalized checkpoint lost at reboot   | identity is re-established at the next character login only if the capture hook was loaded by the active startup file beforehand and the TinyFugue build provides `GMCP_LOGIN` for the operator login scripts; until then TinyScry publishes nothing |
 | TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                                                                                                                                                 |
@@ -150,6 +154,29 @@ Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
 `apps/desktop/src-tauri/src/tunnel.rs`, and desktop source/action tests.
 
 ## Verification
+
+### Slice 11 authenticated WSS live verification — 2026-09-27
+
+Live operator verification covered both desktop transport modes:
+
+- The public TLS edge exposed only port 443 through Caddy. The relay remained
+  bound to `127.0.0.1:8787` and the authenticated gateway remained bound to
+  `127.0.0.1:8788`.
+- A publicly trusted TLS certificate was used for the Direct WSS endpoint.
+  `/healthz` succeeded through the public edge, while `/ingest` and
+  `/action-consumer` returned `404`.
+- With no Windows listener on local port 8787, an invalid pairing token was
+  rejected with WebSocket close code `1008`. A valid token received
+  `hello`, retained `snapshot`, and `status` frames through Direct WSS.
+- The Windows Tauri application loaded current character state through Direct
+  WSS, received live state changes, and successfully sent an outbound action.
+- Stopping the gateway and starting it again caused the running desktop to
+  disconnect and recover automatically. State and outbound actions worked
+  again without restarting the application.
+- Restoring the previous managed-SSH desktop configuration re-established the
+  local SSH forward and restored live state and outbound actions without any
+  relay or feed reconfiguration.
+- The relay, feed, and gateway user services were left enabled for boot.
 
 Status: verified for the established service/tunnel lifecycle, including
 adopted-endpoint takeover - a Windows-native run adopted a manual SSH forward

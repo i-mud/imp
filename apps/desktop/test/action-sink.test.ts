@@ -78,6 +78,55 @@ describe('RelayActionSink', () => {
     expect(socket.closed).toBe(true);
   });
 
+  it('sends authentication before the action when configured', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const sink = new RelayActionSink({
+      url: 'wss://example.test/action',
+      authenticationToken: 'pairing-token',
+      webSocketFactory: () => {
+        const socket = new FakeWebSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const result = sink.send(context, 'look');
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('expected action socket');
+
+    socket.emit('open', new Event('open'));
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
+      {
+        type: 'auth',
+        token: 'pairing-token',
+      },
+      {
+        type: 'action',
+        protocol: 2,
+        context,
+        command: 'look',
+      },
+    ]);
+
+    socket.emit(
+      'message',
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'action-result',
+          protocol: 2,
+          status: 'forwarded',
+          detail: null,
+        }),
+      }),
+    );
+
+    await expect(result).resolves.toEqual({
+      status: 'forwarded',
+      detail: null,
+    });
+  });
+
   it('returns unknown on timeout without retrying', async () => {
     vi.useFakeTimers();
     try {

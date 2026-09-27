@@ -22,6 +22,7 @@
     "lint": "eslint . && prettier --check . && node scripts/check-docs.mjs",
     "lint:fix": "eslint . --fix && prettier --write .",
     "native:sync": "bash scripts/sync-native.sh",
+    "vps:sync": "bash scripts/sync-vps.sh",
     "native:watch": "bash scripts/watch-native-mirror.sh",
     "relay": "uv run --directory services/relay tinyscry-relay",
     "relay:test": "uv run --directory services/relay pytest",

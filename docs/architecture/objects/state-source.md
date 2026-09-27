@@ -36,10 +36,15 @@ Implemented by:
 
 Selected by:
 
-- `createStateSource()` in `config.ts`. An explicit `VITE_TINYSCRY_SOURCE` is
-  authoritative. Without it, browser/development builds default to `mock`,
+- `createRuntimeClients()` in `config.ts`. An explicit `VITE_TINYSCRY_SOURCE`
+  is authoritative. Without it, browser/development builds default to `mock`,
   while a Tauri build identified by `TAURI_ENV_PLATFORM` defaults to `relay`.
-  `VITE_TINYSCRY_RELAY_URL` supplies the relay URL when relay mode is selected.
+- In relay mode, `connection_config` supplies the native runtime transport
+  tuple. External and managed SSH modes use the local relay URL; Direct WSS
+  supplies its `wss:` state URL and transient renderer authentication token
+  from native application configuration.
+- `VITE_TINYSCRY_RELAY_URL` remains a local/custom relay override. Direct WSS
+  never reads a pairing token or remote URL from a build-time `VITE_*` value.
 
 Consumed by:
 
@@ -57,10 +62,15 @@ Two requirements land on it:
    exposing SSH argv, PIDs, or child-process lifecycle to components.
 
 Both hold because the UI's only contract is `SourceEvent`. The Rust
-`TunnelSupervisor` runs before the webview, while `config.ts` supplies a
-synchronous diagnostic accessor to `RelayStateSource`. A relay reconnect event
-therefore carries the best known transport detail when evidence exists; the
-event kind, reducer, store, and components are unchanged.
+`TunnelSupervisor` is established during native setup. Renderer startup then
+loads the native connection tuple before mounting the application and
+`config.ts` constructs the matching source and action sink.
+
+Local relay mode also supplies a synchronous diagnostic accessor to
+`RelayStateSource`. A relay reconnect event therefore carries the best known
+SSH transport detail when evidence exists. Direct WSS bypasses SSH diagnostics;
+its availability is represented by the same socket connection lifecycle. The
+event kind, reducer, store, and components remain unchanged.
 
 The tunnel does not introduce a second top-level state machine. The public HUD
 states still derive from relay socket phase plus feed liveness. See
@@ -75,8 +85,9 @@ prevents source reconnect behavior from replaying a command.
 
 - Adding an event kind: `types.ts`, `model.ts` (exhaustive switch), the reducer
   tests, and any component that renders the new information.
-- Adding a source: implement the interface and register it in `config.ts` only.
-  If a change requires touching a component, the seam has been violated.
+- Adding a source or transport selection: implement the interface and register
+  it in `config.ts` only. If a change requires touching a HUD component, the
+  seam has been violated.
 - Changing reconnect policy affects `docs/architecture/processes/connection-lifecycle.md`.
 - Adding an action sink: implement `ActionSink` and register it in `config.ts`;
   do not add outbound methods to `StateSource`.

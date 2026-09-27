@@ -19,6 +19,7 @@ interface RelayActionSinkOptions {
   readonly url: string;
   readonly timeoutMs?: number;
   readonly webSocketFactory?: ActionWebSocketFactory;
+  readonly authenticationToken?: string;
 }
 
 export class RelayActionSink implements ActionSink {
@@ -28,11 +29,13 @@ export class RelayActionSink implements ActionSink {
   private readonly url: string;
   private readonly timeoutMs: number;
   private readonly factory: ActionWebSocketFactory;
+  private readonly authenticationToken: string | undefined;
 
   constructor(options: RelayActionSinkOptions) {
     this.url = options.url;
     this.timeoutMs = options.timeoutMs ?? 5_000;
     this.factory = options.webSocketFactory ?? ((url) => new WebSocket(url));
+    this.authenticationToken = options.authenticationToken;
   }
 
   send(context: StateContext, command: string): Promise<ActionResult> {
@@ -68,6 +71,14 @@ export class RelayActionSink implements ActionSink {
     socket.addEventListener('open', () => {
       if (settled) return;
       try {
+        if (this.authenticationToken !== undefined) {
+          socket.send(
+            JSON.stringify({
+              type: 'auth',
+              token: this.authenticationToken,
+            }),
+          );
+        }
         socket.send(JSON.stringify({ type: 'action', protocol: PROTOCOL_VERSION, context, command }));
       } catch {
         finish({ status: 'unknown', detail: 'Unable to send relay action.' });

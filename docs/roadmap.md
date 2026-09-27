@@ -41,6 +41,67 @@ Implemented behavior and final verification evidence live in
 [`status.md`](status.md) and
 [`architecture/objects/desktop-alerts.md`](architecture/objects/desktop-alerts.md).
 
+## Slice 11 - Authenticated WSS transport
+
+Slug: `authenticated-wss-transport`. In implementation.
+
+The goal is to make SSH optional for desktop-to-VPS transport without exposing
+the existing relay or its privileged TinyFugue-facing endpoints to the network.
+
+The implementation follows
+[`0010-authenticated-remote-gateway.md`](architecture/decisions/0010-authenticated-remote-gateway.md):
+
+- the existing relay remains permanently loopback-only on its current trust
+  boundary;
+- a separate loopback `tinyscry-gateway` exposes only remote state and action
+  capabilities;
+- a normal reverse proxy terminates public TLS and forwards WSS to that gateway;
+- direct desktop mode requires `wss:` and authenticates with a 256-bit pairing
+  token before normal protocol-v2 traffic begins;
+- the server retains only the SHA-256 digest of the pairing token;
+- the plaintext token is native desktop configuration, never URL/query data,
+  build-time configuration, WebView `localStorage`, or logged diagnostic data;
+- `/ingest` and `/action-consumer` are never reachable through the gateway;
+- SSH external/manual and managed modes remain supported unchanged;
+- the gateway adds no state retention, text replay, action retry, context
+  mutation, or alternative action semantics.
+
+Deterministic acceptance must prove:
+
+1. unauthenticated, malformed, binary, wrong-token, and timed-out authentication
+   connections receive no relay data and never open an upstream relay
+   connection;
+2. a valid token permits state streaming through the gateway, including retained
+   snapshots, feed status, and transient text with the same semantics as a
+   direct relay subscriber;
+3. a valid token permits one normal context-bound action round trip without
+   changing `forwarded`, `rejected`, or `unknown` semantics;
+4. the gateway rejects `/ingest`, `/action-consumer`, unknown routes, and
+   untrusted browser origins before touching the relay;
+5. the gateway listener and its configured upstream relay are both restricted
+   to loopback;
+6. pairing-token material is absent from URLs, logs, health responses, protocol
+   frames forwarded to the relay, and persisted renderer storage;
+7. a relay outage causes the state path to disconnect rather than retain or
+   synthesize state, while action requests are never automatically retried;
+8. existing external/manual SSH and managed-SSH behavior remains regression
+   clean.
+
+Native/live acceptance must additionally prove, over a real trusted TLS
+endpoint, that the Windows Tauri application can:
+
+- connect directly over `wss:` without an SSH listener on local port 8787;
+- receive live state and transient received-text events;
+- send one action through the existing context-bound action path;
+- reject an incorrect pairing token without exposing state;
+- recover its state connection after a gateway/reverse-proxy interruption; and
+- switch back to the existing SSH transport without changing relay/feed
+  configuration.
+
+Automated VPS installation, reverse-proxy provisioning, token-generation UX,
+and general TinyFugue deployment scripts are intentionally deferred to the next
+distribution slice. Slice 11 establishes the stable transport they will deploy.
+
 ## Candidate work
 
 Unordered, and deliberately without slice numbers.
