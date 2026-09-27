@@ -11,6 +11,7 @@
     alertSaveError,
     onmodechange,
     onthemechange,
+    onmanageconnection,
     onmanagealerts,
     onmanageactions,
   }: {
@@ -19,6 +20,7 @@
     alertSaveError: string | null;
     onmodechange: (mode: DisplayMode) => void;
     onthemechange: (theme: ThemePreference) => void;
+    onmanageconnection: (invoker: HTMLButtonElement) => void;
     onmanagealerts: (invoker: HTMLButtonElement) => void;
     onmanageactions: (invoker: HTMLButtonElement) => void;
   } = $props();
@@ -70,6 +72,21 @@
           >
         {/each}
       </div>
+    </div>
+  </section>
+
+  <section class="settings-section" aria-labelledby="connection-settings-title">
+    <div class="section-head">
+      <div id="connection-settings-title" class="menu-title">Connection</div>
+      <button
+        class="menu-button head-action"
+        type="button"
+        data-connection-manager-trigger
+        onclick={(event) => {
+          event.stopPropagation();
+          onmanageconnection(event.currentTarget);
+        }}>Manage</button
+      >
     </div>
   </section>
 

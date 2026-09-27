@@ -132,8 +132,18 @@ gateway:
   subprotocol, build-time `VITE_*` value, reverse-proxy credential, or log
   field;
 - the native desktop configuration owns the persisted plaintext token;
-- the renderer may hold it transiently only to authenticate a direct WSS
-  connection;
+- the settings-read API returns only whether a stored token exists, never the
+  existing plaintext token merely to populate the management UI;
+- an operator-entered replacement token crosses the renderer/native boundary
+  only for the explicit save operation; an existing Direct token can instead
+  be preserved without returning it to the renderer;
+- switching from Direct to another mode removes the persisted Direct token and
+  URL rather than retaining stale credential material;
+- native configuration replacement is staged before replacing the previous
+  file, and failed validation or persistence leaves the previous usable
+  configuration intact;
+- the renderer may hold the active token transiently only to authenticate a
+  direct WSS connection;
 - possession of the token grants remote state observation and context-bound
   action requests for that TinyScry installation, so compromise requires
   rotation.

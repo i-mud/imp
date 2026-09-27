@@ -349,6 +349,8 @@ button {
 .action-dialog *,
 .alert-dialog,
 .alert-dialog *,
+.connection-dialog,
+.connection-dialog *,
 button.close {
   app-region: no-drag;
 }
@@ -363,11 +365,15 @@ button.close {
 .action-dialog .dialog-title *,
 .alert-dialog .dialog-titlebar,
 .alert-dialog .dialog-title,
-.alert-dialog .dialog-title * {
+.alert-dialog .dialog-title *,
+.connection-dialog .dialog-titlebar,
+.connection-dialog .dialog-title,
+.connection-dialog .dialog-title * {
   app-region: drag;
 }
 
 .action-dialog .dialog-close,
-.alert-dialog .dialog-close {
+.alert-dialog .dialog-close,
+.connection-dialog .dialog-close {
   app-region: no-drag;
 }

@@ -75,6 +75,67 @@ itself: automated VPS installation, reverse-proxy/certificate setup,
 pairing-token generation/rotation UX, and general TinyFugue installation
 workflow are candidate distribution work rather than unfinished Slice 11 scope.
 
+## Slice 12 - Native connection settings
+
+Slug: `native-connection-settings`. Complete.
+
+The goal is to make the three existing native desktop transports configurable
+from TinyScry itself rather than requiring operators to hand-edit
+`tunnel.json`.
+
+Slice 12 does not change transport semantics. External SSH, managed SSH and
+authenticated Direct WSS keep the runtime boundaries established by Slices 9
+and 11. This slice adds a validated native configuration-write boundary and a
+desktop management surface around those existing modes.
+
+Planned behavior:
+
+- Settings exposes External, Managed and Direct connection modes.
+- External mode persists no SSH target, remote URL or pairing token.
+- Managed mode requires an SSH target and persists no Direct-WSS credential.
+- Direct mode requires the existing validated `wss:` state endpoint and
+  canonical 256-bit pairing token and persists no SSH target.
+- Existing Direct credentials can remain unchanged when editing other Direct
+  settings without returning the plaintext token through the settings-read API.
+- Pairing-token material is never persisted in WebView `localStorage`, placed
+  in a URL, or included in logs or validation errors.
+- Native configuration writes are atomic and preserve the previous usable file
+  if persistence fails.
+- Saved connection changes take effect on application restart; Slice 12 does
+  not add live transport replacement or a second connection lifecycle.
+- Browser/mock development remains independent of native connection
+  configuration.
+
+Deterministic acceptance must prove:
+
+1. settings reads do not expose an existing plaintext pairing token;
+2. each mode validates its required fields and canonicalizes away fields owned
+   by other modes;
+3. invalid Direct URLs/tokens and empty Managed targets are rejected without
+   replacing the previous configuration;
+4. a Direct token can be explicitly replaced or preserved, but is never
+   silently invented;
+5. configuration persistence failure leaves the previous file intact;
+6. browser/mock runtime remains network-free and does not require native
+   settings commands; and
+7. existing runtime transport selection and action/state semantics remain
+   regression clean.
+
+Windows-native acceptance must additionally configure Managed and Direct modes
+through the TinyScry UI, restart into each saved mode, and verify live state
+plus one outbound action without manually editing `tunnel.json`.
+
+Windows-native acceptance passed for the complete settings path. Managed and
+Direct modes were configured through the TinyScry UI without manually editing
+`tunnel.json`; each saved mode was activated by restarting the application and
+verified with live state plus an outbound action. Direct mode owned no local
+SSH listener, and returning to Managed mode removed the persisted Direct URL
+and pairing token.
+
+VPS installation, reverse-proxy/certificate provisioning, server-side
+pairing-token generation/rotation, live transport hot-switching, multi-user
+credentials and first-run deployment automation remain outside this slice.
+
 ## Candidate work
 
 Unordered, and deliberately without slice numbers.
