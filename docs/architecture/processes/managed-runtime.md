@@ -114,10 +114,12 @@ normally reached through the SSH forward, where the local connect is instant
 and only the answer pays network latency. Sharing the connect window made a
 slow but valid relay read as a foreign listener and the diagnostic flap.
 
-The Tauri command exposes only a transport diagnostic enum. `config.ts` feeds
-a human-readable detail into `RelayStateSource`; Svelte components still see
-only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
-`LIVE` presentation remains in the existing model.
+The Tauri runtime-diagnostic command exposes only a transport diagnostic enum.
+`config.ts` feeds a human-readable detail into `RelayStateSource`; Svelte
+components still see only connection events and the public `RECONNECTING`,
+`DOWN`, `STALE`, and `LIVE` presentation remains in the existing model.
+Separate settings read/write commands manage future-start connection
+configuration and do not widen this runtime diagnostic boundary.
 
 Native connection configuration remains in the historical application-config
 `tunnel.json`, but Slice 12 adds a separate management boundary around it.
@@ -170,12 +172,18 @@ not replace the running source, action sink, or SSH supervisor.
 - `integrations/tinyfugue/tinyscry.tf` - idempotent fixed-path hooks
 - `deploy/systemd/` - VPS user units
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership and adopted-endpoint watch
-- `apps/desktop/src-tauri/src/tunnel_config.rs` - mode and SSH alias
+- `apps/desktop/src-tauri/src/tunnel_config.rs` - native connection validation,
+  canonical persistence, runtime projection, and renderer-safe settings store
 - `apps/desktop/src/lib/tunnel.ts` - transport-independent diagnostic polling
+  plus native connection-settings command wrappers
+- `apps/desktop/src/components/ConnectionDialog.svelte` - native transport
+  management UI
 
 Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
 `test_feed.py`, `test_action_consumer.py`, `test_diagnostics.py`,
-`apps/desktop/src-tauri/src/tunnel.rs`, and desktop source/action tests.
+`apps/desktop/src-tauri/src/tunnel.rs`,
+`apps/desktop/src-tauri/src/tunnel_config.rs`, and
+`apps/desktop/test/tunnel.test.ts`.
 
 ## Verification
 

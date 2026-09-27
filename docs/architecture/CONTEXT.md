@@ -48,18 +48,18 @@ Read the card for the concept you are changing, then the source it cites.
 | [`objects/game-state.md`](objects/game-state.md)           | the normalized state shape and who depends on it          |
 | [`objects/relay.md`](objects/relay.md)                     | the relay's state ownership and local endpoints           |
 | [`objects/gateway.md`](objects/gateway.md)                 | authenticated remote state/action transport boundary      |
-| [`objects/state-source.md`](objects/state-source.md)       | HUD transport selection and connection diagnostics        |
+| [`objects/state-source.md`](objects/state-source.md)       | HUD transport selection, diagnostics, and settings API    |
 | [`objects/hud-model.md`](objects/hud-model.md)             | how the HUD turns events into rendered state              |
 | [`objects/desktop-alerts.md`](objects/desktop-alerts.md)   | desktop-local alert evaluation and effects                |
 | [`objects/desktop-actions.md`](objects/desktop-actions.md) | local action templates, UI invocation, and result meaning |
 
 ### Processes
 
-| Card                                                                     | Covers                                     |
-| ------------------------------------------------------------------------ | ------------------------------------------ |
-| [`processes/state-pipeline.md`](processes/state-pipeline.md)             | GMCP to pixels, hop by hop                 |
-| [`processes/connection-lifecycle.md`](processes/connection-lifecycle.md) | connect, reconnect, stale feed, no data    |
-| [`processes/managed-runtime.md`](processes/managed-runtime.md)           | VPS services and desktop transport runtime |
+| Card                                                                     | Covers                                         |
+| ------------------------------------------------------------------------ | ---------------------------------------------- |
+| [`processes/state-pipeline.md`](processes/state-pipeline.md)             | GMCP to pixels, hop by hop                     |
+| [`processes/connection-lifecycle.md`](processes/connection-lifecycle.md) | connect, reconnect, stale feed, no data        |
+| [`processes/managed-runtime.md`](processes/managed-runtime.md)           | VPS services, desktop transport, native config |
 
 ### Boundaries
 
