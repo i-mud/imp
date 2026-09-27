@@ -8,6 +8,7 @@
   import AlertsMenu from './AlertsMenu.svelte';
   import ActionsMenu from './ActionsMenu.svelte';
   import CompactVital from './CompactVital.svelte';
+  import ConnectionDialog from './ConnectionDialog.svelte';
   import SettingsMenu from './SettingsMenu.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
   import StatusIndicator from './StatusIndicator.svelte';
@@ -31,6 +32,12 @@
   import type { VitalAlertState } from '../lib/alerts/vitals.ts';
   import { freshnessOf, type HudModel } from '../lib/hud/model.ts';
   import type { TextSourceListener } from '../lib/hud/store.svelte.ts';
+  import {
+    loadConnectionSettings,
+    saveConnectionSettings,
+    type ConnectionSettings,
+    type ConnectionSettingsUpdate,
+  } from '../lib/tunnel.ts';
   import {
     loadDisplayMode,
     saveDisplayMode,
@@ -79,11 +86,16 @@
   let alertsOpen = $state(false);
   let actionDialogOpen = $state(false);
   let alertDialogOpen = $state(false);
+  let connectionDialogOpen = $state(false);
   let actionDialogWidth = $state(EXPANDED_SETTINGS_WINDOW_SIZE.width);
   let actionSaveError = $state<string | null>(null);
   let alertSaveError = $state<string | null>(null);
+  let connectionSettings = $state<ConnectionSettings | null>(null);
+  let connectionLoadError = $state<string | null>(null);
+  let connectionSaveError = $state<string | null>(null);
   let actionDialogInvoker: HTMLButtonElement | null = null;
   let alertDialogInvoker: HTMLButtonElement | null = null;
+  let connectionDialogInvoker: HTMLButtonElement | null = null;
   const actionInvocation = $state<ActionInvocationState>({
     pendingActionId: null,
     feedback: null,
@@ -175,6 +187,7 @@
     actionDialogInvoker = invoker;
     actionSaveError = null;
     alertDialogOpen = false;
+    connectionDialogOpen = false;
     settingsOpen = false;
     actionsOpen = false;
     alertsOpen = false;
@@ -211,6 +224,7 @@
 
     alertDialogInvoker = invoker;
     actionDialogOpen = false;
+    connectionDialogOpen = false;
     settingsOpen = false;
     actionsOpen = false;
     alertsOpen = false;
@@ -232,6 +246,76 @@
       target?.focus();
       alertDialogInvoker = null;
     });
+  }
+
+  async function openConnectionDialog(invoker: HTMLButtonElement): Promise<void> {
+    if (displayMode === 'compact') {
+      const row = compactRow;
+      const hudPanel = panel;
+      if (row !== undefined && hudPanel !== undefined) {
+        const rowBounds = row.getBoundingClientRect();
+        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
+        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
+      }
+    } else {
+      actionDialogWidth = EXPANDED_SETTINGS_WINDOW_SIZE.width;
+    }
+
+    connectionDialogInvoker = invoker;
+    connectionSettings = null;
+    connectionLoadError = null;
+    connectionSaveError = null;
+    actionDialogOpen = false;
+    alertDialogOpen = false;
+    settingsOpen = false;
+    actionsOpen = false;
+    alertsOpen = false;
+    connectionDialogOpen = true;
+
+    try {
+      const loaded = await loadConnectionSettings();
+      if (!connectionDialogOpen) return;
+
+      if (loaded === null) {
+        connectionLoadError = 'Connection settings are available only in the native TinyScry application.';
+        return;
+      }
+
+      connectionSettings = loaded;
+    } catch {
+      if (connectionDialogOpen) {
+        connectionLoadError = 'Could not load native connection settings.';
+      }
+    }
+  }
+
+  function closeConnectionDialog(): void {
+    connectionDialogOpen = false;
+    settingsOpen = true;
+
+    const invoker = connectionDialogInvoker;
+    requestAnimationFrame(() => {
+      const target = invoker?.isConnected
+        ? invoker
+        : (document.querySelector<HTMLButtonElement>('[data-connection-manager-trigger]') ??
+          document.querySelector<HTMLButtonElement>('.settings-button') ??
+          document.querySelector<HTMLButtonElement>('button.close'));
+
+      target?.focus();
+      connectionDialogInvoker = null;
+    });
+  }
+
+  async function setConnectionSettings(update: ConnectionSettingsUpdate): Promise<boolean> {
+    connectionSaveError = null;
+
+    try {
+      connectionSettings = await saveConnectionSettings(update);
+      return true;
+    } catch (error) {
+      connectionSaveError = typeof error === 'string' ? error : 'Could not save native connection settings.';
+      return false;
+    }
   }
 
   function invokeDefinition(definition: ActionDefinition): void {
@@ -319,7 +403,7 @@
   });
 
   $effect(() => {
-    if (actionDialogOpen || alertDialogOpen) {
+    if (actionDialogOpen || alertDialogOpen || connectionDialogOpen) {
       const observer = new ResizeObserver(() => resize());
 
       const resize = () => {
@@ -434,7 +518,7 @@
 </script>
 
 <main
-  class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen}
+  class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen && !connectionDialogOpen}
   class="hud"
   aria-label="TinyScry companion HUD"
   data-tauri-drag-region
@@ -452,6 +536,14 @@
       onchange={setAlertDefinitions}
       saveError={alertSaveError}
       onclose={closeAlertDialog}
+    />
+  {:else if connectionDialogOpen}
+    <ConnectionDialog
+      settings={connectionSettings}
+      loadError={connectionLoadError}
+      saveError={connectionSaveError}
+      onsave={setConnectionSettings}
+      onclose={closeConnectionDialog}
     />
   {:else}
     <div
@@ -528,6 +620,9 @@
               {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
+              onmanageconnection={(invoker) => {
+                void openConnectionDialog(invoker);
+              }}
               onmanagealerts={openAlertDialog}
               onmanageactions={openActionDialog}
             />
@@ -619,6 +714,9 @@
               {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
+              onmanageconnection={(invoker) => {
+                void openConnectionDialog(invoker);
+              }}
               onmanagealerts={openAlertDialog}
               onmanageactions={openActionDialog}
             />

@@ -8,7 +8,10 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use tunnel::{TunnelStatus, TunnelSupervisor, LOCAL_PORT};
-use tunnel_config::{RuntimeConnectionConfig, TunnelMode};
+use tunnel_config::{
+    ConnectionConfigStore, ConnectionSettings, ConnectionSettingsUpdate, RuntimeConnectionConfig,
+    TunnelMode,
+};
 
 /// The desktop connection controller's exposure point for transport
 /// diagnostics. Returns only a diagnostic enum - never ssh argv, a PID, or a
@@ -23,6 +26,21 @@ fn tunnel_status(supervisor: tauri::State<'_, Arc<TunnelSupervisor>>) -> TunnelS
 #[tauri::command]
 fn connection_config(config: tauri::State<'_, RuntimeConnectionConfig>) -> RuntimeConnectionConfig {
     config.inner().clone()
+}
+
+#[tauri::command]
+fn connection_settings(
+    store: tauri::State<'_, ConnectionConfigStore>,
+) -> ConnectionSettings {
+    store.settings()
+}
+
+#[tauri::command]
+fn save_connection_settings(
+    store: tauri::State<'_, ConnectionConfigStore>,
+    update: ConnectionSettingsUpdate,
+) -> Result<ConnectionSettings, String> {
+    store.save(update)
 }
 
 #[tauri::command]
@@ -42,6 +60,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tunnel_status,
             connection_config,
+            connection_settings,
+            save_connection_settings,
             alerts_muted
         ])
         .setup(|app| {
@@ -63,12 +83,14 @@ pub fn run() {
             let config_path = app.path().app_config_dir()?.join("tunnel.json");
             let config = tunnel_config::load_or_init(&config_path);
             let runtime_connection = config.runtime_connection_config();
+            let config_store = ConnectionConfigStore::new(config_path, config.clone());
             let supervisor = match config.mode {
                 TunnelMode::External => TunnelSupervisor::external(),
                 TunnelMode::Managed => TunnelSupervisor::managed(config.ssh_target, LOCAL_PORT),
                 TunnelMode::Direct => TunnelSupervisor::direct(),
             };
             app.manage(runtime_connection);
+            app.manage(config_store);
             app.manage(supervisor);
             Ok(())
         })

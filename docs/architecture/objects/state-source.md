@@ -46,6 +46,11 @@ Selected by:
 - `VITE_TINYSCRY_RELAY_URL` remains a local/custom relay override. Direct WSS
   never reads a pairing token or remote URL from a build-time `VITE_*` value.
 
+- Native connection settings use separate `connection_settings` and
+  `save_connection_settings` Tauri commands. They persist configuration for a
+  future application start and do not mutate the `RuntimeConnectionConfig`
+  already selected for the running source/action clients.
+
 Consumed by:
 
 - `apps/desktop/src/lib/hud/store.svelte.ts`, which forwards events to the
@@ -65,6 +70,10 @@ Both hold because the UI's only contract is `SourceEvent`. The Rust
 `TunnelSupervisor` is established during native setup. Renderer startup then
 loads the native connection tuple before mounting the application and
 `config.ts` constructs the matching source and action sink.
+
+The Settings UI is intentionally outside that runtime selection seam. It may
+edit what the next process will select, but it does not hot-swap a
+`StateSource`, `ActionSink`, or `TunnelSupervisor` in the current process.
 
 Local relay mode also supplies a synchronous diagnostic accessor to
 `RelayStateSource`. A relay reconnect event therefore carries the best known

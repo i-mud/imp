@@ -3802,6 +3802,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-window-state",
+ "tempfile",
  "url",
  "windows-sys 0.61.2",
 ]

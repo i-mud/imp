@@ -32,6 +32,27 @@ export type RuntimeConnectionConfig =
       readonly authenticationToken: string;
     };
 
+export type ConnectionMode = 'external' | 'managed' | 'direct';
+
+export interface ConnectionSettings {
+  readonly mode: ConnectionMode;
+  readonly sshTarget: string;
+  readonly remoteUrl: string;
+  readonly hasPairingToken: boolean;
+}
+
+export interface ConnectionSettingsUpdate {
+  readonly mode: ConnectionMode;
+  readonly sshTarget?: string;
+  readonly remoteUrl?: string;
+  /**
+   * Omit to preserve an existing Direct-WSS token. Supplying a string,
+   * including an empty string, explicitly replaces it and is validated by
+   * the native boundary.
+   */
+  readonly pairingToken?: string;
+}
+
 const POLL_INTERVAL_MS = 2_000;
 
 const DETAIL_BY_DIAGNOSTIC: Partial<Record<TunnelDiagnostic, string>> = {
@@ -60,6 +81,32 @@ export async function loadConnectionConfig(): Promise<RuntimeConnectionConfig> {
   }
 
   return invoke<RuntimeConnectionConfig>('connection_config');
+}
+
+/**
+ * Returns editable native connection settings without exposing an existing
+ * plaintext Direct-WSS pairing token.
+ *
+ * Browser/mock development has no native settings store, so it reports null
+ * rather than invoking a Tauri command.
+ */
+export async function loadConnectionSettings(): Promise<ConnectionSettings | null> {
+  if (!isTauriRuntime()) return null;
+
+  return invoke<ConnectionSettings>('connection_settings');
+}
+
+/**
+ * Persists native connection settings for the next application start.
+ *
+ * This intentionally does not mutate the current runtime transport.
+ */
+export async function saveConnectionSettings(update: ConnectionSettingsUpdate): Promise<ConnectionSettings> {
+  if (!isTauriRuntime()) {
+    throw new Error('Native connection settings are unavailable outside Tauri.');
+  }
+
+  return invoke<ConnectionSettings>('save_connection_settings', { update });
 }
 
 /**

@@ -38,13 +38,13 @@ gateway authenticates the pairing token before opening the relay connection,
 exposes only state/action capabilities, and preserves the relay's existing
 state, text, context, and action semantics.
 
-| Component                 | State                                                                                                                                                                                                                                                         |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/protocol`       | Version 2 complete: context-bound state/actions plus transient received text, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                         |
-| `services/relay`          | Loopback-only contextual state relay, transient current-subscriber text broadcast, Origin policy, single-flight action broker, and separate authenticated loopback remote gateway.                                                                            |
-| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and configurable vital/text alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
-| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; external/managed SSH and authenticated Direct WSS transport selection implemented and live-verified.                                                                                                                |
-| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, transient selected-world received-text capture, and fixed-macro action helper implemented.                                                                                         |
+| Component                 | State                                                                                                                                                                                                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`       | Version 2 complete: context-bound state/actions plus transient received text, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                                               |
+| `services/relay`          | Loopback-only contextual state relay, transient current-subscriber text broadcast, Origin policy, single-flight action broker, and separate authenticated loopback remote gateway.                                                                                                  |
+| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, configurable vital/text alerts, and native connection management implemented; Windows-native interaction and live action-path acceptance complete. |
+| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; external/managed SSH and authenticated Direct WSS transport selection plus validated failure-safe native connection persistence implemented and live-verified.                                                                            |
+| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, transient selected-world received-text capture, and fixed-macro action helper implemented.                                                                                                               |
 
 ## Verification
 
@@ -91,6 +91,41 @@ infrastructure and remain separate from CI:
 | TinyFugue GMCP login hook | Required and verified: the operator build must expose the `GMCP_LOGIN` hook its login scripts use to negotiate GMCP and send `Char.Login`. Tested with `5.2.2-3-g4f0ff34`; a version number alone does not prove `GMCP_LOGIN` is compiled in, so the capability is the invariant.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Outbound action path      | The Slice 7 connectionless fence procedure passed on pinned TinyFugue build `5.2.2-3-g4f0ff34` (`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`). Slice 8 then live-verified native UI `look` through `RelayActionSink` -> relay -> TinyFugue -> MUD with one independently observed execution. Consumer removal rejected without execution; restoration did not replay the rejected action; one fresh action executed once. `forwarded` still proves only the fixed bridge write and flush.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+### Slice 12 native connection settings evidence
+
+- The Windows-native Settings surface now manages External, Managed, and Direct
+  transport configuration without requiring manual edits to `tunnel.json`.
+- The settings-read API exposes mode, SSH target, Direct URL, and only a
+  `hasPairingToken` boolean. An existing plaintext Direct pairing token is not
+  returned merely to populate the form.
+- Managed-mode validation now rejects an empty SSH target. Mode-specific writes
+  canonicalize the file: External retains no transport-specific fields,
+  Managed retains only its SSH target, and Direct retains only its WSS state
+  URL and pairing token.
+- Direct settings can preserve an already stored token while changing other
+  Direct fields without returning that token to the renderer. Entering Direct
+  from another mode requires an explicitly supplied valid token.
+- Native persistence stages and replaces the configuration as one write
+  boundary. Validation or persistence failure leaves the previous in-memory
+  and on-disk usable configuration unchanged.
+- Saved transport changes deliberately take effect only after application
+  restart; Slice 12 does not introduce live supervisor/source replacement.
+- Windows-native acceptance saved the existing Managed configuration through
+  the UI, restarted, recovered live state, and executed an outbound `look`
+  action.
+- The same UI then changed Managed -> Direct using the established WSS endpoint
+  and pairing credential. After restart, live state and an outbound `look`
+  action passed through Direct WSS, the UI showed the Direct URL without
+  revealing the stored token, and Windows had no listener on local port 8787.
+- The UI then changed Direct -> Managed with SSH target `avatar`. The persisted
+  file contained only `mode` and `sshTarget`, proving the Direct URL and
+  pairing token were removed. After restart, managed SSH restored live state
+  and outbound action delivery.
+- Browser development kept the native settings boundary inert rather than
+  invoking Tauri configuration commands.
+- The implementation checkpoint passed 144 desktop tests with zero Svelte
+  diagnostics and 39 Windows-native Rust library tests without warnings.
 
 ### Slice 10 transient-text and alert evidence
 

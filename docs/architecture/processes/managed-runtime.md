@@ -119,6 +119,30 @@ a human-readable detail into `RelayStateSource`; Svelte components still see
 only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 `LIVE` presentation remains in the existing model.
 
+Native connection configuration remains in the historical application-config
+`tunnel.json`, but Slice 12 adds a separate management boundary around it.
+`ConnectionConfigStore` exposes a renderer-safe settings projection: mode, SSH
+target, Direct URL, and only whether a Direct pairing token exists. Reading
+settings does not return the existing token.
+
+Writes are canonical by mode. External clears SSH and Direct fields; Managed
+requires a non-empty trimmed SSH target and clears Direct material; Direct
+requires the existing strict `wss:` state-endpoint shape plus a canonical
+256-bit pairing token and clears the SSH target. A Direct update may preserve
+the existing token without sending it back through the renderer. Switching
+away from Direct removes that credential rather than keeping stale secret
+material.
+
+Configuration persistence stages a complete replacement in the destination
+directory before replacing `tunnel.json`; on Unix the staged file is mode
+`0600`. Failed validation or persistence leaves both the previous file and the
+store's previous in-memory configuration intact.
+
+This settings lifecycle remains separate from the active transport lifecycle.
+`RuntimeConnectionConfig` and `TunnelSupervisor` are constructed once during
+Tauri setup. Saving settings changes the next application start only; it does
+not replace the running source, action sink, or SSH supervisor.
+
 ## Failure boundaries
 
 | Failure                                | Recovery / visible result                                                                                                                                                                                                                            |
