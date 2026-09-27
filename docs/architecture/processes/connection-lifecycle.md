@@ -5,8 +5,8 @@
 Two independent liveness signals decide what the HUD shows, and conflating them
 is the most likely bug in this area:
 
-- **Socket liveness** - can the HUD reach the relay? Owned by
-  `apps/desktop/src/lib/source/relay.ts`.
+- **Socket liveness** - can the HUD reach its selected desktop transport and
+  receive the relay stream? Owned by `apps/desktop/src/lib/source/relay.ts`.
 - **Feed liveness** - is the MUD still feeding the relay? Owned by
   `services/relay/src/tinyscry_relay/state.py` and reported as `status.feed`.
 
@@ -25,20 +25,33 @@ vitals.
 ```
 idle
  |  start()
-connecting ----------- open ----------> connected
- |                                        |
- |  close / error                         |  close / error
- v                                        v
-reconnecting --- backoff, retry ----> connecting
- |  stop()
+connecting
+ |-- local/SSH WebSocket open ----------------------> connected
+ |
+ `-- Direct WSS open -> send auth -> relay `hello` -> connected
+
+close / error
+     |
+     v
+reconnecting --- bounded backoff, retry ---> connecting
+     |
+     | stop()
+     v
 disconnected
 ```
 
-On `connected` the relay sends `hello`, then the retained context-bearing
-`snapshot` if it has one, then `status`. The HUD resets its `seq` high-water
-mark on `hello` and on every connection transition, because the relay's counter
-restarts with its process. A non-connected phase also clears the actionable
-context, so stale displayed values cannot authorize an action.
+For the local/SSH transport, WebSocket `open` confirms the connection
+immediately. For authenticated Direct WSS, `open` is not enough: the client
+first sends the pairing-token authentication frame and reports `connected`
+only after the gateway has accepted it and the relay's `hello` arrives. A wrong
+token therefore cannot briefly appear connected or reset reconnect backoff.
+
+After the relay path is established it sends `hello`, then the retained
+context-bearing `snapshot` if it has one, then `status`. The HUD resets its
+`seq` high-water mark on `hello` and on every connection transition, because
+the relay's counter restarts with its process. A non-connected phase also
+clears the actionable context, so stale displayed values cannot authorize an
+action.
 
 Feed status, evaluated by the relay:
 
@@ -96,6 +109,8 @@ current. `apps/desktop/test/model.test.ts` pins this as a regression.
 | -------------------------- | ------------------------------------------------------------------------------- |
 | relay down at startup      | `connecting` -> `reconnecting`, bounded backoff                                 |
 | managed SSH tunnel drops   | same reconnect state, enriched with SSH detail when supervisor knows            |
+| Direct WSS token rejected  | never reaches connected; socket closes and bounded reconnect applies            |
+| gateway/proxy drops        | Direct WSS enters reconnecting and recovers without retained gateway state      |
 | relay restarts             | HUD reconnects; publisher reconnects while idle and restores selection as stale |
 | one subscriber disconnects | others unaffected                                                               |
 | producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data                          |
@@ -106,7 +121,7 @@ a reconnect storm when the relay returns.
 ## Relevant tests
 
 - `apps/desktop/test/relay-source.test.ts` - phases, backoff, `stop()`,
-  diagnostic detail
+  diagnostic detail, and authenticated connection confirmation on `hello`
 - `apps/desktop/src-tauri/src/tunnel.rs` - port classification, argv,
   reconnect failure and owned-child shutdown
 - `apps/desktop/test/model.test.ts` - seq reset, reconnect display rule
@@ -121,13 +136,17 @@ a reconnect storm when the relay returns.
 
 ## Change-impact notes
 
-The SSH supervisor is intentionally outside this state machine. Its internal
-diagnostic may refine a reconnect detail, but it does not add a `SourceEvent`
-kind or a public HUD state. See `docs/architecture/objects/state-source.md` and
+The SSH supervisor and authenticated gateway are intentionally outside this
+HUD state machine. Managed-SSH diagnostics may refine reconnect detail, while
+Direct WSS uses the same socket phases without an SSH diagnostic. Neither adds
+a `SourceEvent` kind or public HUD state. See
+`docs/architecture/objects/state-source.md`,
+`docs/architecture/objects/gateway.md`, and
 `docs/architecture/processes/managed-runtime.md`.
 
 ## Verification
 
 Status: verified
-Verified against: managed-runtime tests listed above and the original
-connection-lifecycle runtime checks recorded in `docs/status.md`.
+Verified against: the tests listed above, the original managed-SSH lifecycle
+runtime checks, and Slice 11 live Direct-WSS recovery after a gateway
+interruption as recorded in `docs/status.md`.

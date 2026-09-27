@@ -5,10 +5,12 @@ A small always-on-top companion HUD for MUDs.
 TinyScry reads character vitals out of a running [TinyFugue](https://github.com/ingwarsw/tinyfugue)
 session on a remote VPS and renders them in a compact, frameless, themeable
 window that supports Dark, Light, and System themes. It sits over your MUD
-client: HP, mana, movement, and the current target's health.
+client: HP, mana, movement, the current target's health, configurable alerts,
+and operator-defined outbound actions.
 
 The MUD never talks to the HUD directly. TinyFugue-side Python normalizes state
-into a protocol TinyScry owns, and the HUD reads it over an SSH tunnel.
+into a protocol TinyScry owns. The desktop reaches that state either through an
+SSH-forwarded loopback relay or through an authenticated Direct WSS gateway.
 
 - Architecture and change impact: [`docs/architecture/CONTEXT.md`](docs/architecture/CONTEXT.md)
 - Wire protocol: [`packages/protocol/SPEC.md`](packages/protocol/SPEC.md)
@@ -21,23 +23,30 @@ into a protocol TinyScry owns, and the HUD reads it over an SSH tunnel.
 ```text
 MUD <-> GMCP <-> TinyFugue             (VPS)
                   <-> TinyScry TF adapter
-                  <-> TinyScry relay, loopback only
-                  <-> SSH tunnel
-                  <-> TinyScry desktop
+                  <-> TinyScry relay, 127.0.0.1:8787
+                       |            |
+                       | SSH        | authenticated gateway, 127.0.0.1:8788
+                       | forward    | -> TLS reverse proxy -> WSS
+                       +------------+------------------------------> TinyScry desktop
 ```
 
-The relay is **never** exposed publicly. Loopback plus SSH prevents remote
-network access, but loopback does not isolate OS users and TinyScry adds no
-per-user authentication. Both workstation and VPS must be single-user or trust
-every host-local process - see
-[ADR 0001](docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md).
+The relay is **never** exposed publicly. SSH mode forwards that loopback relay
+to the workstation. Direct WSS instead exposes only the separate authenticated
+gateway through a TLS reverse proxy; `/ingest` and `/action-consumer` remain
+local-only.
+
+Loopback does not isolate OS users. Both workstation and VPS must be
+single-user or trust every host-local process - see
+[ADR 0001](docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md)
+and
+[ADR 0010](docs/architecture/decisions/0010-authenticated-remote-gateway.md).
 
 ## Repository structure
 
 ```
 tinyscry/
   apps/desktop/           Tauri 2 + Svelte 5 HUD window
-  services/relay/         Python WebSocket relay (loopback only)
+  services/relay/         Python loopback relay + authenticated remote gateway
   integrations/tinyfugue/ GMCP capture, normalization, publisher
   packages/protocol/      Canonical wire protocol, validation, fixtures
   deploy/                 VPS systemd units and install documentation
@@ -139,12 +148,16 @@ npm run tf:replay -- fixtures/real-session.jsonl --dry-run
 VITE_TINYSCRY_SOURCE=relay VITE_TINYSCRY_RELAY_URL=ws://127.0.0.1:8787/state npm run dev
 ```
 
-## SSH tunnel
+## Desktop transport
 
-TinyScry never talks SSH itself; it always uses the platform's system OpenSSH
-client, your `~/.ssh/config`, `known_hosts` and agent. It stores no password
-and handles no private key. Two modes, selected by
-`tunnel.json` in the app's config directory
+TinyScry supports three native desktop transport modes in `tunnel.json`:
+external SSH, managed SSH, and authenticated Direct WSS.
+
+TinyScry does not implement SSH itself. External and managed SSH modes use the
+platform's system OpenSSH client, your `~/.ssh/config`, `known_hosts`, and
+agent. TinyScry stores no SSH password and handles no private key.
+
+The mode is selected by `tunnel.json` in the app's config directory
 (`~/.config/dev.tinyscry.hud/tunnel.json` on Linux,
 `%APPDATA%\dev.tinyscry.hud\tunnel.json` on Windows,
 `~/Library/Application Support/dev.tinyscry.hud/tunnel.json` on macOS) -
@@ -198,7 +211,29 @@ owning process: it verifies whether that port already answers with TinyScry's
 relay health shape and, if so, uses it; otherwise it reports the conflict and
 does not start a child. Closing TinyScry terminates only the child it spawned.
 
-`ws://127.0.0.1:8787/state` remains the HUD's default relay URL in both modes.
+`ws://127.0.0.1:8787/state` remains the HUD's default relay URL in both SSH modes.
+
+### Direct WSS mode
+
+Direct mode owns no SSH process and requires a trusted `wss:` endpoint backed
+by TinyScry's authenticated gateway:
+
+```json
+{
+  "mode": "direct",
+  "remoteUrl": "wss://host.example/state",
+  "pairingToken": "<43-character unpadded base64url token>"
+}
+```
+
+The gateway itself remains loopback-only and must sit behind a TLS reverse
+proxy. The desktop sends the pairing token as the first WebSocket frame; it is
+not placed in the URL, WebSocket subprotocol, build-time `VITE_*`
+configuration, or WebView `localStorage`. The server stores only the token's
+SHA-256 digest.
+
+See [`deploy/README.md`](deploy/README.md) for the current manual gateway and
+reverse-proxy deployment procedure.
 
 ## How TinyFugue feeds it
 
@@ -250,7 +285,10 @@ Planned and future work: [`docs/roadmap.md`](docs/roadmap.md).
 - All MUD/GMCP data is untrusted; the protocol layer fails closed on malformed
   input and never partially applies state.
 - The relay binds `127.0.0.1` by default and has no public listening socket.
-- No secrets, no persisted passwords, no private key handling.
+- SSH mode stores no password and handles no private key; credentials remain
+  owned by system OpenSSH.
+- Direct WSS persists one high-entropy pairing token in native application
+  configuration; the gateway stores only its SHA-256 digest.
 - Loopback TCP is not same-user isolation. Another local OS user or process can
   reach the listener; `Origin` checks are browser defense-in-depth, not
   authentication. Untrusted multi-user hosts are unsupported.

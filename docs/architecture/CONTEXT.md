@@ -14,24 +14,28 @@ a running TinyFugue session on a remote VPS and renders them in a compact
 frameless window on the operator's desktop.
 
 ```
-MUD <-> GMCP <-> TinyFugue <-> TinyScry TF adapter <-> relay (loopback) <-> SSH tunnel <-> desktop
+MUD <-> GMCP <-> TinyFugue <-> TinyScry TF adapter <-> relay (loopback)
+                                                        |         |
+                                                        | SSH     | gateway (loopback)
+                                                        |         | -> TLS/WSS
+                                                        +---------+----> desktop
 ```
 
 ## Where things live
 
-| Concern                                 | Path                        |
-| --------------------------------------- | --------------------------- |
-| Wire protocol + validation              | `packages/protocol/`        |
-| Protocol reference                      | `packages/protocol/SPEC.md` |
-| Desktop HUD (Tauri + Svelte)            | `apps/desktop/`             |
-| Relay service (Python)                  | `services/relay/`           |
-| TinyFugue integration                   | `integrations/tinyfugue/`   |
-| VPS systemd units, install              | `deploy/`                   |
-| Cross-component e2e check               | `tests/e2e/`                |
-| Commands, prerequisites                 | `README.md`                 |
-| Platform/build strategy                 | `docs/development.md`       |
-| Current implementation and verification | `docs/status.md`            |
-| Planned slices and deferred future work | `docs/roadmap.md`           |
+| Concern                                  | Path                        |
+| ---------------------------------------- | --------------------------- |
+| Wire protocol + validation               | `packages/protocol/`        |
+| Protocol reference                       | `packages/protocol/SPEC.md` |
+| Desktop HUD (Tauri + Svelte)             | `apps/desktop/`             |
+| Relay + remote gateway services (Python) | `services/relay/`           |
+| TinyFugue integration                    | `integrations/tinyfugue/`   |
+| VPS systemd units, install               | `deploy/`                   |
+| Cross-component e2e check                | `tests/e2e/`                |
+| Commands, prerequisites                  | `README.md`                 |
+| Platform/build strategy                  | `docs/development.md`       |
+| Current implementation and verification  | `docs/status.md`            |
+| Planned slices and deferred future work  | `docs/roadmap.md`           |
 
 ## Map entries
 
@@ -42,19 +46,20 @@ Read the card for the concept you are changing, then the source it cites.
 | Card                                                       | Covers                                                    |
 | ---------------------------------------------------------- | --------------------------------------------------------- |
 | [`objects/game-state.md`](objects/game-state.md)           | the normalized state shape and who depends on it          |
-| [`objects/relay.md`](objects/relay.md)                     | the relay's state ownership and endpoints                 |
-| [`objects/state-source.md`](objects/state-source.md)       | HUD transport boundary and tunnel diagnostics             |
+| [`objects/relay.md`](objects/relay.md)                     | the relay's state ownership and local endpoints           |
+| [`objects/gateway.md`](objects/gateway.md)                 | authenticated remote state/action transport boundary      |
+| [`objects/state-source.md`](objects/state-source.md)       | HUD transport selection and connection diagnostics        |
 | [`objects/hud-model.md`](objects/hud-model.md)             | how the HUD turns events into rendered state              |
 | [`objects/desktop-alerts.md`](objects/desktop-alerts.md)   | desktop-local alert evaluation and effects                |
 | [`objects/desktop-actions.md`](objects/desktop-actions.md) | local action templates, UI invocation, and result meaning |
 
 ### Processes
 
-| Card                                                                     | Covers                                  |
-| ------------------------------------------------------------------------ | --------------------------------------- |
-| [`processes/state-pipeline.md`](processes/state-pipeline.md)             | GMCP to pixels, hop by hop              |
-| [`processes/connection-lifecycle.md`](processes/connection-lifecycle.md) | connect, reconnect, stale feed, no data |
-| [`processes/managed-runtime.md`](processes/managed-runtime.md)           | VPS services, live feed, SSH ownership  |
+| Card                                                                     | Covers                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------ |
+| [`processes/state-pipeline.md`](processes/state-pipeline.md)             | GMCP to pixels, hop by hop                 |
+| [`processes/connection-lifecycle.md`](processes/connection-lifecycle.md) | connect, reconnect, stale feed, no data    |
+| [`processes/managed-runtime.md`](processes/managed-runtime.md)           | VPS services and desktop transport runtime |
 
 ### Boundaries
 
@@ -70,7 +75,7 @@ about to contradict it.
 
 | ADR                                                               | Decision                                            |
 | ----------------------------------------------------------------- | --------------------------------------------------- |
-| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay is loopback-only; SSH is the boundary         |
+| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay loopback boundary and SSH transport           |
 | [0002](decisions/0002-tinyscry-owned-protocol.md)                 | TinyScry owns its protocol; GMCP stops at normalize |
 | [0003](decisions/0003-snapshot-only-state-transfer.md)            | whole snapshots, never partial updates              |
 | [0004](decisions/0004-hand-written-validators-shared-fixtures.md) | hand-written decoders, shared fixture corpus        |
@@ -79,6 +84,7 @@ about to contradict it.
 | [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                          |
 | [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds           |
 | [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context        |
+| [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway    |
 
 ## Invariants worth knowing before you edit
 
@@ -98,6 +104,9 @@ about to contradict it.
    freshness model; they do not publish state or trigger outbound actions.
 9. Saved desktop actions are local command templates, not queued or retained
    dispatches; the relay and TinyFugue no-replay contract remains unchanged.
+10. Public Direct WSS terminates at the authenticated loopback gateway, never
+    at the relay. Authentication succeeds before the gateway opens the relay,
+    and privileged producer/helper routes remain unreachable remotely.
 
 ## Maintaining this map
 

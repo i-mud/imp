@@ -191,5 +191,6 @@ character class requires a new rejection fixture, in both languages.
 
 Status: verified
 Verified against: protocol rejection tests, hostile event/record tests,
-context-marker and action-helper tests, relay Origin/action tests, and managed
-OpenSSH argv and ownership tests.
+context-marker and action-helper tests, relay Origin/action tests, authenticated
+gateway pre-auth/origin/route/loopback tests, managed OpenSSH argv and ownership
+tests, and the live Direct-WSS boundary recorded in `docs/status.md`.

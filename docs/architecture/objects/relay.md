@@ -40,7 +40,10 @@ Fed by:
 
 Read by:
 
-- `apps/desktop/src/lib/source/relay.ts`, across an SSH port-forward
+- `apps/desktop/src/lib/source/relay.ts`, across a local/SSH-forwarded relay
+  connection in external or managed mode
+- `tinyscry-gateway`, as the authenticated Direct-WSS transport's loopback
+  upstream
 
 Depends on:
 
@@ -55,19 +58,21 @@ Reused by:
 
 - Changing `RelayState`'s feed rules changes what the HUD renders as
   "no data" vs. "stale" - see `docs/architecture/processes/connection-lifecycle.md`.
-- **The default port `8787` is hardcoded in six source locations**, none of
-  which read from the others, so changing it means editing
-  `services/relay/src/tinyscry_relay/server.py` (twice - the class and the
-  start helper), `services/relay/src/tinyscry_relay/config.py` (the env
-  fallback), `integrations/tinyfugue/src/tinyscry_tf/publisher.py`,
-  `integrations/tinyfugue/src/tinyscry_tf/action_consumer.py`, and
-  `apps/desktop/src/lib/config.ts`. Tests use ephemeral ports, so also update
-  `README.md`, `docs/development.md`, and `packages/protocol/SPEC.md`.
+- The default relay port `8787` is intentionally duplicated across process
+  boundaries rather than imported from one language/runtime. Before changing
+  it, search the repository for `8787`: current consumers include relay
+  configuration/server startup, TinyFugue publisher/action consumer, the
+  Tauri local-forward port, desktop local-relay configuration, gateway
+  upstream defaults, deployment units, and documentation. Tests frequently
+  use ephemeral ports and will not enumerate every operational default.
 - Changing endpoint paths (`/state`, `/ingest`, `/action`,
   `/action-consumer`, `/healthz`) breaks the corresponding source, publisher,
-  action sink, helper, and `SPEC.md` transport table.
+  action sink, helper, and `SPEC.md` transport table. `/state`, `/action`, and
+  `/healthz` also affect the authenticated gateway and public reverse-proxy
+  route set.
 - Changing the bind default is a security change; read
-  `docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md` first.
+  `docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md` and
+  `docs/architecture/decisions/0010-authenticated-remote-gateway.md` first.
 - `RelayState` is deliberately transport-free and clock-injected so its rules
   are unit-testable without a socket. Keep it that way; putting broadcast logic
   into it would make the feed rules untestable.
@@ -75,6 +80,8 @@ Reused by:
 ## Invariants
 
 - Binds loopback only. A non-loopback host is rejected and has no override.
+- Public Direct WSS terminates at the separate authenticated gateway. The
+  relay itself never accepts Internet-facing authentication or a public bind.
 - Loopback prevents remote access but does not isolate OS users. TinyScry has
   no per-user authentication, so the VPS and workstation must be single-user
   or trust every host-local process.
@@ -96,5 +103,7 @@ Reused by:
 ## Verification
 
 Status: verified
-Verified against: `services/relay` at bootstrap; unit and loopback server tests
-plus `tests/e2e/relay_roundtrip.py` passing.
+Verified against: relay unit/loopback server tests,
+`tests/e2e/relay_roundtrip.py`, gateway integration tests that bridge the
+relay only after authentication, and live SSH/Direct-WSS transport evidence in
+`docs/status.md`.

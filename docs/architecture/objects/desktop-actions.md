@@ -5,7 +5,8 @@
 TinyScry stores operator-defined action buttons in the desktop renderer and
 forwards a command only after an explicit operator click or keyboard activation.
 Saved definitions are presentation-side configuration; they do not change the
-relay, TinyFugue helper, protocol, SSH boundary, or game-state model.
+relay, TinyFugue helper, protocol, desktop transport boundary, or game-state
+model.
 
 ## Ownership
 
@@ -143,3 +144,9 @@ replay, reconnect resend, or duplicate invocation was observed.
 Deterministic tests cover the `unknown` result semantics and its no-retry
 wording, and manual browser mock acceptance checked that presentation. No live
 `unknown` result was deliberately manufactured.
+
+Slice 11 transport acceptance re-verified the same real outbound `look` action
+from the native Windows UI through authenticated Direct WSS. After a deliberate
+gateway interruption, the desktop reconnected automatically and another action
+succeeded. Restoring the previous managed-SSH configuration then re-verified
+state and action delivery without changing relay or feed configuration.

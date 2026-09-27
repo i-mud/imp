@@ -23,9 +23,12 @@ publisher.py
 relay /ingest
  |  protocol.decode_client_message  (fail-closed)
 RelayState                  <-- owns selected context + snapshot + seq + feed
- |  context-bearing snapshot
-SSH port-forward            <-- see decisions/0001
-relay.ts  (RelayStateSource)
+ |  desktop-facing state/action capability
+ |-- SSH local forward -------------------------------.
+ |                                                   |
+ `-- authenticated gateway -> TLS reverse proxy -> WSS
+                                                     |
+relay.ts  (RelayStateSource) <-----------------------'
  |  decodeServerMessage     (fail-closed)
  |  SourceEvent
 model.ts  (applyEvent)
@@ -36,7 +39,10 @@ components/*.svelte
 Outbound actions are a separate reverse path:
 
 ```text
-desktop ActionSink -> relay /action -> one matching /action-consumer
+desktop ActionSink
+  -> SSH-forwarded relay /action
+     OR authenticated gateway /action -> relay /action
+  -> one matching /action-consumer
   -> private context check -> one fixed /tinyscry_send <encoded-data> TF line
   -> helper exit -> synchronous TF context/world fence -> textdecode() -> send()
   -> guarded replacement helper
@@ -52,12 +58,12 @@ path exercises real validation rather than bypassing it.
 
 ## Major dependencies
 
-| Hop           | Depends on                                      |
-| ------------- | ----------------------------------------------- |
-| TF -> feed    | verified TinyFugue hook + private drained spool |
-| feed -> relay | `websockets` client                             |
-| relay -> HUD  | system OpenSSH forward, `websockets` server     |
-| HUD           | Tauri 2 webview, Svelte 5                       |
+| Hop           | Depends on                                                 |
+| ------------- | ---------------------------------------------------------- |
+| TF -> feed    | verified TinyFugue hook + private drained spool            |
+| feed -> relay | `websockets` client                                        |
+| relay -> HUD  | system OpenSSH forward, or authenticated gateway + TLS/WSS |
+| HUD           | Tauri 2 webview, Svelte 5                                  |
 
 ## Validation points
 
@@ -86,6 +92,8 @@ writes TinyFugue input.
 | feed process exits                | systemd restarts one lock-protected replacement                                                                         |
 | hook spool target missing         | TinyFugue loses updates but never blocks                                                                                |
 | managed SSH child exits           | supervisor retries; HUD remains in reconnecting presentation                                                            |
+| Direct WSS authentication fails   | no relay connection is opened; desktop socket closes and reconnects                                                     |
+| gateway or reverse proxy drops    | desktop state socket reconnects with bounded backoff; no state/action replay                                            |
 | producer disconnects              | snapshot retained; `feed` becomes `down`                                                                                |
 | binary or malformed HUD frame     | `protocol-error`; current socket closes, state remains untouched, and reconnect starts                                  |
 | unknown message `type`            | silently ignored (forwards compatibility)                                                                               |
@@ -100,6 +108,9 @@ writes TinyFugue input.
   (shared corpus, both languages)
 - `services/relay/tests/test_server.py` (loopback, Origin policy, producer, and
   action lifecycle)
+- `services/relay/tests/test_gateway.py` and `test_gateway_config.py`
+  (authentication, endpoint/origin policy, loopback gateway boundary, state
+  and action bridging)
 - `integrations/tinyfugue/tests/test_feed.py` (per-world state, checkpoints,
   selection, and cancellation)
 - `integrations/tinyfugue/tests/test_action_consumer.py` (private context and
@@ -125,12 +136,13 @@ action evidence. Mappings in `normalize.py` remain limited to observed
 
 Status: state path verified end to end; outbound TinyFugue bridge live-verified
 
-Verified state evidence remains the test suites listed above; the sanitized
-`integrations/tinyfugue/fixtures/real-session.jsonl`; a VPS loopback relay; a
-manual SSH local forward; and the native Windows Tauri HUD. That runtime
-exercise covered initial identity/resources, damage and recovery, target
-acquisition/damage/clearing, producer stall and exit, relay restart, and SSH
-tunnel interruption.
+Verified state evidence includes the test suites listed above; the sanitized
+`integrations/tinyfugue/fixtures/real-session.jsonl`; the VPS loopback relay;
+both SSH and authenticated Direct-WSS desktop transports; and the native
+Windows Tauri HUD. Runtime exercises covered initial identity/resources,
+damage and recovery, target acquisition/damage/clearing, producer stall and
+exit, relay restart, SSH-tunnel interruption, valid and invalid Direct-WSS
+authentication, and recovery after a gateway interruption.
 
 The outbound bridge was live-verified using real TinyFugue
 `5.2.2-3-g4f0ff34`, pinned to

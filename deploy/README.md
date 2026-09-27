@@ -22,19 +22,28 @@ untrusted multi-user hosts are unsupported.
 
 The `tinyscry-tinyfugue` package depends on `tinyscry-relay` by relative path
 (see its `pyproject.toml` `[tool.uv.sources]`), so sync the whole repository
-rather than individual subdirectories:
+rather than individual subdirectories.
+
+The repository includes the canonical sync command:
 
 ```bash
-rsync -a --delete \
-  --exclude .git --exclude node_modules --exclude dist --exclude target \
-  --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
-  --exclude .mypy_cache --exclude .ruff_cache \
-  ~/src/tinyscry/ <host-alias>:~/tinyscry/
+npm run vps:sync
 ```
 
-Replace `<host-alias>` with the VPS's entry in `~/.ssh/config`. Re-run this
-after every change that needs to reach the VPS; the WSL2 checkout stays
-authoritative.
+It copies `~/src/tinyscry/` to the SSH host alias `avatar` at `~/tinyscry/`
+while excluding Git metadata, dependency/build directories, caches,
+environment files, and common key material.
+
+For another host or destination, override the defaults:
+
+```bash
+TINYSCRY_VPS_HOST=<host-alias> \
+TINYSCRY_VPS_DEST='~/tinyscry/' \
+npm run vps:sync
+```
+
+Re-run the sync after every source change that needs to reach the VPS; the WSL2
+checkout stays authoritative.
 
 ## 2. Install the Python environments (on VPS)
 
@@ -69,7 +78,8 @@ the SHA-256 digest of the token. The plaintext token is copied once to the
 desktop configuration later; do not put it in a URL, shell history, service
 unit, repository file, or reverse-proxy configuration.
 
-For Slice 11 verification, generate a token and its digest manually:
+Until pairing/rotation UX is automated, generate a token and its digest
+manually:
 
 ```bash
 mkdir -p ~/.config/tinyscry
@@ -105,9 +115,69 @@ unset token digest
 gateway refuses to start without a valid 64-hex-character digest.
 
 The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
-`ws://127.0.0.1:8787`. A TLS reverse proxy may later expose the gateway over
-`wss:`. Never proxy port 8787 or the relay's `/ingest` or `/action-consumer`
-endpoints to the Internet.
+`ws://127.0.0.1:8787`. Never proxy port 8787 or the relay's `/ingest` or
+`/action-consumer` endpoints to the Internet.
+
+### Public TLS/WSS edge for Direct mode
+
+Direct WSS requires a publicly trusted TLS endpoint. TLS termination belongs to
+a normal reverse proxy such as Caddy or nginx, not to TinyScry's Python
+gateway.
+
+The public proxy must expose only `/state`, `/action`, and optionally
+`/healthz`, forwarding them to `127.0.0.1:8788`. All other paths should be
+rejected.
+
+A minimal Caddy route shape is:
+
+```text
+https://tinyscry.example {
+    @gateway path /state /action /healthz
+
+    handle @gateway {
+        reverse_proxy 127.0.0.1:8788
+    }
+
+    handle {
+        respond 404
+    }
+}
+```
+
+Certificate acquisition and renewal are currently operator-owned. If
+certificates are provisioned outside the reverse proxy, renewal must also reload
+the proxy after replacing its readable certificate/key copies.
+
+The Slice 11 live acceptance used Caddy and a publicly trusted certificate and
+verified the public `/healthz`, `/state`, and `/action` path while
+`/ingest` and `/action-consumer` remained unreachable. Automated
+reverse-proxy/certificate provisioning remains future distribution work.
+
+### Direct desktop configuration
+
+The native desktop configuration file is the same `tunnel.json` used by SSH
+modes:
+
+- Linux: `~/.config/dev.tinyscry.hud/tunnel.json`
+- Windows: `%APPDATA%\dev.tinyscry.hud\tunnel.json`
+- macOS: `~/Library/Application Support/dev.tinyscry.hud/tunnel.json`
+
+For Direct WSS:
+
+```json
+{
+  "mode": "direct",
+  "remoteUrl": "wss://tinyscry.example/state",
+  "pairingToken": "<43-character pairing token>"
+}
+```
+
+`remoteUrl` must use `wss:`, contain no credentials/query/fragment, and end in
+`/state`. The pairing token must be the exact plaintext token whose SHA-256
+digest is configured on the gateway.
+
+Do not put the token in a URL, reverse-proxy configuration, `VITE_*`
+environment value, or WebView `localStorage`.
 
 ## 5. Enable lingering (on VPS, once)
 
@@ -234,6 +304,11 @@ systemctl --user is-active \
 curl -s http://127.0.0.1:8788/healthz
 # expect: {"status":"ok"}
 
+# When Direct WSS is configured, verify the public TLS edge separately:
+# curl -s https://<public-host>/healthz
+# curl -s -o /dev/null -w '%{http_code}\n' https://<public-host>/ingest
+# the second command must report 404
+
 # The feed created the runtime spool, hook symlink, and private context marker
 ls -l ~/.local/state/tinyscry/spool
 stat -c '%a %n' ~/.local/state/tinyscry/context   # 600 after a world selection
@@ -248,14 +323,15 @@ journalctl --user \
 
 ## Common failure diagnostics
 
-| Symptom                                                                  | Check                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tinyscry-feed` exits immediately with "another TinyScry feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status tinyscry-feed.service`, then stop the extra process.                                                 |
-| Relay reachable but no HUD data                                          | `curl http://127.0.0.1:8787/healthz` (via the SSH tunnel) and confirm a producer is attached; check `journalctl --user -u tinyscry-feed.service` for "feed started" / reconnect lines.                                                       |
-| TinyFugue shows an `fwrite` error line                                   | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                           |
-| Services do not survive a reboot                                         | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                        |
-| Relay bound to more than loopback                                        | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                               |
-| Feed consuming GMCP but relay reports `has_snapshot: false`              | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again. |
+| Symptom                                                                  | Check                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tinyscry-feed` exits immediately with "another TinyScry feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status tinyscry-feed.service`, then stop the extra process.                                                    |
+| Relay reachable but no HUD data                                          | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `tinyscry-feed.service`.      |
+| Direct WSS repeatedly reconnects                                         | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging. |
+| TinyFugue shows an `fwrite` error line                                   | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                              |
+| Services do not survive a reboot                                         | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                           |
+| Relay bound to more than loopback                                        | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                  |
+| Feed consuming GMCP but relay reports `has_snapshot: false`              | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again.    |
 
 ## Diagnostic raw capture (opt-in, VPS)
 

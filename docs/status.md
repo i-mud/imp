@@ -10,7 +10,10 @@ The complete production-shaped path runs today:
 ```text
 MUD GMCP <-> TinyFugue hook -> private versioned spool
          -> per-world normalize -> selected-context publisher -> loopback relay
-         <-> SSH tunnel <-> native Windows Tauri HUD
+              |                                            |
+              | SSH forward                                | authenticated gateway
+              |                                            | -> TLS reverse proxy
+              +-------------------------------> native Windows Tauri HUD <--- WSS
 ```
 
 The source data came from a real target-MUD session. A selected, redacted
@@ -28,12 +31,19 @@ monitors that endpoint instead of spawning over it, and takes the forward over
 with its own supervised child once the endpoint is gone. External tunnel mode
 remains the default and remains supported.
 
+Direct WSS mode is also implemented and live-verified. The desktop can bypass
+SSH and connect through a trusted TLS endpoint to the separate authenticated
+gateway while the relay and gateway themselves remain loopback-only. The
+gateway authenticates the pairing token before opening the relay connection,
+exposes only state/action capabilities, and preserves the relay's existing
+state, text, context, and action semantics.
+
 | Component                 | State                                                                                                                                                                                                                                                         |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/protocol`       | Version 2 complete: context-bound state/actions plus transient received text, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                         |
-| `services/relay`          | Loopback-only contextual state relay, transient current-subscriber text broadcast, Origin policy, and single-flight action broker.                                                                                                                            |
+| `services/relay`          | Loopback-only contextual state relay, transient current-subscriber text broadcast, Origin policy, single-flight action broker, and separate authenticated loopback remote gateway.                                                                            |
 | `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and configurable vital/text alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
-| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks.                                                                                                                           |
+| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; external/managed SSH and authenticated Direct WSS transport selection implemented and live-verified.                                                                                                                |
 | `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, transient selected-world received-text capture, and fixed-macro action helper implemented.                                                                                         |
 
 ## Verification
@@ -344,5 +354,29 @@ wildcard behavior, quick enable/disable through Bell surfaces, compact and
 expanded alert presentation, intrinsic Settings/Alerts sizing, and the
 zero-definition compact Actions/Alerts affordances. Alerts remain local
 presentation behavior and do not dispatch outbound commands.
+
+Slice 11, `authenticated-wss-transport`, is complete. It adds a separate
+loopback `tinyscry-gateway`, pairing-token authentication before relay access,
+native Direct-WSS desktop configuration, and runtime selection between Direct
+WSS and the existing SSH modes. The relay remains permanently loopback-only
+and unchanged in role; the gateway exposes only state and action capabilities.
+
+Deterministic verification covers malformed, binary, wrong-token and timed-out
+authentication; pre-auth relay isolation; Origin and endpoint rejection;
+loopback listener/upstream restrictions; state/text semantics; action
+round-trips; relay loss; and no automatic action retry.
+
+Live Windows acceptance used a publicly trusted TLS endpoint and verified
+Direct WSS with no local `8787` listener, live state changes, a real `look`
+action, automatic recovery after a gateway interruption, and switching the
+same desktop back to managed SSH without changing relay or feed configuration.
+A separate live workstation WSS probe verified that an incorrect pairing token
+was rejected with close code `1008` and exposed no state. Relay, feed, and
+gateway user services were left enabled for boot. Relay/feed reboot survival
+was previously live-verified; gateway reboot survival has not yet been
+separately observed after enabling it.
+
+Certificate renewal infrastructure was configured for the live endpoint, but
+an actual renewal has not yet occurred and is not claimed as verified.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).
