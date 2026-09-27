@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 type TunnelDiagnostic =
   | 'external'
+  | 'direct'
   | 'external_port_in_use'
   | 'local_port_unavailable'
   | 'ssh_unavailable'

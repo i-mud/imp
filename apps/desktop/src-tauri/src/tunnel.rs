@@ -48,6 +48,8 @@ const STDERR_TAIL_BYTES: usize = 4096;
 pub enum TunnelDiagnostic {
     /// Managed mode is off; TinyScry does not own a tunnel.
     External,
+    /// Direct WSS mode; no local SSH child or forwarded port is owned.
+    Direct,
     /// The local port is held by something that answers like a usable relay
     /// endpoint. Managed mode adopts it: no child is spawned on top of it,
     /// and it is monitored so the forward can be taken over when it goes.
@@ -85,6 +87,19 @@ impl TunnelSupervisor {
         Arc::new(Self {
             status: Mutex::new(TunnelStatus {
                 diagnostic: TunnelDiagnostic::External,
+            }),
+            child: Mutex::new(None),
+            stop: Arc::new(AtomicBool::new(false)),
+            worker: Mutex::new(None),
+        })
+    }
+
+    /// Direct WSS mode: TinyScry owns no SSH process or local forward.
+    pub fn direct() -> Arc<Self> {
+        eprintln!("tinyscry: direct WSS mode; no SSH child");
+        Arc::new(Self {
+            status: Mutex::new(TunnelStatus {
+                diagnostic: TunnelDiagnostic::Direct,
             }),
             child: Mutex::new(None),
             stop: Arc::new(AtomicBool::new(false)),
@@ -460,6 +475,19 @@ mod tests {
 
         assert_eq!(supervisor.status().diagnostic, TunnelDiagnostic::External);
         supervisor.shutdown(); // no-op; must not panic without a child
+    }
+
+    #[test]
+    fn direct_mode_owns_no_ssh_child() {
+        let supervisor = TunnelSupervisor::direct();
+
+        assert_eq!(supervisor.status().diagnostic, TunnelDiagnostic::Direct);
+        assert!(supervisor.child.lock().is_none());
+        assert!(supervisor.worker.lock().is_none());
+
+        supervisor.shutdown();
+
+        assert_eq!(supervisor.status().diagnostic, TunnelDiagnostic::Direct);
     }
 
     #[test]
