@@ -93,6 +93,24 @@ describe('RelayStateSource', () => {
         token: 'pairing-token',
       },
     ]);
+    expect(events).not.toContainEqual({
+      kind: 'connection',
+      phase: 'connected',
+      detail: null,
+    });
+
+    socket.emit(
+      'message',
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'hello',
+          protocol: 2,
+          at: 100,
+          relay: { name: 'tinyscry-relay', version: '0.1.0' },
+        }),
+      }),
+    );
+
     expect(events).toContainEqual({
       kind: 'connection',
       phase: 'connected',

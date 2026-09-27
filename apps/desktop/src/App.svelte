@@ -2,12 +2,19 @@
   import { onMount } from 'svelte';
 
   import Hud from './components/Hud.svelte';
-  import { createActionSink, createStateSource } from './lib/config.ts';
+  import type { ActionSink } from './lib/action/types.ts';
   import { HudStore, type TextSourceListener } from './lib/hud/store.svelte.ts';
+  import type { StateSource } from './lib/source/types.ts';
+
+  let {
+    source,
+    actionSink,
+  }: {
+    source: StateSource;
+    actionSink: ActionSink;
+  } = $props();
 
   const store = new HudStore();
-  const source = createStateSource();
-  const actionSink = createActionSink();
   const subscribeText = (listener: TextSourceListener) => store.subscribeText(listener);
 
   onMount(() => {

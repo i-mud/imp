@@ -80,6 +80,15 @@ export class RelayStateSource implements StateSource {
     }
 
     this.socket = socket;
+
+    let confirmed = false;
+    const confirmConnected = (): void => {
+      if (confirmed) return;
+      confirmed = true;
+      this.nextDelayMs = this.options.reconnect.initialDelayMs;
+      this.emit({ kind: 'connection', phase: 'connected', detail: null });
+    };
+
     socket.addEventListener('open', () => {
       if (!this.running || this.socket !== socket) return;
 
@@ -96,10 +105,9 @@ export class RelayStateSource implements StateSource {
           this.reconnect('Unable to authenticate relay connection.');
           return;
         }
+      } else {
+        confirmConnected();
       }
-
-      this.nextDelayMs = this.options.reconnect.initialDelayMs;
-      this.emit({ kind: 'connection', phase: 'connected', detail: null });
     });
     socket.addEventListener('message', (event) => {
       if (!this.running || this.socket !== socket || !(event instanceof MessageEvent)) return;
@@ -111,7 +119,7 @@ export class RelayStateSource implements StateSource {
         socket.close();
         return;
       }
-      this.handleFrame(socket, event.data);
+      this.handleFrame(socket, event.data, confirmConnected);
     });
     socket.addEventListener('error', () => {
       if (this.socket === socket) this.reconnect('Relay connection failed.');
@@ -121,7 +129,7 @@ export class RelayStateSource implements StateSource {
     });
   }
 
-  private handleFrame(socket: WebSocketLike, frame: string): void {
+  private handleFrame(socket: WebSocketLike, frame: string, confirmConnected: () => void): void {
     const decoded = decodeServerMessage(frame);
     if (!decoded.ok) {
       if (decoded.error.code !== 'unknown_type') {
@@ -133,6 +141,7 @@ export class RelayStateSource implements StateSource {
 
     switch (decoded.value.type) {
       case 'hello':
+        confirmConnected();
         this.emit({ kind: 'hello', relay: decoded.value.relay });
         break;
       case 'snapshot':
