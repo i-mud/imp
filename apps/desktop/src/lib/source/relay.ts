@@ -5,6 +5,7 @@ import type { SourceEvent, StateSource } from './types.ts';
 export interface WebSocketLike {
   addEventListener(type: string, listener: (event: Event) => void): void;
   close(): void;
+  send(data: string): void;
 }
 
 export type WebSocketFactory = (url: string) => WebSocketLike;
@@ -17,6 +18,7 @@ export interface RelaySourceOptions {
     readonly factor: number;
   };
   readonly webSocketFactory?: WebSocketFactory;
+  readonly authenticationToken?: string;
   /**
    * Best-known transport-level reason for the current unavailability, e.g.
    * from a managed SSH tunnel supervisor. Called only when a socket-level
@@ -80,6 +82,22 @@ export class RelayStateSource implements StateSource {
     this.socket = socket;
     socket.addEventListener('open', () => {
       if (!this.running || this.socket !== socket) return;
+
+      if (this.options.authenticationToken !== undefined) {
+        try {
+          socket.send(
+            JSON.stringify({
+              type: 'auth',
+              token: this.options.authenticationToken,
+            }),
+          );
+        } catch {
+          socket.close();
+          this.reconnect('Unable to authenticate relay connection.');
+          return;
+        }
+      }
+
       this.nextDelayMs = this.options.reconnect.initialDelayMs;
       this.emit({ kind: 'connection', phase: 'connected', detail: null });
     });
