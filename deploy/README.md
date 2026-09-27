@@ -74,9 +74,9 @@ systemctl --user daemon-reload
 ## 4. Configure the authenticated gateway (on VPS)
 
 Direct WSS access uses one 256-bit pairing token. TinyScry's gateway stores only
-the SHA-256 digest of the token. The plaintext token is copied once to the
-desktop configuration later; do not put it in a URL, shell history, service
-unit, repository file, or reverse-proxy configuration.
+the SHA-256 digest of the token. The plaintext token is entered once in the
+desktop Connection settings later; do not put it in a URL, shell history,
+service unit, repository file, or reverse-proxy configuration.
 
 Until pairing/rotation UX is automated, generate a token and its digest
 manually:
@@ -104,7 +104,7 @@ chmod 600 ~/.config/tinyscry/gateway.env
 printf 'Pairing token: %s\n' "$token"
 ```
 
-Record the displayed pairing token in the intended desktop configuration and
+Record the displayed pairing token securely for the desktop Connection step,
 then clear the shell variables:
 
 ```bash
@@ -155,29 +155,34 @@ reverse-proxy/certificate provisioning remains future distribution work.
 
 ### Direct desktop configuration
 
-The native desktop configuration file is the same `tunnel.json` used by SSH
-modes:
+On the workstation, open TinyScry and use **Settings -> Connection -> Direct**.
+
+Enter:
+
+- the public `wss:` state endpoint, for example
+  `wss://tinyscry.example/state`; and
+- the exact 43-character plaintext pairing token whose SHA-256 digest is stored
+  in `gateway.env`.
+
+Save the connection and restart TinyScry. The URL must use `wss:`, contain no
+credentials, query, or fragment, and end in `/state`.
+
+The pairing token is persisted by the native application. TinyScry's
+settings-read path does not return the stored plaintext token merely to populate
+the form; an existing Direct token can therefore remain unchanged when editing
+other Direct settings.
+
+Do not put the token in a URL, reverse-proxy configuration, `VITE_*`
+environment value, or WebView `localStorage`.
+
+For troubleshooting only, the native configuration is persisted at:
 
 - Linux: `~/.config/dev.tinyscry.hud/tunnel.json`
 - Windows: `%APPDATA%\dev.tinyscry.hud\tunnel.json`
 - macOS: `~/Library/Application Support/dev.tinyscry.hud/tunnel.json`
 
-For Direct WSS:
-
-```json
-{
-  "mode": "direct",
-  "remoteUrl": "wss://tinyscry.example/state",
-  "pairingToken": "<43-character pairing token>"
-}
-```
-
-`remoteUrl` must use `wss:`, contain no credentials/query/fragment, and end in
-`/state`. The pairing token must be the exact plaintext token whose SHA-256
-digest is configured on the gateway.
-
-Do not put the token in a URL, reverse-proxy configuration, `VITE_*`
-environment value, or WebView `localStorage`.
+Normal setup should use the Connection UI rather than editing this file by
+hand.
 
 ## 5. Enable lingering (on VPS, once)
 

@@ -15,7 +15,8 @@ WebSockets, the relay, and SSH process details.
 - `apps/desktop/src/lib/config.ts` - the only module allowed to name a concrete
   implementation
 - `apps/desktop/src/lib/tunnel.ts` - polls transport-independent diagnostics
-  exposed by the Tauri backend
+  and wraps the native connection-settings commands exposed by the Tauri
+  backend
 
 Outbound commands use a separate boundary:
 

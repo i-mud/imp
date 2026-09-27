@@ -150,43 +150,34 @@ VITE_TINYSCRY_SOURCE=relay VITE_TINYSCRY_RELAY_URL=ws://127.0.0.1:8787/state npm
 
 ## Desktop transport
 
-TinyScry supports three native desktop transport modes in `tunnel.json`:
-external SSH, managed SSH, and authenticated Direct WSS.
+TinyScry supports three native desktop transport modes: external SSH, managed
+SSH, and authenticated Direct WSS.
+
+Configure the native transport from **Settings -> Connection**. Saved changes
+apply on the next application start, so restart TinyScry after changing modes
+or connection details.
 
 TinyScry does not implement SSH itself. External and managed SSH modes use the
 platform's system OpenSSH client, your `~/.ssh/config`, `known_hosts`, and
 agent. TinyScry stores no SSH password and handles no private key.
 
-The mode is selected by `tunnel.json` in the app's config directory
-(`~/.config/dev.tinyscry.hud/tunnel.json` on Linux,
-`%APPDATA%\dev.tinyscry.hud\tunnel.json` on Windows,
-`~/Library/Application Support/dev.tinyscry.hud/tunnel.json` on macOS) -
-created with a safe default the first time TinyScry runs:
-
-```json
-{ "mode": "external", "sshTarget": "" }
-```
-
 ### External mode (default)
 
-TinyScry owns no SSH process. Forward the relay yourself:
+External mode owns no SSH process. Forward the relay yourself:
 
 ```bash
 ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
 ```
 
-Then point the HUD at `ws://127.0.0.1:8787/state` exactly as in step 5 - it
-cannot tell a manual tunnel from a local relay. This is the mode to keep for
-development or an unusual SSH setup.
+The native HUD then uses the local relay at
+`ws://127.0.0.1:8787/state`. This mode remains useful for development or an
+unusual SSH setup whose lifecycle should stay outside TinyScry.
 
 ### Managed mode
 
-Set `mode` to `"managed"` and `sshTarget` to an existing `Host` alias from
-your `~/.ssh/config` - the same alias `ssh <alias>` already connects with:
-
-```json
-{ "mode": "managed", "sshTarget": "avatar" }
-```
+Choose **Managed** in **Settings -> Connection** and enter an existing OpenSSH
+`Host` alias - the same alias for which `ssh <alias>` already connects
+non-interactively. Save the setting and restart TinyScry.
 
 On launch, TinyScry's Rust backend spawns and supervises exactly one child
 equivalent to:
@@ -211,26 +202,35 @@ owning process: it verifies whether that port already answers with TinyScry's
 relay health shape and, if so, uses it; otherwise it reports the conflict and
 does not start a child. Closing TinyScry terminates only the child it spawned.
 
-`ws://127.0.0.1:8787/state` remains the HUD's default relay URL in both SSH modes.
+`ws://127.0.0.1:8787/state` remains the HUD's relay URL in both SSH modes.
 
 ### Direct WSS mode
 
 Direct mode owns no SSH process and requires a trusted `wss:` endpoint backed
-by TinyScry's authenticated gateway:
+by TinyScry's authenticated gateway.
 
-```json
-{
-  "mode": "direct",
-  "remoteUrl": "wss://host.example/state",
-  "pairingToken": "<43-character unpadded base64url token>"
-}
-```
+Choose **Direct** in **Settings -> Connection**, enter the gateway's public
+`wss:` state URL and the 43-character pairing token, save, and restart
+TinyScry. The URL must end in `/state` and contain no credentials, query, or
+fragment.
+
+When editing an already configured Direct connection, leaving the pairing-token
+field blank preserves the existing stored token. Switching away from Direct
+removes the persisted Direct URL and pairing token.
 
 The gateway itself remains loopback-only and must sit behind a TLS reverse
 proxy. The desktop sends the pairing token as the first WebSocket frame; it is
 not placed in the URL, WebSocket subprotocol, build-time `VITE_*`
 configuration, or WebView `localStorage`. The server stores only the token's
 SHA-256 digest.
+
+Native connection settings are persisted in the application's `tunnel.json`,
+but normal configuration should use the UI rather than editing that file by
+hand. Its location is:
+
+- Linux: `~/.config/dev.tinyscry.hud/tunnel.json`
+- Windows: `%APPDATA%\dev.tinyscry.hud\tunnel.json`
+- macOS: `~/Library/Application Support/dev.tinyscry.hud/tunnel.json`
 
 See [`deploy/README.md`](deploy/README.md) for the current manual gateway and
 reverse-proxy deployment procedure.
