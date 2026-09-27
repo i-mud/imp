@@ -15,6 +15,7 @@ never owns or daemonizes the operator's interactive TinyFugue session.
 | per-dispatch action helper                    | TinyFugue `/quote`             | reader loss or one line ends it; guarded macro replaces it |
 | spool, per-world normalize, selected publish  | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`                   |
 | loopback state/action relay                   | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`                     |
+| authenticated remote gateway                  | `tinyscry-gateway.service`     | loopback user service; state/action only                   |
 | local SSH forward                             | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process               |
 | pre-existing relay endpoint on the local port | whoever started it             | adopted and monitored; never owned, signalled or replaced  |
 | WebSocket reconnect and public HUD state      | `RelayStateSource` / HUD model | unchanged freshness presentation                           |
@@ -52,7 +53,9 @@ interactive TinyFugue
   -> private $XDG_RUNTIME_DIR/tinyscry/spool
   -> tinyscry-feed (strict parse -> per-world normalize -> selected publish)
   -> tinyscry-relay on 127.0.0.1:8787
-  -> system OpenSSH local forward
+  -> either:
+       system OpenSSH local forward
+       or authenticated gateway on 127.0.0.1:8788 -> TLS reverse proxy -> WSS
   -> RelayStateSource / separate one-shot ActionSink
 ```
 
@@ -120,7 +123,8 @@ only connection events and the public `RECONNECTING`, `DOWN`, `STALE`, and
 
 | Failure                                | Recovery / visible result                                                                                                                                                                                                                            |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| relay process exits                    | systemd restarts it; feed publisher reconnects                                                                                                                                                                                                       |
+| relay process exits                    | systemd restarts it; feed publisher reconnects; gateway state clients disconnect and reconnect from the desktop                                                                                                                                      |
+| gateway process exits                  | systemd restarts it; relay/feed continue unaffected; direct-WSS desktop reconnects                                                                                                                                                                   |
 | feed process exits                     | lock releases with the process; systemd starts one replacement                                                                                                                                                                                       |
 | normalized checkpoint lost at reboot   | identity is re-established at the next character login only if the capture hook was loaded by the active startup file beforehand and the TinyFugue build provides `GMCP_LOGIN` for the operator login scripts; until then TinyScry publishes nothing |
 | TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                                                                                                                                                 |
