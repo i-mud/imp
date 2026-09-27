@@ -84,6 +84,113 @@ def test_reconnect_reselects_context_before_publish() -> None:
     asyncio.run(scenario())
 
 
+def test_transient_text_uses_current_connection_without_mutating_selection() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{relay.port}/ingest")
+        try:
+            await publisher.select(CONTEXT, _state("Selected"))
+
+            async with websocket_connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
+                # hello, retained snapshot, status
+                await subscriber.recv()
+                await subscriber.recv()
+                await subscriber.recv()
+
+                before = relay.state.snapshot()
+                assert await publisher.text(CONTEXT, 1234, "Incoming line")
+
+                while True:
+                    raw = await asyncio.wait_for(subscriber.recv(), timeout=1)
+                    assert isinstance(raw, str)
+                    message = cast(dict[str, object], json.loads(raw))
+                    if message["type"] == "text":
+                        break
+
+                assert message["text"] == "Incoming line"
+                assert message["at"] == 1234
+                assert relay.state.snapshot() == before
+
+                assert not await publisher.text(OTHER_CONTEXT, 1235, "Wrong context")
+        finally:
+            await publisher.close()
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_transient_text_drops_while_reconnecting_and_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        port = relay.port
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{port}/ingest")
+        await publisher.select(CONTEXT, _state("Selected"))
+
+        real_connect = websocket_connect
+        reconnect_started = asyncio.Event()
+        reconnect_release = asyncio.Event()
+
+        async def gated_connect(uri: str, *, proxy: None) -> ClientConnection:
+            reconnect_started.set()
+            await reconnect_release.wait()
+            return await real_connect(uri, proxy=proxy)
+
+        monkeypatch.setattr(publisher_module, "connect", gated_connect)
+
+        await relay.close()
+        await asyncio.wait_for(reconnect_started.wait(), timeout=1)
+
+        assert not await asyncio.wait_for(
+            publisher.text(CONTEXT, 2000, "Must be dropped"),
+            timeout=0.1,
+        )
+
+        restarted = RelayServer(port=port)
+        await restarted.start()
+        try:
+            async with real_connect(f"ws://127.0.0.1:{port}/state") as subscriber:
+                # Initial subscriber handshake before publisher reconnects.
+                await subscriber.recv()  # hello
+                await subscriber.recv()  # status
+
+                reconnect_release.set()
+
+                # Publisher reasserts retained selection after reconnect.
+                while True:
+                    raw = await asyncio.wait_for(subscriber.recv(), timeout=1)
+                    assert isinstance(raw, str)
+                    message = cast(dict[str, object], json.loads(raw))
+                    if message["type"] == "snapshot":
+                        break
+
+                with pytest.raises(TimeoutError):
+                    while True:
+                        raw = await asyncio.wait_for(subscriber.recv(), timeout=0.05)
+                        assert isinstance(raw, str)
+                        if json.loads(raw)["type"] == "text":
+                            raise AssertionError("dropped text was replayed")
+        finally:
+            reconnect_release.set()
+            await publisher.close()
+            await restarted.close()
+
+    asyncio.run(scenario())
+
+
+def test_transient_text_is_validated_before_send() -> None:
+    async def scenario() -> None:
+        publisher = RelayPublisher(url="ws://127.0.0.1:1/ingest")
+        with pytest.raises(ValueError, match="text"):
+            await publisher.text(CONTEXT, 1, "bad\nline")
+        await publisher.close()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("retained_context", [OTHER_CONTEXT, None])
 def test_idle_reconnect_reasserts_only_the_latest_selection(
     retained_context: StateContext | None,

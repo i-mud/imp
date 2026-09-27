@@ -2,26 +2,24 @@
   import Monitor from '@lucide/svelte/icons/monitor';
   import Moon from '@lucide/svelte/icons/moon';
   import Sun from '@lucide/svelte/icons/sun';
-
-  import { boundedThresholdPercent, type AlertSettings } from '../lib/alerts/settings.ts';
   import type { DisplayMode } from '../lib/hud/presentation.ts';
   import type { ThemePreference } from '../lib/hud/theme.ts';
 
   let {
     mode,
     theme,
-    alertSettings,
+    alertSaveError,
     onmodechange,
     onthemechange,
-    onalertsettingschange,
+    onmanagealerts,
     onmanageactions,
   }: {
     mode: DisplayMode;
     theme: ThemePreference;
-    alertSettings: AlertSettings;
+    alertSaveError: string | null;
     onmodechange: (mode: DisplayMode) => void;
     onthemechange: (theme: ThemePreference) => void;
-    onalertsettingschange: (settings: AlertSettings) => void;
+    onmanagealerts: (invoker: HTMLButtonElement) => void;
     onmanageactions: (invoker: HTMLButtonElement) => void;
   } = $props();
 
@@ -30,10 +28,6 @@
     { value: 'light', label: 'Light', icon: Sun },
     { value: 'system', label: 'System', icon: Monitor },
   ] as const;
-
-  function updateAlertSettings(patch: Partial<AlertSettings>): void {
-    onalertsettingschange({ ...alertSettings, ...patch });
-  }
 </script>
 
 <div class="settings-panel">
@@ -79,59 +73,23 @@
     </div>
   </section>
 
-  <section class="settings-section alerts" aria-labelledby="alert-settings-title">
-    <div id="alert-settings-title" class="menu-title">Alerts</div>
-    <label class="toggle primary-toggle">
-      <input
-        type="checkbox"
-        checked={alertSettings.lowHpEnabled}
-        onchange={(event) => updateAlertSettings({ lowHpEnabled: event.currentTarget.checked })}
-      />
-      <span>Low HP alert</span>
-    </label>
-
-    <div class:disabled={!alertSettings.lowHpEnabled} class="alert-details">
-      <label class="threshold-row">
-        <span>Threshold</span>
-        <span class="threshold-input">
-          <input
-            type="number"
-            min="1"
-            max="100"
-            step="1"
-            value={alertSettings.lowHpThresholdPercent}
-            disabled={!alertSettings.lowHpEnabled}
-            onchange={(event) =>
-              updateAlertSettings({
-                lowHpThresholdPercent: boundedThresholdPercent(event.currentTarget.valueAsNumber),
-              })}
-          />
-          <span aria-hidden="true">%</span>
-        </span>
-      </label>
-
-      <div class="toggle-row">
-        <label class="toggle">
-          <input
-            type="checkbox"
-            checked={alertSettings.soundEnabled}
-            disabled={!alertSettings.lowHpEnabled}
-            onchange={(event) => updateAlertSettings({ soundEnabled: event.currentTarget.checked })}
-          />
-          <span>Sound</span>
-        </label>
-
-        <label class="toggle">
-          <input
-            type="checkbox"
-            checked={alertSettings.notificationEnabled}
-            disabled={!alertSettings.lowHpEnabled}
-            onchange={(event) => updateAlertSettings({ notificationEnabled: event.currentTarget.checked })}
-          />
-          <span>Notification</span>
-        </label>
-      </div>
+  <section class="settings-section" aria-labelledby="alert-settings-title">
+    <div class="section-head">
+      <div id="alert-settings-title" class="menu-title">Alerts</div>
+      <button
+        class="menu-button head-action"
+        type="button"
+        data-alert-manager-trigger
+        onclick={(event) => {
+          event.stopPropagation();
+          onmanagealerts(event.currentTarget);
+        }}>Manage</button
+      >
     </div>
+
+    {#if alertSaveError !== null}
+      <p class="alert-save-error" role="alert">{alertSaveError}</p>
+    {/if}
   </section>
 
   <section class="settings-section" aria-labelledby="action-settings-title">
@@ -250,78 +208,13 @@
     color: var(--text);
   }
 
-  .alerts {
-    gap: var(--space-2);
-  }
-
-  .toggle,
-  .threshold-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-6);
-    min-height: 1.3rem;
-    padding: var(--space-1) var(--space-2);
-    color: var(--text);
-    font-size: var(--font-xs);
-    cursor: pointer;
-  }
-
-  .primary-toggle {
-    justify-content: flex-start;
-    font-weight: var(--weight-label);
-  }
-
-  .toggle-row {
-    display: flex;
-    gap: var(--space-4);
-  }
-
-  .toggle-row .toggle {
-    justify-content: flex-start;
-    gap: var(--space-2);
-  }
-
-  .toggle input {
+  .alert-save-error {
     margin: 0;
-    accent-color: var(--accent);
-  }
-
-  .alert-details {
-    display: grid;
-    gap: var(--space-1);
-    padding-left: 0.85rem;
-  }
-
-  .alert-details.disabled {
-    opacity: 0.52;
-  }
-
-  .threshold-input {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--muted);
-  }
-
-  .threshold-input input {
-    width: 3.2rem;
     padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--input-border);
-    border-radius: var(--radius);
-    background: var(--input-bg);
-    color: var(--text);
-    font: inherit;
-    text-align: right;
+    font-size: var(--font-xs);
   }
 
-  .threshold-input input:focus-visible {
-    border-color: var(--accent-focus);
-    outline: none;
-  }
-
-  .threshold-input input:disabled,
-  .toggle input:disabled {
-    cursor: default;
+  .alert-save-error {
+    color: var(--bad);
   }
 </style>

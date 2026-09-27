@@ -28,13 +28,13 @@ monitors that endpoint instead of spawning over it, and takes the forward over
 with its own supervised child once the endpoint is gone. External tunnel mode
 remains the default and remains supported.
 
-| Component                 | State                                                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/protocol`       | Version 2 complete: context-bound state/actions, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                                     |
-| `services/relay`          | Loopback-only contextual state relay plus Origin policy and single-flight action broker.                                                                                                                                                     |
-| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and low-HP alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
-| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks.                                                                                                          |
-| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, and fixed-macro action helper implemented.                                                                                                                        |
+| Component                 | State                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`       | Version 2 complete: context-bound state/actions plus transient received text, fail-closed dual decoders, shared accept/reject corpus.                                                                                                                         |
+| `services/relay`          | Loopback-only contextual state relay, transient current-subscriber text broadcast, Origin policy, and single-flight action broker.                                                                                                                            |
+| `apps/desktop` (frontend) | Refined compact/expanded HUD, shared styling, Lucide controls, persisted Dark/Light/System themes, configurable local action UI, and configurable vital/text alerts implemented; Windows-native interaction and earlier live action-path acceptance complete. |
+| `apps/desktop` (Tauri)    | Native shell runtime-verified on Windows; managed SSH lifecycle and adopted-endpoint takeover covered by deterministic Rust checks.                                                                                                                           |
+| `integrations/tinyfugue`  | Versioned per-world feed, session-aware checkpoint, strict context marker, transient selected-world received-text capture, and fixed-macro action helper implemented.                                                                                         |
 
 ## Verification
 
@@ -81,6 +81,47 @@ infrastructure and remain separate from CI:
 | TinyFugue GMCP login hook | Required and verified: the operator build must expose the `GMCP_LOGIN` hook its login scripts use to negotiate GMCP and send `Char.Login`. Tested with `5.2.2-3-g4f0ff34`; a version number alone does not prove `GMCP_LOGIN` is compiled in, so the capability is the invariant.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Outbound action path      | The Slice 7 connectionless fence procedure passed on pinned TinyFugue build `5.2.2-3-g4f0ff34` (`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`). Slice 8 then live-verified native UI `look` through `RelayActionSink` -> relay -> TinyFugue -> MUD with one independently observed execution. Consumer removal rejected without execution; restoration did not replay the rejected action; one fresh action executed once. `forwarded` still proves only the fixed bridge write and flush.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Tauri Rust crate          | Slice 3 Windows-native mirror: all three Rust gates clean; previously container-verified with `webkit2gtk`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+### Slice 10 transient-text and alert evidence
+
+- A normal received AVATAR line traversed TinyFugue capture, the private spool,
+  feed context fencing, transient publisher, relay, and a current `/state`
+  subscriber with the exact selected context.
+- A line actually received on a background TinyFugue echo world was visible in
+  that world's history but did not reach the selected-context subscriber.
+- A newly connected subscriber received none of the previous unique text
+  markers (`REPLAY_COUNT=0`), confirming that received text is not retained or
+  replayed.
+- Windows-native alert acceptance created and edited a received-text alert,
+  verified persistence, repeated identical matches, sound and notification
+  delivery, case-sensitive and case-insensitive behavior, and confirmed that
+  notification bodies contain the configured alert label rather than raw
+  received MUD text.
+- Contains mode remained literal: `*` did not match ordinary text and did match
+  a received line containing a literal `*`.
+- Wildcard mode was live-verified after the internal matcher optimization.
+  `TS10_WILD_*_END` matched both `TS10_WILD_ABC_END` and
+  `TS10_WILD__END`, proving that `*` consumes arbitrary text including zero
+  characters. Prefixed and suffixed lines did not match, confirming whole-line
+  anchoring.
+- With `*TS10_WILD_ABC_END*`, a prefixed-and-suffixed line matched. A wildcard
+  pattern containing no `*` matched only the exact whole line. A lower-case
+  received line also matched an upper-case wildcard pattern when case
+  sensitivity was disabled.
+- Existing text definitions without `matchMode` migrate to Contains, while
+  unknown modes are rejected by deterministic validation.
+- Compact and expanded Bell quick lists operate on the same persisted alert
+  definitions as the manager. Disabling a matching text alert through Bell
+  suppressed the next matching line immediately; re-enabling it caused the
+  next identical line to alert.
+- The final Windows-native UI smoke verified compact and expanded Bell panels,
+  synchronized quick toggles, intrinsic expanded Settings/Alerts heights with
+  no large blank region, native-height restoration while switching panels, and
+  compact panel dismissal behavior.
+- Compact Actions now mirrors Alerts at zero definitions: its Swords trigger
+  remains available and opens a `No actions defined.` state rather than
+  disappearing. The expanded action strip remains absent when there are no
+  actions.
 
 ### Slice 8 native and live action evidence
 
@@ -290,4 +331,18 @@ sizing; drag; non-maximizable behavior; keyboard/focus paths; and general
 polish. That smoke did not deliberately manufacture a stale/down transport
 failure, re-test the live MUD action path, or verify new VPS behavior.
 
-For planned work, including Slice 10, see [`roadmap.md`](roadmap.md).
+Slice 10, `configurable-notification-triggers`, is complete. It generalizes the
+original low-health alert into persisted configurable vital and received-text
+alerts, adds transient selected-context received-text delivery without retained
+HUD state, and provides bounded Contains and whole-line Wildcard matching with
+independent case sensitivity. Only `*` is special in Wildcard mode; there is no
+regular-expression engine or capture behavior.
+
+Windows-native acceptance covered creation/editing/persistence, sound and
+notification effects, configured-label-only notification bodies, optimized
+wildcard behavior, quick enable/disable through Bell surfaces, compact and
+expanded alert presentation, intrinsic Settings/Alerts sizing, and the
+zero-definition compact Actions/Alerts affordances. Alerts remain local
+presentation behavior and do not dispatch outbound commands.
+
+For future candidate work, see [`roadmap.md`](roadmap.md).

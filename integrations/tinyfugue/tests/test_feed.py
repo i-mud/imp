@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tinyscry_relay.protocol import GameState, StateContext
 
+from tinyscry_tf.diagnostics import DiagnosticCapture
 from tinyscry_tf.feed import FeedCheckpoint, WorldCheckpoint, load_checkpoint, run_feed, store_checkpoint
 
 EMPTY = GameState(character=None, target=None)
@@ -27,12 +28,17 @@ class _FakeSource:
 class _CollectingPublisher:
     def __init__(self) -> None:
         self.operations: list[tuple[str, StateContext | None, GameState]] = []
+        self.texts: list[tuple[StateContext, int, str]] = []
 
     async def select(self, context: StateContext | None, state: GameState) -> None:
         self.operations.append(("select", context, state))
 
     async def publish(self, context: StateContext, state: GameState) -> None:
         self.operations.append(("publish", context, state))
+
+    async def text(self, context: StateContext, at: int, text: str) -> bool:
+        self.texts.append((context, at, text))
+        return True
 
 
 async def _run(
@@ -42,6 +48,7 @@ async def _run(
     initial_checkpoint: FeedCheckpoint | None = None,
     checkpoint: Callable[[FeedCheckpoint], None] | None = None,
     context_marker: Callable[[StateContext | None], None] | None = None,
+    diagnostics: DiagnosticCapture | None = None,
 ) -> None:
     stop = asyncio.Event()
 
@@ -60,6 +67,7 @@ async def _run(
             initial_checkpoint=initial_checkpoint,
             checkpoint=checkpoint,
             context_marker=context_marker,
+            diagnostics=diagnostics,
         ),
         stop_after_drain(),
     )
@@ -128,6 +136,67 @@ def test_selection_and_gmcp_from_one_spool_drain_keep_the_context_order() -> Non
 
         assert [operation[0] for operation in publisher.operations] == ["select", "publish"]
         assert _character_name(publisher.operations[-1][2]) == "Alice"
+
+    asyncio.run(scenario())
+
+
+def test_text_events_forward_only_for_the_selected_exact_connection() -> None:
+    async def scenario() -> None:
+        source = _FakeSource(
+            [
+                [
+                    "TS2 S s1 1 1 Alpha 1",
+                    "TS2 T s1 1 Alpha 2 Alpha_32_one",
+                    "TS2 T s1 2 Beta 3 Background",
+                    "TS2 S s1 2 2 Beta 4",
+                    "TS2 T s1 1 Alpha 5 Old_32_foreground",
+                    "TS2 T s1 2 Beta 6 Beta_32_now",
+                ]
+            ]
+        )
+        publisher = _CollectingPublisher()
+
+        await _run(source, publisher)
+
+        assert publisher.texts == [
+            (StateContext("s1", 1, 1), 2000, "Alpha one"),
+            (StateContext("s1", 2, 2), 6000, "Beta now"),
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_text_events_are_not_checkpointed_or_written_to_diagnostics(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        source = _FakeSource(
+            [
+                [
+                    "TS2 S s1 1 1 Alpha 1",
+                    "TS2 T s1 1 Alpha 2 Secret_32_received_32_line",
+                ]
+            ]
+        )
+        publisher = _CollectingPublisher()
+        checkpoints: list[FeedCheckpoint] = []
+        directory = tmp_path / "diagnostics"
+        diagnostics = DiagnosticCapture(directory)
+        diagnostics.open()
+        try:
+            await _run(
+                source,
+                publisher,
+                checkpoint=checkpoints.append,
+                diagnostics=diagnostics,
+            )
+        finally:
+            diagnostics.close()
+
+        captured = (directory / "gmcp.raw").read_text(encoding="utf-8")
+        assert "TS2 S s1 1 1 Alpha 1" in captured
+        assert "TS2 T " not in captured
+        assert "Secret" not in captured
+        assert len(checkpoints) == 1
+        assert publisher.texts == [(StateContext("s1", 1, 1), 2000, "Secret received line")]
 
     asyncio.run(scenario())
 

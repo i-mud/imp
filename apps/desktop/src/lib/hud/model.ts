@@ -93,6 +93,8 @@ export function applyEvent(model: HudModel, event: SourceEvent): HudModel {
     }
     case 'feed':
       return { ...model, feed: event.status, detail: event.detail };
+    case 'text':
+      return model;
     case 'protocol-error':
       return { ...model, lastError: event.error };
   }

@@ -13,6 +13,12 @@ export type SourceEvent =
       readonly state: GameState;
     }
   | { readonly kind: 'feed'; readonly status: FeedStatus; readonly detail: string | null }
+  | {
+      readonly kind: 'text';
+      readonly context: StateContext;
+      readonly at: number;
+      readonly text: string;
+    }
   | { readonly kind: 'protocol-error'; readonly error: ProtocolError };
 
 export interface StateSource {

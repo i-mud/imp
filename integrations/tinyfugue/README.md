@@ -23,6 +23,7 @@ The TF-facing hook emits one UTF-8 `TS2` event per line:
 
 ```text
 TS2 G <session> <connection> <world-token> <epoch-seconds> <package> [JSON]
+TS2 T <session> <connection> <world-token> <epoch-seconds> <text-token>
 TS2 R <session> <connection> <world-token> <epoch-seconds>
 TS2 S <session> <foreground> <connection> <world-token-or-> <epoch-seconds>
 ```
@@ -33,6 +34,9 @@ TS2 S <session> <foreground> <connection> <world-token-or-> <epoch-seconds>
 - `world-token` is TinyFugue `textencode.tf` data, not executable TF source.
 - `G` carries GMCP, `R` resets only that world's accumulated state, and `S`
   selects the only world whose state may be published. `-` means no selection.
+- `T` carries one normal received MUD line as `textencode.tf` data. It is
+  bounded at capture, accepted only for the selected exact connection, sent
+  best-effort, never checkpointed, and never replayed after a relay outage.
 
 The parser rejects malformed versions, fields, encodings, timestamps, JSON, and
 oversize records without logging raw content. Each world has an independent
@@ -181,9 +185,9 @@ TinyFugue, so the blocking-writer problem above does not apply to it.
 
 Normal operation retains raw GMCP only in the private, bounded,
 ephemeral live spool. It does not retain raw diagnostic history.
-`tinyscry-feed --diagnostic-capture` writes each raw hook line, unparsed, to a
-private, size-rotated file set
-under `~/.local/state/tinyscry/diagnostics/` (mode `0700` directory, `0600`
+`tinyscry-feed --diagnostic-capture` writes raw non-text hook lines, unparsed,
+to a private, size-rotated file set. Transient `TS2 T` received-text events are
+explicitly excluded even when diagnostic capture is enabled. The files live under `~/.local/state/tinyscry/diagnostics/` (mode `0700` directory, `0600`
 files, 1 MiB per file, 5 files kept). This is a debugging aid for a specific
 session, not a default; see
 [`../../deploy/README.md`](../../deploy/README.md) for enabling it under the
@@ -238,6 +242,39 @@ Stop if any tuple regresses, if a background world appears in the HUD, or if
 TinyFugue pauses. Do not open `/action` during this checklist. A real outbound
 command is a separate, explicit operator acceptance check because even a
 read-only-looking MUD command is an external effect.
+
+### Transient received-text acceptance
+
+Status: **live-verified** on the VPS with TinyFugue
+`5.2.2-3-g4f0ff34`, pinned to
+`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`.
+
+The recorded run established the transient received-text boundary:
+
+- With the feed temporarily suspended, a normal received line was present in
+  the private spool as one `TS2 T` event with `textencode.tf` payload data,
+  proving the TinyFugue trigger-to-spool boundary independently of downstream
+  delivery.
+- With the real connected `musa` world selected, normal AVATAR output reached a
+  live `/state` subscriber as `text` messages carrying the exact active
+  `(session, foreground, connection)` context.
+- While `musa` remained selected, an echo line was actually received by a
+  background `-e` connectionless world and was visible in that world's
+  TinyFugue history, but no matching `text` message reached the `/state`
+  subscriber. This live-verifies the selected-world fence.
+- After the original subscriber disconnected, a newly connected `/state`
+  subscriber observed none of the previously delivered unique text markers;
+  the recorded result was `REPLAY_COUNT=0`. Text is therefore not retained or
+  replayed to later subscribers.
+- Connectionless echo worlds are not valid foreground selected-context probes
+  for this path because TinyScry selection requires TinyFugue
+  `is_connected()`. They remain useful for proving a real background received
+  line without sending traffic to a MUD.
+
+This acceptance exercises TinyFugue capture, the drained spool, feed context
+fencing, transient publisher behavior, relay broadcast, and subscriber
+delivery. It does not claim native desktop alert matching; that is a separate
+consumer of the transient `SourceEvent` boundary.
 
 ### Connectionless outbound acceptance check
 

@@ -1,86 +1,119 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { dispatchLowHpAlert } from '../src/lib/alerts/effects.ts';
-import { DEFAULT_ALERT_SETTINGS } from '../src/lib/alerts/settings.ts';
+import { dispatchAlert, textAlertEvent, vitalAlertEvent } from '../src/lib/alerts/effects.ts';
+import type { VitalAlertDefinition } from '../src/lib/alerts/definitions.ts';
 
-const event = { characterName: 'Ivrin', hpPercent: 24 } as const;
+const definition: VitalAlertDefinition = {
+  id: 'low-mana',
+  kind: 'vital',
+  label: 'Low mana',
+  enabled: true,
+  vital: 'mana',
+  thresholdPercent: 25,
+  soundEnabled: true,
+  notificationEnabled: true,
+};
 
-describe('dispatchLowHpAlert', () => {
+const event = {
+  alertId: 'low-mana',
+  body: 'Low mana — Ivrin is at 24%',
+};
+
+describe('dispatchAlert', () => {
   it('runs sound and notification once when both are enabled', async () => {
-    const playLowHpSound = vi.fn();
-    const showLowHpNotification = vi.fn();
+    const playAlertSound = vi.fn();
+    const showAlertNotification = vi.fn();
 
-    await dispatchLowHpAlert(event, DEFAULT_ALERT_SETTINGS, { playLowHpSound, showLowHpNotification });
+    await dispatchAlert(event, definition, {
+      playAlertSound,
+      showAlertNotification,
+    });
 
-    expect(playLowHpSound).toHaveBeenCalledOnce();
-    expect(showLowHpNotification).toHaveBeenCalledOnce();
+    expect(playAlertSound).toHaveBeenCalledOnce();
+    expect(showAlertNotification).toHaveBeenCalledOnce();
   });
 
   it('suppresses all effects while alerts are temporarily muted', async () => {
     const alertsMuted = vi.fn(() => true);
-    const playLowHpSound = vi.fn();
-    const showLowHpNotification = vi.fn();
+    const playAlertSound = vi.fn();
+    const showAlertNotification = vi.fn();
 
-    await dispatchLowHpAlert(event, DEFAULT_ALERT_SETTINGS, {
+    await dispatchAlert(event, definition, {
       alertsMuted,
-      playLowHpSound,
-      showLowHpNotification,
+      playAlertSound,
+      showAlertNotification,
     });
 
     expect(alertsMuted).toHaveBeenCalledOnce();
-    expect(playLowHpSound).not.toHaveBeenCalled();
-    expect(showLowHpNotification).not.toHaveBeenCalled();
+    expect(playAlertSound).not.toHaveBeenCalled();
+    expect(showAlertNotification).not.toHaveBeenCalled();
   });
 
-  it('suppresses both effects when the low-HP alert is disabled', async () => {
-    const playLowHpSound = vi.fn();
-    const showLowHpNotification = vi.fn();
+  it('suppresses effects for a disabled definition', async () => {
+    const playAlertSound = vi.fn();
+    const showAlertNotification = vi.fn();
 
-    await dispatchLowHpAlert(
-      event,
-      { ...DEFAULT_ALERT_SETTINGS, lowHpEnabled: false },
-      { playLowHpSound, showLowHpNotification },
-    );
+    await dispatchAlert(event, { ...definition, enabled: false }, { playAlertSound, showAlertNotification });
 
-    expect(playLowHpSound).not.toHaveBeenCalled();
-    expect(showLowHpNotification).not.toHaveBeenCalled();
+    expect(playAlertSound).not.toHaveBeenCalled();
+    expect(showAlertNotification).not.toHaveBeenCalled();
   });
 
-  it('can disable sound without disabling the notification', async () => {
-    const playLowHpSound = vi.fn();
-    const showLowHpNotification = vi.fn();
+  it('configures sound and notification independently per definition', async () => {
+    const playAlertSound = vi.fn();
+    const showAlertNotification = vi.fn();
 
-    await dispatchLowHpAlert(
+    await dispatchAlert(
       event,
-      { ...DEFAULT_ALERT_SETTINGS, soundEnabled: false },
-      { playLowHpSound, showLowHpNotification },
+      { ...definition, soundEnabled: false },
+      { playAlertSound, showAlertNotification },
     );
 
-    expect(playLowHpSound).not.toHaveBeenCalled();
-    expect(showLowHpNotification).toHaveBeenCalledOnce();
-  });
-
-  it('can disable the notification without disabling sound', async () => {
-    const playLowHpSound = vi.fn();
-    const showLowHpNotification = vi.fn();
-
-    await dispatchLowHpAlert(
-      event,
-      { ...DEFAULT_ALERT_SETTINGS, notificationEnabled: false },
-      { playLowHpSound, showLowHpNotification },
-    );
-
-    expect(playLowHpSound).toHaveBeenCalledOnce();
-    expect(showLowHpNotification).not.toHaveBeenCalled();
+    expect(playAlertSound).not.toHaveBeenCalled();
+    expect(showAlertNotification).toHaveBeenCalledOnce();
   });
 
   it('does not let one failed effect block the other or reject state handling', async () => {
-    const playLowHpSound = vi.fn(() => Promise.reject(new Error('audio failed')));
-    const showLowHpNotification = vi.fn();
+    const playAlertSound = vi.fn(() => Promise.reject(new Error('audio failed')));
+    const showAlertNotification = vi.fn();
 
     await expect(
-      dispatchLowHpAlert(event, DEFAULT_ALERT_SETTINGS, { playLowHpSound, showLowHpNotification }),
+      dispatchAlert(event, definition, {
+        playAlertSound,
+        showAlertNotification,
+      }),
     ).resolves.toBeUndefined();
-    expect(showLowHpNotification).toHaveBeenCalledOnce();
+
+    expect(showAlertNotification).toHaveBeenCalledOnce();
+  });
+});
+
+describe('vitalAlertEvent', () => {
+  it('formats a generalized vital notification from the configured label', () => {
+    expect(vitalAlertEvent(definition, 'Ivrin', 24.4)).toEqual({
+      alertId: 'low-mana',
+      body: 'Low mana — Ivrin is at 24%',
+    });
+  });
+});
+
+describe('textAlertEvent', () => {
+  it('contains only the stable alert id and configured label', () => {
+    expect(
+      textAlertEvent({
+        id: 'tell',
+        kind: 'text',
+        matchMode: 'contains',
+        label: 'Incoming tell',
+        enabled: true,
+        pattern: 'tells you',
+        caseSensitive: false,
+        soundEnabled: true,
+        notificationEnabled: true,
+      }),
+    ).toEqual({
+      alertId: 'tell',
+      body: 'Incoming tell',
+    });
   });
 });

@@ -1,6 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+
   import ActionBar from './ActionBar.svelte';
   import ActionDialog from './ActionDialog.svelte';
+  import AlertDialog from './AlertDialog.svelte';
+  import AlertQuickList from './AlertQuickList.svelte';
+  import AlertsMenu from './AlertsMenu.svelte';
   import ActionsMenu from './ActionsMenu.svelte';
   import CompactVital from './CompactVital.svelte';
   import SettingsMenu from './SettingsMenu.svelte';
@@ -15,15 +20,17 @@
   } from '../lib/action/definitions.ts';
   import { invokeAction, type ActionInvocationState } from '../lib/action/invocation.ts';
   import type { ActionSink } from '../lib/action/types.ts';
-  import { dispatchLowHpAlert } from '../lib/alerts/effects.ts';
   import {
-    INITIAL_LOW_HP_ALERT_STATE,
-    evaluateLowHpAlert,
-    type LowHpAlertState,
-  } from '../lib/alerts/evaluator.ts';
+    commitAlertDefinitions,
+    loadAlertDefinitions,
+    type AlertDefinition,
+  } from '../lib/alerts/definitions.ts';
+  import { dispatchAlert, textAlertEvent, vitalAlertEvent } from '../lib/alerts/effects.ts';
   import { DESKTOP_ALERT_EFFECTS } from '../lib/alerts/native.ts';
-  import { loadAlertSettings, saveAlertSettings, type AlertSettings } from '../lib/alerts/settings.ts';
+  import { evaluateTextAlerts, evaluateVitalAlerts } from '../lib/alerts/runtime.ts';
+  import type { VitalAlertState } from '../lib/alerts/vitals.ts';
   import { freshnessOf, type HudModel } from '../lib/hud/model.ts';
+  import type { TextSourceListener } from '../lib/hud/store.svelte.ts';
   import {
     loadDisplayMode,
     saveDisplayMode,
@@ -46,10 +53,18 @@
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import X from '@lucide/svelte/icons/x';
 
-  let { model, actionSink }: { model: HudModel; actionSink: ActionSink } = $props();
+  let {
+    model,
+    actionSink,
+    subscribeText,
+  }: {
+    model: HudModel;
+    actionSink: ActionSink;
+    subscribeText: (listener: TextSourceListener) => () => void;
+  } = $props();
   let displayMode = $state(loadDisplayMode());
   let theme = $state(loadTheme());
-  let alertSettings = $state(loadAlertSettings());
+  let alertDefinitions = $state<AlertDefinition[]>(loadAlertDefinitions());
   let actions = $state<ActionDefinition[]>(loadActionDefinitions());
 
   let panel = $state<HTMLElement>();
@@ -58,19 +73,32 @@
   let compactControls = $state<HTMLElement>();
   let compactSettingsTrigger = $state<HTMLButtonElement>();
   let compactActionsTrigger = $state<HTMLButtonElement>();
+  let compactAlertsTrigger = $state<HTMLButtonElement>();
   let settingsOpen = $state(false);
   let actionsOpen = $state(false);
+  let alertsOpen = $state(false);
   let actionDialogOpen = $state(false);
+  let alertDialogOpen = $state(false);
   let actionDialogWidth = $state(EXPANDED_SETTINGS_WINDOW_SIZE.width);
   let actionSaveError = $state<string | null>(null);
+  let alertSaveError = $state<string | null>(null);
   let actionDialogInvoker: HTMLButtonElement | null = null;
+  let alertDialogInvoker: HTMLButtonElement | null = null;
   const actionInvocation = $state<ActionInvocationState>({
     pendingActionId: null,
     feedback: null,
   });
-  const lowHpAlertMemory: { current: LowHpAlertState } = {
-    current: INITIAL_LOW_HP_ALERT_STATE,
+  const vitalAlertMemory: { current: Map<string, VitalAlertState> } = {
+    current: new Map(),
   };
+
+  onMount(() =>
+    subscribeText((event) => {
+      for (const trigger of evaluateTextAlerts(alertDefinitions, event.text)) {
+        void dispatchAlert(textAlertEvent(trigger.definition), trigger.definition, DESKTOP_ALERT_EFFECTS);
+      }
+    }),
+  );
 
   const freshness = $derived(freshnessOf(model));
   const isFresh = $derived(freshness === 'fresh' && model.hasData);
@@ -85,13 +113,29 @@
   function setDisplayMode(mode: DisplayMode): void {
     settingsOpen = false;
     actionsOpen = false;
+    alertsOpen = false;
     displayMode = mode;
     saveDisplayMode(mode);
   }
 
-  function setAlertSettings(settings: AlertSettings): void {
-    alertSettings = settings;
-    saveAlertSettings(settings);
+  function setAlertDefinitions(nextDefinitions: AlertDefinition[]): boolean {
+    if (
+      !commitAlertDefinitions(nextDefinitions, (committed) => {
+        alertDefinitions = committed;
+      })
+    ) {
+      alertSaveError = 'Could not save alerts locally.';
+      return false;
+    }
+
+    alertSaveError = null;
+    return true;
+  }
+
+  function setAlertDefinitionEnabled(id: string, enabled: boolean): boolean {
+    return setAlertDefinitions(
+      alertDefinitions.map((definition) => (definition.id === id ? { ...definition, enabled } : definition)),
+    );
   }
 
   function setTheme(preference: ThemePreference): void {
@@ -130,8 +174,10 @@
 
     actionDialogInvoker = invoker;
     actionSaveError = null;
+    alertDialogOpen = false;
     settingsOpen = false;
     actionsOpen = false;
+    alertsOpen = false;
     actionDialogOpen = true;
   }
 
@@ -150,6 +196,44 @@
     });
   }
 
+  function openAlertDialog(invoker: HTMLButtonElement): void {
+    if (displayMode === 'compact') {
+      const row = compactRow;
+      const hudPanel = panel;
+      if (row !== undefined && hudPanel !== undefined) {
+        const rowBounds = row.getBoundingClientRect();
+        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
+        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
+      }
+    } else {
+      actionDialogWidth = EXPANDED_SETTINGS_WINDOW_SIZE.width;
+    }
+
+    alertDialogInvoker = invoker;
+    actionDialogOpen = false;
+    settingsOpen = false;
+    actionsOpen = false;
+    alertsOpen = false;
+    alertDialogOpen = true;
+  }
+
+  function closeAlertDialog(): void {
+    alertDialogOpen = false;
+    settingsOpen = true;
+
+    const invoker = alertDialogInvoker;
+    requestAnimationFrame(() => {
+      const target = invoker?.isConnected
+        ? invoker
+        : (document.querySelector<HTMLButtonElement>('[data-alert-manager-trigger]') ??
+          document.querySelector<HTMLButtonElement>('.settings-button') ??
+          document.querySelector<HTMLButtonElement>('button.close'));
+
+      target?.focus();
+      alertDialogInvoker = null;
+    });
+  }
+
   function invokeDefinition(definition: ActionDefinition): void {
     const context = model.context;
     void invokeAction(actionInvocation, actionSink, context, definition);
@@ -160,24 +244,32 @@
       settingsOpen = false;
     } else if (actionsOpen) {
       actionsOpen = false;
+    } else if (alertsOpen) {
+      alertsOpen = false;
     } else {
       closeWindow();
     }
   }
 
   const closeLabel = $derived(
-    settingsOpen ? 'Close settings' : actionsOpen ? 'Close actions' : 'Close TinyScry',
+    settingsOpen
+      ? 'Close settings'
+      : actionsOpen
+        ? 'Close actions'
+        : alertsOpen
+          ? 'Close alerts'
+          : 'Close TinyScry',
   );
-  const CloseIcon = $derived(settingsOpen || actionsOpen ? ChevronUp : X);
+  const CloseIcon = $derived(settingsOpen || actionsOpen || alertsOpen ? ChevronUp : X);
 
   $effect(() => {
-    if (actions.length === 0) actionsOpen = false;
-  });
-
-  $effect(() => {
-    if (displayMode !== 'compact' || (!settingsOpen && !actionsOpen)) return;
+    if (displayMode !== 'compact' || (!settingsOpen && !actionsOpen && !alertsOpen)) return;
     const attachedPanel = compactPanel;
-    const activeTrigger = actionsOpen ? compactActionsTrigger : compactSettingsTrigger;
+    const activeTrigger = alertsOpen
+      ? compactAlertsTrigger
+      : actionsOpen
+        ? compactActionsTrigger
+        : compactSettingsTrigger;
     if (attachedPanel === undefined) return;
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -188,6 +280,7 @@
       if (!attachedPanel.contains(target) && compactControls?.contains(target) !== true) {
         settingsOpen = false;
         actionsOpen = false;
+        alertsOpen = false;
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -195,6 +288,7 @@
       event.preventDefault();
       settingsOpen = false;
       actionsOpen = false;
+      alertsOpen = false;
       requestAnimationFrame(() => activeTrigger?.focus());
     };
     window.addEventListener('pointerdown', closeOnOutsidePointer);
@@ -206,36 +300,79 @@
   });
 
   $effect(() => {
-    const hp = character?.hp ?? null;
-    const evaluation = evaluateLowHpAlert(lowHpAlertMemory.current, {
-      enabled: alertSettings.lowHpEnabled,
-      thresholdPercent: alertSettings.lowHpThresholdPercent,
-      fresh: isFresh,
-      subjectKey: character?.name ?? null,
-      currentHp: hp?.current ?? null,
-      maxHp: hp?.max ?? null,
-    });
-    lowHpAlertMemory.current = evaluation.state;
+    const evaluation = evaluateVitalAlerts(
+      vitalAlertMemory.current,
+      alertDefinitions,
+      character,
+      isFresh,
+      target,
+    );
+    vitalAlertMemory.current = evaluation.states;
 
-    if (evaluation.triggered && evaluation.hpPercent !== null && character !== null) {
-      void dispatchLowHpAlert(
-        { characterName: character.name, hpPercent: evaluation.hpPercent },
-        alertSettings,
+    for (const trigger of evaluation.triggered) {
+      void dispatchAlert(
+        vitalAlertEvent(trigger.definition, trigger.subjectLabel, trigger.percent),
+        trigger.definition,
         DESKTOP_ALERT_EFFECTS,
       );
     }
   });
 
   $effect(() => {
-    if (actionDialogOpen) {
-      resizeHudWindow(actionDialogWindowSize(actionDialogWidth));
-      return;
+    if (actionDialogOpen || alertDialogOpen) {
+      const observer = new ResizeObserver(() => resize());
+
+      const resize = () => {
+        const dialog = document.querySelector<HTMLElement>('.manager-dialog');
+        if (dialog === null) return;
+
+        const bounds = dialog.getBoundingClientRect();
+        resizeHudWindow(actionDialogWindowSize(actionDialogWidth, bounds.height));
+      };
+
+      const frame = requestAnimationFrame(() => {
+        const dialog = document.querySelector<HTMLElement>('.manager-dialog');
+        if (dialog === null) return;
+
+        observer.observe(dialog);
+        resize();
+      });
+
+      return () => {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+      };
     }
 
     if (displayMode === 'expanded') {
-      if (settingsOpen) {
-        resizeHudWindow(EXPANDED_SETTINGS_WINDOW_SIZE);
-        return;
+      if (settingsOpen || alertsOpen) {
+        const hudPanel = panel;
+        if (hudPanel === undefined) return;
+
+        const body = hudPanel.querySelector<HTMLElement>(settingsOpen ? '.settings-body' : '.alerts-body');
+        const titlebar = hudPanel.querySelector<HTMLElement>('.titlebar');
+        if (body === null || titlebar === null) return;
+
+        const resize = () => {
+          const titlebarHeight = titlebar.getBoundingClientRect().height;
+          const bodyHeight = body.getBoundingClientRect().height;
+          const frameHeight = hudPanel.offsetHeight - hudPanel.clientHeight;
+
+          resizeHudWindow({
+            width: EXPANDED_SETTINGS_WINDOW_SIZE.width,
+            height: Math.ceil(titlebarHeight + bodyHeight + frameHeight),
+          });
+        };
+
+        const frame = requestAnimationFrame(resize);
+        const observer = new ResizeObserver(resize);
+        observer.observe(body);
+        observer.observe(titlebar);
+
+        return () => {
+          cancelAnimationFrame(frame);
+          observer.disconnect();
+        };
       }
       if (actions.length === 0) {
         resizeHudWindow(expandedBase);
@@ -265,7 +402,7 @@
 
     const row = compactRow;
     const hudPanel = panel;
-    const attachedPanel = settingsOpen || actionsOpen ? compactPanel : undefined;
+    const attachedPanel = settingsOpen || actionsOpen || alertsOpen ? compactPanel : undefined;
     if (row === undefined || hudPanel === undefined) return;
 
     const resize = () => {
@@ -279,7 +416,7 @@
       const contentWidth = right - left + frameWidth;
       const contentHeight = bottom - rowBounds.top + frameHeight;
       resizeHudWindow(
-        settingsOpen || actionsOpen
+        settingsOpen || actionsOpen || alertsOpen
           ? compactPanelWindowSize(contentWidth, contentHeight)
           : compactWindowSize(contentWidth, contentHeight),
       );
@@ -297,7 +434,7 @@
 </script>
 
 <main
-  class:compact={displayMode === 'compact' && !actionDialogOpen}
+  class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen}
   class="hud"
   aria-label="TinyScry companion HUD"
   data-tauri-drag-region
@@ -309,11 +446,19 @@
       saveError={actionSaveError}
       onclose={closeActionDialog}
     />
+  {:else if alertDialogOpen}
+    <AlertDialog
+      definitions={alertDefinitions}
+      onchange={setAlertDefinitions}
+      saveError={alertSaveError}
+      onclose={closeAlertDialog}
+    />
   {:else}
     <div
       bind:this={panel}
-      class:has-actions={displayMode === 'expanded' && !settingsOpen && actions.length > 0}
-      class:has-compact-panel={displayMode === 'compact' && (settingsOpen || actionsOpen)}
+      class:has-actions={displayMode === 'expanded' && !settingsOpen && !alertsOpen && actions.length > 0}
+      class:has-expanded-panel={displayMode === 'expanded' && (settingsOpen || alertsOpen)}
+      class:has-compact-panel={displayMode === 'compact' && (settingsOpen || actionsOpen || alertsOpen)}
       class="panel"
     >
       {#if displayMode === 'compact'}
@@ -328,23 +473,34 @@
             <CompactVital label="MV" vital={character?.moves ?? null} color="var(--moves)" />
           </div>
           <div bind:this={compactControls} class="compact-controls">
-            <span class="control-slot" class:hidden={settingsOpen || actionsOpen}>
-              {#if actions.length > 0}
-                <ActionsMenu
-                  onopen={() => {
-                    settingsOpen = false;
-                  }}
-                  bind:open={actionsOpen}
-                  bind:trigger={compactActionsTrigger}
-                />
-              {/if}
+            <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
+              <ActionsMenu
+                onopen={() => {
+                  settingsOpen = false;
+                  alertsOpen = false;
+                }}
+                bind:open={actionsOpen}
+                bind:trigger={compactActionsTrigger}
+              />
             </span>
-            <span class="control-slot" class:hidden={settingsOpen || actionsOpen}>
+            <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
+              <AlertsMenu
+                controls="compact-alerts-panel"
+                onopen={() => {
+                  settingsOpen = false;
+                  actionsOpen = false;
+                }}
+                bind:open={alertsOpen}
+                bind:trigger={compactAlertsTrigger}
+              />
+            </span>
+            <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
               <SettingsMenu
                 bind:open={settingsOpen}
                 bind:trigger={compactSettingsTrigger}
                 onopen={() => {
                   actionsOpen = false;
+                  alertsOpen = false;
                 }}
               />
             </span>
@@ -369,10 +525,10 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
-              {alertSettings}
+              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
-              onalertsettingschange={setAlertSettings}
+              onmanagealerts={openAlertDialog}
               onmanageactions={openActionDialog}
             />
           </div>
@@ -385,20 +541,38 @@
             aria-label="Saved actions"
           >
             <div class="compact-action-list">
-              {#each actions as definition (definition.id)}
-                <button
-                  class="action-btn"
-                  type="button"
-                  disabled={actionInvocation.pendingActionId !== null}
-                  onclick={() => invokeDefinition(definition)}>{definition.label}</button
-                >
-              {/each}
+              {#if actions.length === 0}
+                <span class="compact-action-feedback">No actions defined.</span>
+              {:else}
+                {#each actions as definition (definition.id)}
+                  <button
+                    class="action-btn"
+                    type="button"
+                    disabled={actionInvocation.pendingActionId !== null}
+                    onclick={() => invokeDefinition(definition)}>{definition.label}</button
+                  >
+                {/each}
+              {/if}
             </div>
             {#if actionInvocation.feedback}
               <div class="compact-action-feedback" aria-live="polite">
                 {actionInvocation.feedback ?? '\u00a0'}
               </div>
             {/if}
+          </div>
+        {:else if alertsOpen}
+          <div
+            id="compact-alerts-panel"
+            bind:this={compactPanel}
+            class="compact-attached-panel compact-alerts-panel"
+            role="region"
+            aria-label="Saved alerts"
+          >
+            <AlertQuickList
+              definitions={alertDefinitions}
+              saveError={alertSaveError}
+              ontoggle={setAlertDefinitionEnabled}
+            />
           </div>
         {/if}
       {:else}
@@ -407,11 +581,23 @@
             <StatusIndicator {status} label={statusLabel} />
             <span>{characterName}</span>
           </div>
-          <span class="control-slot" class:hidden={settingsOpen}>
+          <span class="control-slot" class:hidden={settingsOpen || alertsOpen}>
+            <AlertsMenu
+              controls="expanded-alerts-panel"
+              onopen={() => {
+                settingsOpen = false;
+                actionsOpen = false;
+              }}
+              bind:open={alertsOpen}
+            />
+          </span>
+
+          <span class="control-slot" class:hidden={settingsOpen || alertsOpen}>
             <SettingsMenu
               bind:open={settingsOpen}
               onopen={() => {
                 actionsOpen = false;
+                alertsOpen = false;
               }}
             />
           </span>
@@ -430,11 +616,19 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
-              {alertSettings}
+              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
-              onalertsettingschange={setAlertSettings}
+              onmanagealerts={openAlertDialog}
               onmanageactions={openActionDialog}
+            />
+          </div>
+        {:else if alertsOpen}
+          <div id="expanded-alerts-panel" class="alerts-body" role="region" aria-label="Saved alerts">
+            <AlertQuickList
+              definitions={alertDefinitions}
+              saveError={alertSaveError}
+              ontoggle={setAlertDefinitionEnabled}
             />
           </div>
         {:else if isFresh && character !== null}
@@ -475,7 +669,7 @@
           </section>
         {/if}
 
-        {#if !settingsOpen && actions.length > 0}
+        {#if !settingsOpen && !alertsOpen && actions.length > 0}
           <ActionBar
             definitions={actions}
             pendingActionId={actionInvocation.pendingActionId}
@@ -513,9 +707,15 @@
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
+  .hud:not(.compact) .panel.has-expanded-panel {
+    height: max-content;
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+
   .titlebar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: var(--space-4);
     min-height: 2.05rem;
@@ -546,7 +746,8 @@
     visibility: hidden;
   }
 
-  .settings-body {
+  .settings-body,
+  .alerts-body {
     min-height: 0;
     overflow: hidden;
     padding: var(--section-pad);
@@ -619,13 +820,15 @@
     padding: var(--section-pad);
   }
 
-  .compact-actions-panel {
-    /* Wrapped action labels must not contribute max-content window width. */
+  .compact-actions-panel,
+  .compact-alerts-panel {
+    /* Wrapped labels must not contribute max-content window width. */
     display: grid;
     width: 0;
     min-width: 100%;
     gap: var(--space-6);
   }
+
   .compact-action-list {
     display: flex;
     flex-wrap: wrap;

@@ -18,6 +18,7 @@ export type {
   SnapshotMessage,
   StateContext,
   StatusMessage,
+  TextMessage,
 } from './messages.ts';
 export { describeError } from './result.ts';
 export type { DecodeResult, ProtocolError, ProtocolErrorCode } from './result.ts';

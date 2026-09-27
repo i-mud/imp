@@ -14,9 +14,11 @@ from tinyscry_relay.protocol import (
     StateContext,
     Target,
     Vital,
+    decode_client_message,
     decode_game_state,
     encode_publish,
     encode_select,
+    encode_text,
 )
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
@@ -57,6 +59,16 @@ def _target_to_wire(target: Target | None) -> dict[str, object] | None:
 
 def state_to_wire(state: GameState) -> dict[str, object]:
     return {"character": _character_to_wire(state.character), "target": _target_to_wire(state.target)}
+
+
+def _validated_text_frame(context: StateContext, at: int, text: str) -> str:
+    frame = encode_text(context, at, text)
+    decoded = decode_client_message(frame)
+    if not decoded.ok:
+        error = decoded.error
+        assert error is not None
+        raise ValueError(f"text event rejected: {error.code} at {error.path}")
+    return frame
 
 
 def _validated(state: GameState) -> GameState:
@@ -108,6 +120,29 @@ class RelayPublisher:
             self._selection_revision += 1
             revision = self._selection_revision
         await self._send_publish(context, checked, revision)
+
+    async def text(self, context: StateContext, at: int, text: str) -> bool:
+        """Attempt one transient send on the current selected connection.
+
+        This method never opens a connection, waits for reconnect, retries, or
+        retains the text. A missing or not-yet-selected connection means drop.
+        """
+
+        frame = _validated_text_frame(context, at, text)
+
+        async with self._condition:
+            if self._closed or context != self._selected_context:
+                return False
+            connection = self._connection
+            if connection is None or self._connection_revision != self._selection_revision:
+                return False
+
+        try:
+            await connection.send(frame)
+        except (ConnectionClosed, OSError, WebSocketException):
+            await self._discard_connection(connection)
+            return False
+        return True
 
     async def _send_selection(self, requested_revision: int) -> None:
         while True:

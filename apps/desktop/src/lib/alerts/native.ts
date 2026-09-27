@@ -1,10 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
-import lowHpSoundUrl from '../../assets/low-hp.wav?url';
-import type { DesktopAlertEffects, LowHpAlertEvent } from './effects.ts';
+import alertSoundUrl from '../../assets/low-hp.wav?url';
+import type { AlertEvent, DesktopAlertEffects } from './effects.ts';
 
-let lowHpAudio: HTMLAudioElement | null = null;
+let alertAudio: HTMLAudioElement | null = null;
 let permissionRequested = false;
 
 function isTauriRuntime(): boolean {
@@ -21,13 +21,13 @@ async function alertsMuted(): Promise<boolean> {
   }
 }
 
-async function playLowHpSound(): Promise<void> {
+async function playAlertSound(): Promise<void> {
   if (typeof Audio === 'undefined') return;
 
   try {
-    lowHpAudio ??= new Audio(lowHpSoundUrl);
-    lowHpAudio.currentTime = 0;
-    await lowHpAudio.play();
+    alertAudio ??= new Audio(alertSoundUrl);
+    alertAudio.currentTime = 0;
+    await alertAudio.play();
   } catch {
     // Alert delivery is best-effort and must never break the HUD.
   }
@@ -47,12 +47,13 @@ async function notificationPermissionGranted(): Promise<boolean> {
   }
 }
 
-async function showLowHpNotification(event: LowHpAlertEvent): Promise<void> {
+async function showAlertNotification(event: AlertEvent): Promise<void> {
   try {
     if (!(await notificationPermissionGranted())) return;
+
     sendNotification({
       title: 'TinyScry',
-      body: `Low HP — ${event.characterName} is at ${Math.round(event.hpPercent)}%`,
+      body: event.body,
     });
   } catch {
     // Alert delivery is best-effort and must never break the HUD.
@@ -61,6 +62,6 @@ async function showLowHpNotification(event: LowHpAlertEvent): Promise<void> {
 
 export const DESKTOP_ALERT_EFFECTS: DesktopAlertEffects = {
   alertsMuted,
-  playLowHpSound,
-  showLowHpNotification,
+  playAlertSound,
+  showAlertNotification,
 };

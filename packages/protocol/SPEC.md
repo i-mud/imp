@@ -21,8 +21,8 @@ invalid message is a policy violation and closes the connection.
 
 | Endpoint                              | Direction                    | Messages                                                    |
 | ------------------------------------- | ---------------------------- | ----------------------------------------------------------- |
-| `ws://127.0.0.1:8787/state`           | relay -> subscriber          | `hello`, `snapshot`, `status`                               |
-| `ws://127.0.0.1:8787/ingest`          | producer -> relay            | `select`, `publish`                                         |
+| `ws://127.0.0.1:8787/state`           | relay -> subscriber          | `hello`, `snapshot`, `status`, `text`                       |
+| `ws://127.0.0.1:8787/ingest`          | producer -> relay            | `select`, `publish`, `text`                                 |
 | `ws://127.0.0.1:8787/action`          | requester -> relay -> result | `action`, then `action-result`                              |
 | `ws://127.0.0.1:8787/action-consumer` | TF helper <-> relay          | `consumer`, `consumer-ready`, `dispatch`, `consumer-result` |
 | `http://127.0.0.1:8787/healthz`       | operator -> relay            | plain HTTP JSON                                             |
@@ -83,6 +83,7 @@ Every message carries `"protocol": 2`. Unknown object keys are ignored.
 | `hello`           | relay -> subscriber | `at`, `relay: { name, version }`                           |
 | `snapshot`        | relay -> subscriber | `seq`, `at`, `context`, `state`                            |
 | `status`          | relay -> subscriber | `at`, `feed: "live" \| "stale" \| "down"`, `detail`        |
+| `text`            | both                | non-null `context`, `at`, `text`                           |
 | `select`          | producer -> relay   | `context` (nullable), `state`                              |
 | `publish`         | producer -> relay   | non-null `context`, `state`                                |
 | `action`          | requester -> relay  | non-null `context`, `command`                              |
@@ -106,6 +107,12 @@ restarts, so consumers reset their high-water mark on `hello` and on reconnect.
 The relay retains its last snapshot across producer disconnects, so a
 reconnecting HUD gets state immediately; `feed` is what tells it whether that
 state is fresh.
+
+`text` is a transient received-MUD-line event. The relay accepts it only for
+the active context and broadcasts it only to subscribers connected at that
+moment. It is never stored in `RelayState`, does not increment `seq`, does not
+affect feed freshness, and is never replayed to a later or reconnecting
+subscriber.
 
 ## Action semantics
 
@@ -141,6 +148,7 @@ and checked again at each protocol boundary.
 | `at`, `seq`                | integers, `0 .. Number.MAX_SAFE_INTEGER`                       |
 | context `session`          | 1..128 ASCII letters, digits, or underscores                   |
 | `foreground`, `connection` | positive safe integers; null selection uses no context         |
+| received `text`            | 1..1024 chars, no C0/C1 controls, DEL, or unpaired surrogates  |
 | action `command`           | 1..512 printable ASCII characters (`0x20..0x7e`)               |
 | dispatch `id`              | 1..64 ASCII letters, digits, or underscores                    |
 | names                      | 1..64 chars, no C0/C1 controls, no DEL, no unpaired surrogates |

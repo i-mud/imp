@@ -17,6 +17,7 @@ LIMITS: Final = {
     "maxDetailChars": 256,
     "maxRelayIdentChars": 64,
     "maxContextSessionChars": 128,
+    "maxTextEventChars": 1024,
     "maxActionChars": 512,
     "maxCorrelationChars": 64,
     "maxVitalValue": 1_000_000_000,
@@ -95,6 +96,15 @@ class StatusMessage:
 
 
 @dataclass(frozen=True)
+class TextMessage:
+    type: Literal["text"]
+    protocol: int
+    context: StateContext
+    at: int
+    text: str
+
+
+@dataclass(frozen=True)
 class ActionResultMessage:
     type: Literal["action-result"]
     protocol: int
@@ -161,11 +171,14 @@ type ServerMessage = (
     HelloMessage
     | SnapshotMessage
     | StatusMessage
+    | TextMessage
     | ActionResultMessage
     | ConsumerReadyMessage
     | DispatchMessage
 )
-type ClientMessage = SelectMessage | PublishMessage | ActionMessage | ConsumerMessage | ConsumerResultMessage
+type ClientMessage = (
+    SelectMessage | PublishMessage | TextMessage | ActionMessage | ConsumerMessage | ConsumerResultMessage
+)
 
 
 @dataclass(frozen=True)
@@ -463,6 +476,18 @@ def decode_server_message(raw: str) -> DecodeResult[ServerMessage]:
             return _propagate(detail)
         assert at.value is not None and feed.value is not None
         return _ok(StatusMessage("status", protocol, at.value, feed.value, detail.value))
+    if message_type == "text":
+        context = _read_context(body.get("context"), "context")
+        if not context.ok:
+            return _propagate(context)
+        at = _read_integer(body.get("at"), "at", 0, MAX_SAFE_INTEGER)
+        if not at.ok:
+            return _propagate(at)
+        text = _read_text(body.get("text"), "text", LIMITS["maxTextEventChars"])
+        if not text.ok:
+            return _propagate(text)
+        assert context.value is not None and at.value is not None and text.value is not None
+        return _ok(TextMessage("text", protocol, context.value, at.value, text.value))
     if message_type == "action-result":
         status = _read_action_status(body.get("status"), "status")
         if not status.ok:
@@ -519,6 +544,18 @@ def decode_client_message(raw: str) -> DecodeResult[ClientMessage]:
             return _propagate(state)
         assert context.value is not None and state.value is not None
         return _ok(PublishMessage("publish", protocol, context.value, state.value))
+    if message_type == "text":
+        context = _read_context(body.get("context"), "context")
+        if not context.ok:
+            return _propagate(context)
+        at = _read_integer(body.get("at"), "at", 0, MAX_SAFE_INTEGER)
+        if not at.ok:
+            return _propagate(at)
+        text = _read_text(body.get("text"), "text", LIMITS["maxTextEventChars"])
+        if not text.ok:
+            return _propagate(text)
+        assert context.value is not None and at.value is not None and text.value is not None
+        return _ok(TextMessage("text", protocol, context.value, at.value, text.value))
     if message_type == "action":
         context = _read_context(body.get("context"), "context")
         if not context.ok:
@@ -586,6 +623,10 @@ def encode_snapshot(seq: int, at: int, context: StateContext | None, state: Game
 
 def encode_status(at: int, feed: FeedStatus, detail: str | None) -> str:
     return _encode(StatusMessage("status", PROTOCOL_VERSION, at, feed, detail))
+
+
+def encode_text(context: StateContext, at: int, text: str) -> str:
+    return _encode(TextMessage("text", PROTOCOL_VERSION, context, at, text))
 
 
 def encode_action_result(status: ActionStatus, detail: str | None = None) -> str:

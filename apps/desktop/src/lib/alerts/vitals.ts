@@ -1,29 +1,34 @@
-export interface LowHpAlertInput {
+import type { AlertVital } from './definitions.ts';
+
+export interface VitalAlertInput {
   readonly enabled: boolean;
+  readonly vital: AlertVital;
   readonly thresholdPercent: number;
   readonly fresh: boolean;
   readonly subjectKey: string | null;
-  readonly currentHp: number | null;
-  readonly maxHp: number | null;
+  readonly current: number | null;
+  readonly max: number | null;
 }
 
-export interface LowHpAlertState {
+export interface VitalAlertState {
   readonly hasBaseline: boolean;
   readonly subjectKey: string | null;
+  readonly vital: AlertVital | null;
   readonly previousPercent: number | null;
   readonly armed: boolean;
   readonly thresholdPercent: number | null;
 }
 
-export interface LowHpAlertEvaluation {
-  readonly state: LowHpAlertState;
+export interface VitalAlertEvaluation {
+  readonly state: VitalAlertState;
   readonly triggered: boolean;
-  readonly hpPercent: number | null;
+  readonly percent: number | null;
 }
 
-export const INITIAL_LOW_HP_ALERT_STATE: LowHpAlertState = {
+export const INITIAL_VITAL_ALERT_STATE: VitalAlertState = {
   hasBaseline: false,
   subjectKey: null,
+  vital: null,
   previousPercent: null,
   armed: false,
   thresholdPercent: null,
@@ -33,18 +38,22 @@ function validThreshold(value: number): boolean {
   return Number.isFinite(value) && value >= 1 && value <= 100;
 }
 
-export function hpPercent(currentHp: number | null, maxHp: number | null): number | null {
-  if (currentHp === null || maxHp === null) return null;
-  if (!Number.isFinite(currentHp) || currentHp < 0) return null;
-  if (!Number.isFinite(maxHp) || maxHp <= 0) return null;
-  return (currentHp / maxHp) * 100;
+export function vitalPercent(current: number | null, max: number | null): number | null {
+  if (current === null || max === null) return null;
+  if (!Number.isFinite(current) || current < 0) return null;
+  if (!Number.isFinite(max) || max <= 0) return null;
+  return (current / max) * 100;
 }
 
-function reset(): LowHpAlertEvaluation {
-  return { state: INITIAL_LOW_HP_ALERT_STATE, triggered: false, hpPercent: null };
+function reset(): VitalAlertEvaluation {
+  return {
+    state: INITIAL_VITAL_ALERT_STATE,
+    triggered: false,
+    percent: null,
+  };
 }
 
-export function evaluateLowHpAlert(state: LowHpAlertState, input: LowHpAlertInput): LowHpAlertEvaluation {
+export function evaluateVitalAlert(state: VitalAlertState, input: VitalAlertInput): VitalAlertEvaluation {
   if (
     !input.enabled ||
     !input.fresh ||
@@ -54,24 +63,26 @@ export function evaluateLowHpAlert(state: LowHpAlertState, input: LowHpAlertInpu
     return reset();
   }
 
-  const percent = hpPercent(input.currentHp, input.maxHp);
+  const percent = vitalPercent(input.current, input.max);
   if (percent === null) return reset();
 
   if (
     !state.hasBaseline ||
     state.subjectKey !== input.subjectKey ||
+    state.vital !== input.vital ||
     state.thresholdPercent !== input.thresholdPercent
   ) {
     return {
       state: {
         hasBaseline: true,
         subjectKey: input.subjectKey,
+        vital: input.vital,
         previousPercent: percent,
         armed: percent > input.thresholdPercent,
         thresholdPercent: input.thresholdPercent,
       },
       triggered: false,
-      hpPercent: percent,
+      percent,
     };
   }
 
@@ -85,11 +96,12 @@ export function evaluateLowHpAlert(state: LowHpAlertState, input: LowHpAlertInpu
     state: {
       hasBaseline: true,
       subjectKey: input.subjectKey,
+      vital: input.vital,
       previousPercent: percent,
       armed: percent > input.thresholdPercent,
       thresholdPercent: input.thresholdPercent,
     },
     triggered: crossedDown,
-    hpPercent: percent,
+    percent,
   };
 }

@@ -19,6 +19,7 @@ from tinyscry_relay.protocol import (
     encode_consumer_result,
     encode_publish,
     encode_select,
+    encode_text,
 )
 from tinyscry_relay.server import POLICY_VIOLATION_CLOSE_CODE, RelayServer
 
@@ -91,6 +92,54 @@ def test_publish_broadcasts_only_for_selected_context() -> None:
                 await producer.send(encode_publish(OTHER_CONTEXT, _state("Wrong")))
                 await producer.send(encode_publish(CONTEXT, _state("Current")))
                 assert _character_name(await _receive_type(subscriber, "snapshot")) == "Current"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_text_is_transient_and_broadcast_only_for_active_context() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            async with connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer:
+                await producer.send(encode_select(CONTEXT, _state("Selected")))
+
+                async with connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
+                    await _receive_type(subscriber, "snapshot")
+                    await _receive_type(subscriber, "status")
+
+                    before = relay.state.snapshot()
+                    await producer.send(encode_text(CONTEXT, 1234, "The troll snarls."))
+
+                    event = await _receive_type(subscriber, "text")
+                    assert event == {
+                        "type": "text",
+                        "protocol": 2,
+                        "context": {
+                            "session": "session1",
+                            "foreground": 1,
+                            "connection": 1,
+                        },
+                        "at": 1234,
+                        "text": "The troll snarls.",
+                    }
+
+                    # A transient event does not advance or replace retained state.
+                    assert relay.state.snapshot() == before
+
+                    await producer.send(encode_text(OTHER_CONTEXT, 1235, "wrong world"))
+                    with pytest.raises(TimeoutError):
+                        await asyncio.wait_for(_receive_type(subscriber, "text"), timeout=0.05)
+
+                # A subscriber arriving later receives retained state/status,
+                # but never the earlier text event.
+                async with connect(f"ws://127.0.0.1:{relay.port}/state") as later:
+                    await _receive_type(later, "snapshot")
+                    await _receive_type(later, "status")
+                    with pytest.raises(TimeoutError):
+                        await asyncio.wait_for(_receive_type(later, "text"), timeout=0.05)
         finally:
             await relay.close()
 

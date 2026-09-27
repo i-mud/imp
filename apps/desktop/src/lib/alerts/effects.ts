@@ -1,31 +1,50 @@
-import type { AlertSettings } from './settings.ts';
+import type { AlertDefinition, TextAlertDefinition, VitalAlertDefinition } from './definitions.ts';
 
-export interface LowHpAlertEvent {
-  readonly characterName: string;
-  readonly hpPercent: number;
+export interface AlertEvent {
+  readonly alertId: string;
+  readonly body: string;
 }
 
 export interface DesktopAlertEffects {
   alertsMuted?(): Promise<boolean> | boolean;
-  playLowHpSound(event: LowHpAlertEvent): Promise<void> | void;
-  showLowHpNotification(event: LowHpAlertEvent): Promise<void> | void;
+  playAlertSound(event: AlertEvent): Promise<void> | void;
+  showAlertNotification(event: AlertEvent): Promise<void> | void;
 }
 
-export async function dispatchLowHpAlert(
-  event: LowHpAlertEvent,
-  settings: AlertSettings,
+export function vitalAlertEvent(
+  definition: VitalAlertDefinition,
+  characterName: string,
+  percent: number,
+): AlertEvent {
+  return {
+    alertId: definition.id,
+    body: `${definition.label} — ${characterName} is at ${Math.round(percent)}%`,
+  };
+}
+
+export function textAlertEvent(definition: TextAlertDefinition): AlertEvent {
+  return {
+    alertId: definition.id,
+    body: definition.label,
+  };
+}
+
+export async function dispatchAlert(
+  event: AlertEvent,
+  definition: AlertDefinition,
   effects: DesktopAlertEffects,
 ): Promise<void> {
-  if (!settings.lowHpEnabled) return;
+  if (!definition.enabled) return;
   if (await effects.alertsMuted?.()) return;
 
   const pending: Promise<unknown>[] = [];
 
-  if (settings.soundEnabled) {
-    pending.push(Promise.resolve().then(() => effects.playLowHpSound(event)));
+  if (definition.soundEnabled) {
+    pending.push(Promise.resolve().then(() => effects.playAlertSound(event)));
   }
-  if (settings.notificationEnabled) {
-    pending.push(Promise.resolve().then(() => effects.showLowHpNotification(event)));
+
+  if (definition.notificationEnabled) {
+    pending.push(Promise.resolve().then(() => effects.showAlertNotification(event)));
   }
 
   await Promise.allSettled(pending);

@@ -24,12 +24,14 @@ from .protocol import (
     PublishMessage,
     RelayInfo,
     SelectMessage,
+    TextMessage,
     decode_client_message,
     encode_action_result,
     encode_consumer_ready,
     encode_hello,
     encode_snapshot,
     encode_status,
+    encode_text,
 )
 from .state import RelayState, Snapshot
 
@@ -161,6 +163,10 @@ class RelayServer:
                     snapshot = self._state.apply_publish(message.context, message.state, self._clock())
                     if snapshot is None:
                         continue
+                elif isinstance(message, TextMessage):
+                    if message.context == self._state.active_context:
+                        await self._broadcast(encode_text(message.context, message.at, message.text))
+                    continue
                 else:
                     await self._close_invalid(connection)
                     return
