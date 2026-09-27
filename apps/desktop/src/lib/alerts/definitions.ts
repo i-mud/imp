@@ -1,6 +1,7 @@
 import { isSafeText } from '@tinyscry/protocol';
 
 export type AlertVital = 'health' | 'mana' | 'moves' | 'target-health';
+export type TextMatchMode = 'contains' | 'wildcard';
 
 interface AlertDefinitionBase {
   readonly id: string;
@@ -18,6 +19,7 @@ export interface VitalAlertDefinition extends AlertDefinitionBase {
 
 export interface TextAlertDefinition extends AlertDefinitionBase {
   readonly kind: 'text';
+  readonly matchMode: TextMatchMode;
   readonly pattern: string;
   readonly caseSensitive: boolean;
 }
@@ -126,12 +128,21 @@ function persistedDefinition(value: unknown): AlertDefinition | null {
 
   if (value.kind === 'text') {
     if (typeof value.pattern !== 'string' || textPatternError(value.pattern) !== null) return null;
+
+    const matchMode =
+      value.matchMode === undefined
+        ? 'contains'
+        : value.matchMode === 'contains' || value.matchMode === 'wildcard'
+          ? value.matchMode
+          : null;
     const caseSensitive = persistedBoolean(value.caseSensitive);
-    if (caseSensitive === null) return null;
+
+    if (matchMode === null || caseSensitive === null) return null;
 
     return {
       ...base,
       kind: 'text',
+      matchMode,
       pattern: value.pattern,
       caseSensitive,
     };

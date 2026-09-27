@@ -23,6 +23,46 @@ export interface TriggeredTextAlert {
   readonly definition: TextAlertDefinition;
 }
 
+function wildcardMatches(text: string, pattern: string): boolean {
+  if (!pattern.includes('*')) return text === pattern;
+
+  const parts = pattern.split('*');
+  const startsWithWildcard = pattern.startsWith('*');
+  const endsWithWildcard = pattern.endsWith('*');
+  const lastIndex = parts.length - 1;
+
+  let offset = 0;
+  let partIndex = 0;
+
+  if (!startsWithWildcard) {
+    const first = parts[0]!;
+    if (!text.startsWith(first)) return false;
+    offset = first.length;
+    partIndex = 1;
+  }
+
+  const middleEnd = endsWithWildcard ? parts.length : lastIndex;
+
+  for (; partIndex < middleEnd; partIndex += 1) {
+    const part = parts[partIndex]!;
+    if (part.length === 0) continue;
+
+    const foundAt = text.indexOf(part, offset);
+    if (foundAt === -1) return false;
+
+    offset = foundAt + part.length;
+  }
+
+  if (!endsWithWildcard) {
+    const last = parts[lastIndex]!;
+    const lastStart = text.length - last.length;
+
+    return lastStart >= offset && text.endsWith(last);
+  }
+
+  return true;
+}
+
 export function evaluateTextAlerts(
   definitions: readonly AlertDefinition[],
   text: string,
@@ -33,9 +73,13 @@ export function evaluateTextAlerts(
   for (const definition of definitions) {
     if (definition.kind !== 'text' || !definition.enabled) continue;
 
-    const matches = definition.caseSensitive
-      ? text.includes(definition.pattern)
-      : (lowerText ??= text.toLowerCase()).includes(definition.pattern.toLowerCase());
+    const candidateText = definition.caseSensitive ? text : (lowerText ??= text.toLowerCase());
+    const candidatePattern = definition.caseSensitive ? definition.pattern : definition.pattern.toLowerCase();
+
+    const matches =
+      definition.matchMode === 'contains'
+        ? candidateText.includes(candidatePattern)
+        : wildcardMatches(candidateText, candidatePattern);
 
     if (matches) triggered.push({ definition });
   }

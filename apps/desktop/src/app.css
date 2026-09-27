@@ -194,7 +194,6 @@
   box-shadow: inset 0 1px 0 var(--divider);
   scroll-behavior: auto;
   scroll-snap-type: y mandatory;
-  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 
@@ -340,6 +339,10 @@ button {
 .settings-panel *,
 .actions-menu,
 .actions-menu *,
+.alerts-menu,
+.alerts-menu *,
+.alert-quick-list,
+.alert-quick-list *,
 .action-bar,
 .action-bar *,
 .action-dialog,

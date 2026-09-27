@@ -13,21 +13,31 @@ claims belong in `status.md` and the relevant architecture documents.
 
 ## Slice 10 - Configurable notification triggers
 
-Slug: `configurable-notification-triggers`. In final implementation.
+Slug: `configurable-notification-triggers`. Complete.
 
-The generalized vital-alert system, transient received-text transport,
-text-alert evaluation, persisted definitions, management UI, deterministic
-coverage, and native/live acceptance are implemented.
+Slice 10 generalizes the original low-health rule into persisted configurable
+vital and received-text alerts. It includes transient selected-context text
+delivery, configurable sound/notification effects, quick enable/disable
+controls, and compact/expanded Bell surfaces.
 
-One final text-matching capability remains before Slice 10 closes: bounded
-wildcard matching in addition to the existing literal substring mode. The
-wildcard form must remain data-only and bounded; it must not introduce shell,
-`eval`, command synthesis, or an unbounded regular-expression execution path.
+Text alerts support two intentionally bounded modes:
 
-More advanced pattern matching, including general regular expressions, is
-deferred to a future slice.
+- Contains: literal substring matching, including literal `*`.
+- Wildcard: whole-line matching where only `*` is special and means zero or
+  more characters.
 
-Implemented behavior and current verification evidence live in
+Case sensitivity is independent of match mode. Existing text definitions
+without an explicit match mode migrate to Contains. Unknown modes are rejected.
+
+Wildcard matching remains data-only and bounded. Slice 10 introduces no shell,
+`eval`, command synthesis, regular-expression engine, captures, retained text,
+or automatic text-triggered outbound actions.
+
+More advanced pattern matching and capture semantics remain future work and
+should receive their own design before any reaction/automation feature crosses
+the outbound trust boundary.
+
+Implemented behavior and final verification evidence live in
 [`status.md`](status.md) and
 [`architecture/objects/desktop-alerts.md`](architecture/objects/desktop-alerts.md).
 

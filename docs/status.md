@@ -93,11 +93,35 @@ infrastructure and remain separate from CI:
   markers (`REPLAY_COUNT=0`), confirming that received text is not retained or
   replayed.
 - Windows-native alert acceptance created and edited a received-text alert,
-  verified persistence, repeated identical matches, case-sensitive and
-  case-insensitive matching, and literal non-regex matching.
-- Native sound and notification effects fired as configured. The notification
-  body contained only the configured alert label and did not expose the raw
-  received MUD line.
+  verified persistence, repeated identical matches, sound and notification
+  delivery, case-sensitive and case-insensitive behavior, and confirmed that
+  notification bodies contain the configured alert label rather than raw
+  received MUD text.
+- Contains mode remained literal: `*` did not match ordinary text and did match
+  a received line containing a literal `*`.
+- Wildcard mode was live-verified after the internal matcher optimization.
+  `TS10_WILD_*_END` matched both `TS10_WILD_ABC_END` and
+  `TS10_WILD__END`, proving that `*` consumes arbitrary text including zero
+  characters. Prefixed and suffixed lines did not match, confirming whole-line
+  anchoring.
+- With `*TS10_WILD_ABC_END*`, a prefixed-and-suffixed line matched. A wildcard
+  pattern containing no `*` matched only the exact whole line. A lower-case
+  received line also matched an upper-case wildcard pattern when case
+  sensitivity was disabled.
+- Existing text definitions without `matchMode` migrate to Contains, while
+  unknown modes are rejected by deterministic validation.
+- Compact and expanded Bell quick lists operate on the same persisted alert
+  definitions as the manager. Disabling a matching text alert through Bell
+  suppressed the next matching line immediately; re-enabling it caused the
+  next identical line to alert.
+- The final Windows-native UI smoke verified compact and expanded Bell panels,
+  synchronized quick toggles, intrinsic expanded Settings/Alerts heights with
+  no large blank region, native-height restoration while switching panels, and
+  compact panel dismissal behavior.
+- Compact Actions now mirrors Alerts at zero definitions: its Swords trigger
+  remains available and opens a `No actions defined.` state rather than
+  disappearing. The expanded action strip remains absent when there are no
+  actions.
 
 ### Slice 8 native and live action evidence
 
@@ -307,4 +331,18 @@ sizing; drag; non-maximizable behavior; keyboard/focus paths; and general
 polish. That smoke did not deliberately manufacture a stale/down transport
 failure, re-test the live MUD action path, or verify new VPS behavior.
 
-For planned work, including Slice 10, see [`roadmap.md`](roadmap.md).
+Slice 10, `configurable-notification-triggers`, is complete. It generalizes the
+original low-health alert into persisted configurable vital and received-text
+alerts, adds transient selected-context received-text delivery without retained
+HUD state, and provides bounded Contains and whole-line Wildcard matching with
+independent case sensitivity. Only `*` is special in Wildcard mode; there is no
+regular-expression engine or capture behavior.
+
+Windows-native acceptance covered creation/editing/persistence, sound and
+notification effects, configured-label-only notification bodies, optimized
+wildcard behavior, quick enable/disable through Bell surfaces, compact and
+expanded alert presentation, intrinsic Settings/Alerts sizing, and the
+zero-definition compact Actions/Alerts affordances. Alerts remain local
+presentation behavior and do not dispatch outbound commands.
+
+For future candidate work, see [`roadmap.md`](roadmap.md).

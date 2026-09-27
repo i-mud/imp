@@ -9,6 +9,7 @@
     textPatternError,
     type AlertDefinition,
     type AlertVital,
+    type TextMatchMode,
   } from '../lib/alerts/definitions.ts';
 
   let {
@@ -28,9 +29,9 @@
   let label = $state('');
   let vital = $state<AlertVital>('health');
   let thresholdPercent = $state(25);
+  let matchMode = $state<TextMatchMode>('contains');
   let pattern = $state('');
   let caseSensitive = $state(false);
-  let enabled = $state(true);
   let soundEnabled = $state(true);
   let notificationEnabled = $state(true);
 
@@ -57,9 +58,9 @@
     label = '';
     vital = 'health';
     thresholdPercent = 25;
+    matchMode = 'contains';
     pattern = '';
     caseSensitive = false;
-    enabled = true;
     soundEnabled = true;
     notificationEnabled = true;
     labelError = null;
@@ -79,18 +80,19 @@
     editingId = definition.id;
     kind = definition.kind;
     label = definition.label;
-    enabled = definition.enabled;
     soundEnabled = definition.soundEnabled;
     notificationEnabled = definition.notificationEnabled;
 
     if (definition.kind === 'vital') {
       vital = definition.vital;
       thresholdPercent = definition.thresholdPercent;
+      matchMode = 'contains';
       pattern = '';
       caseSensitive = false;
     } else {
       vital = 'health';
       thresholdPercent = 25;
+      matchMode = definition.matchMode;
       pattern = definition.pattern;
       caseSensitive = definition.caseSensitive;
     }
@@ -110,6 +112,12 @@
     if (editingId === id) resetForm();
   }
 
+  function setDefinitionEnabled(id: string, enabled: boolean): boolean {
+    return onchange(
+      definitions.map((definition) => (definition.id === id ? { ...definition, enabled } : definition)),
+    );
+  }
+
   function saveDefinition(): void {
     labelError = alertLabelError(label);
     thresholdError = kind === 'vital' ? alertThresholdError(thresholdPercent) : null;
@@ -124,10 +132,13 @@
 
     limitError = null;
 
+    const existing =
+      editingId === null ? null : definitions.find((definition) => definition.id === editingId);
+
     const base = {
       id: editingId ?? crypto.randomUUID(),
       label: label.trim(),
-      enabled,
+      enabled: existing?.enabled ?? true,
       soundEnabled,
       notificationEnabled,
     };
@@ -143,6 +154,7 @@
         : {
             ...base,
             kind: 'text',
+            matchMode,
             pattern,
             caseSensitive,
           };
@@ -154,19 +166,6 @@
     );
 
     if (saved) resetForm();
-  }
-
-  function vitalLabel(value: AlertVital): string {
-    switch (value) {
-      case 'health':
-        return 'Health';
-      case 'mana':
-        return 'Mana';
-      case 'moves':
-        return 'Moves';
-      case 'target-health':
-        return 'Target health';
-    }
   }
 </script>
 
@@ -194,20 +193,20 @@
       {:else}
         <div class="saved-list">
           {#each definitions as definition (definition.id)}
-            <div class="saved-row">
-              <div class="saved-description">
-                <span title={definition.label}>{definition.label}</span>
-                <small>
-                  {#if definition.kind === 'vital'}
-                    {vitalLabel(definition.vital)} ≤ {definition.thresholdPercent}%
-                  {:else}
-                    <span title={definition.pattern}>
-                      Text contains: {definition.pattern} ·
-                      {definition.caseSensitive ? 'case-sensitive' : 'case-insensitive'}
-                    </span>
-                  {/if}
-                </small>
-              </div>
+            <div class="saved-row alert-saved-row">
+              <input
+                class="row-enabled"
+                type="checkbox"
+                checked={definition.enabled}
+                aria-label={'Enable ' + definition.label}
+                onchange={(event) => {
+                  if (!setDefinitionEnabled(definition.id, event.currentTarget.checked)) {
+                    event.currentTarget.checked = definition.enabled;
+                  }
+                }}
+              />
+
+              <span class="saved-label" title={definition.label}>{definition.label}</span>
 
               <button class="manager-btn secondary" type="button" onclick={() => editDefinition(definition)}>
                 Edit
@@ -249,18 +248,29 @@
         <span id="alert-label-error" class="error">{labelError}</span>
       {/if}
 
-      <label>
+      <div class="selector-row">
         <span>Trigger</span>
-        <select
-          value={kind}
-          onchange={(event) => {
-            setKind(event.currentTarget.value === 'text' ? 'text' : 'vital');
-          }}
-        >
-          <option value="vital">Vital threshold</option>
-          <option value="text">Received text</option>
-        </select>
-      </label>
+        <div class="segmented" role="radiogroup" aria-label="Alert trigger">
+          <button
+            class:selected={kind === 'vital'}
+            type="button"
+            role="radio"
+            aria-checked={kind === 'vital'}
+            onclick={() => setKind('vital')}
+          >
+            Vitals
+          </button>
+          <button
+            class:selected={kind === 'text'}
+            type="button"
+            role="radio"
+            aria-checked={kind === 'text'}
+            onclick={() => setKind('text')}
+          >
+            Text
+          </button>
+        </div>
+      </div>
 
       {#if kind === 'vital'}
         <div class="condition-row">
@@ -298,6 +308,34 @@
           <span id="alert-threshold-error" class="error">{thresholdError}</span>
         {/if}
       {:else}
+        <div class="selector-row">
+          <span>Match</span>
+          <div class="segmented" role="radiogroup" aria-label="Text match mode">
+            <button
+              class:selected={matchMode === 'contains'}
+              type="button"
+              role="radio"
+              aria-checked={matchMode === 'contains'}
+              onclick={() => {
+                matchMode = 'contains';
+              }}
+            >
+              Contains
+            </button>
+            <button
+              class:selected={matchMode === 'wildcard'}
+              type="button"
+              role="radio"
+              aria-checked={matchMode === 'wildcard'}
+              onclick={() => {
+                matchMode = 'wildcard';
+              }}
+            >
+              Wildcard
+            </button>
+          </div>
+        </div>
+
         <label>
           <span>Text to match</span>
           <input
@@ -311,19 +349,9 @@
         {#if patternError !== null}
           <span id="alert-pattern-error" class="error">{patternError}</span>
         {/if}
-
-        <label class="toggle">
-          <input type="checkbox" bind:checked={caseSensitive} />
-          <span>Case sensitive</span>
-        </label>
       {/if}
 
       <div class="toggles">
-        <label class="toggle">
-          <input type="checkbox" bind:checked={enabled} />
-          <span>Enabled</span>
-        </label>
-
         <label class="toggle">
           <input type="checkbox" bind:checked={soundEnabled} />
           <span>Sound</span>
@@ -333,6 +361,13 @@
           <input type="checkbox" bind:checked={notificationEnabled} />
           <span>Notification</span>
         </label>
+
+        {#if kind === 'text'}
+          <label class="toggle">
+            <input type="checkbox" bind:checked={caseSensitive} />
+            <span>Case sensitive</span>
+          </label>
+        {/if}
       </div>
 
       {#if limitError !== null}
@@ -378,7 +413,6 @@
   .dialog-title,
   .saved,
   .saved-row,
-  .saved-description,
   form,
   label {
     min-width: 0;
@@ -416,35 +450,16 @@
     flex: 0 0 auto;
   }
 
-  .saved-description {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    gap: var(--space-3);
+  .alert-dialog .saved-row.alert-saved-row {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
 
-  .saved-description span {
+  .saved-label {
     min-width: 0;
     overflow: hidden;
     font-size: var(--font-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .saved-description small {
-    min-width: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    color: var(--muted);
-    font-size: var(--font-2xs);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .saved-description small span {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .empty {
@@ -466,6 +481,51 @@
     gap: var(--space-2);
     color: var(--muted);
     font-size: var(--font-xs);
+  }
+
+  .selector-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    color: var(--muted);
+    font-size: var(--font-xs);
+  }
+
+  .segmented {
+    display: flex;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border: 1px solid var(--divider);
+    border-radius: var(--radius);
+  }
+
+  .segmented button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: var(--font-2xs);
+    line-height: 1;
+  }
+
+  .segmented button + button {
+    border-left: 1px solid var(--divider);
+  }
+
+  .segmented button:hover,
+  .segmented button:focus-visible {
+    background: var(--accent-hover);
+    outline: none;
+  }
+
+  .segmented button.selected {
+    background: var(--accent-subtle);
+    color: var(--text);
   }
 
   input,
@@ -502,7 +562,7 @@
 
   .toggles {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: var(--space-4);
   }
 
@@ -511,11 +571,14 @@
     grid-template-columns: none;
     align-items: center;
     gap: var(--space-2);
+    white-space: nowrap;
   }
 
-  .toggle input {
+  .toggle input,
+  .row-enabled {
     width: auto;
     margin: 0;
+    padding: 0;
     accent-color: var(--accent);
   }
 

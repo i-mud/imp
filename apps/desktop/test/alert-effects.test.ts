@@ -103,6 +103,7 @@ describe('textAlertEvent', () => {
       textAlertEvent({
         id: 'tell',
         kind: 'text',
+        matchMode: 'contains',
         label: 'Incoming tell',
         enabled: true,
         pattern: 'tells you',

@@ -28,6 +28,7 @@ const healthAlert: AlertDefinition = {
 const textAlert: AlertDefinition = {
   id: 'tell',
   kind: 'text',
+  matchMode: 'contains',
   label: 'Incoming tell',
   enabled: true,
   pattern: 'tells you',
@@ -45,6 +46,26 @@ describe('alert definition persistence', () => {
     const definitions = [healthAlert, textAlert];
 
     expect(alertDefinitionsFromPersisted(serializeAlertDefinitions(definitions))).toEqual(definitions);
+  });
+
+  it('migrates text definitions without a match mode to contains', () => {
+    const persisted = JSON.parse(JSON.stringify(textAlert)) as Record<string, unknown>;
+    delete persisted.matchMode;
+
+    expect(alertDefinitionsFromPersisted(JSON.stringify([persisted]))).toEqual([textAlert]);
+  });
+
+  it('rejects unknown text match modes', () => {
+    expect(
+      alertDefinitionsFromPersisted(
+        JSON.stringify([
+          {
+            ...textAlert,
+            matchMode: 'regex',
+          },
+        ]),
+      ),
+    ).toEqual([]);
   });
 
   it('preserves an intentionally empty definition list', () => {

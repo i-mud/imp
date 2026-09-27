@@ -20,7 +20,7 @@ Data flow:
     configured vital definitions          configured text definitions
             |                                      |
             v                                      v
-    per-trigger crossing state              literal substring match
+    per-trigger crossing state            bounded Contains/Wildcard match
             |                                      |
             +------------------+-------------------+
                                |
@@ -37,7 +37,7 @@ Data flow:
   vital-threshold crossing state machine.
 - `apps/desktop/src/lib/alerts/runtime.ts` maps configured vital definitions to
   normalized character vitals, keeps independent evaluator state per vital
-  definition, and performs stateless literal matching for text definitions.
+  definition, and performs stateless bounded matching for text definitions.
 - `apps/desktop/src/lib/alerts/effects.ts` owns generalized best-effort effect
   dispatch.
 - `apps/desktop/src/lib/alerts/native.ts` owns the bundled audio and Tauri
@@ -78,9 +78,12 @@ of 100.
 
 Every threshold is an integer percentage in the inclusive range 1-100.
 
-Text definitions contain a bounded literal pattern and a case-sensitivity
-flag. They consume only the transient received-text stream; the incoming line
-is not added to persisted alert configuration or retained desktop state.
+Text definitions contain a bounded pattern, a match mode (`contains` or
+`wildcard`), and an independent case-sensitivity flag. Existing stored text
+definitions that predate `matchMode` migrate to `contains`; unknown match modes
+are rejected. Text alerts consume only the transient received-text stream; the
+incoming line is not added to persisted alert configuration or retained
+desktop state.
 
 If the generalized store does not yet exist, TinyScry reads the previous
 `tinyscry.alert-settings` low-HP preferences and materializes them in memory as
@@ -89,7 +92,10 @@ saved, that store takes precedence, including an intentionally empty list.
 
 The settings surface exposes a dedicated alert manager. Operators can create,
 edit, delete, enable, and disable both threshold and received-text alerts and
-independently select sound and desktop-notification effects.
+independently select sound and desktop-notification effects. Enabled state is a
+persisted quick-toggle rather than part of the edit form. The compact and
+expanded Bell surfaces expose the same enabled state through a shared quick
+alert list.
 
 ## Vital threshold semantics
 
@@ -120,9 +126,26 @@ update.
 
 ## Text trigger semantics
 
-Text patterns are literal substrings, not regular expressions. Matching can be
-case-sensitive or case-insensitive. Case-insensitive matching uses deterministic
-string lowercasing rather than locale-specific comparison.
+Text alerts support two bounded matching modes.
+
+`contains` performs literal substring matching. No character has special
+meaning in this mode, including `*`.
+
+`wildcard` matches the whole received line. Only `*` is special, and it means
+zero or more characters. Every other character is literal, including regular
+expression punctuation such as `.`, `?`, `[`, `]`, `+`, `^`, `$`, and `\`.
+A wildcard pattern with no `*` therefore requires exact whole-line equality.
+Leading or trailing `*` explicitly permit unmatched text at that edge.
+
+Wildcard matching is implemented as ordered literal-segment matching rather
+than regular-expression evaluation or per-character dynamic programming. The
+grammar remains intentionally small and bounded: there are no regular
+expressions, captures, command synthesis, shell semantics, or executable
+expressions.
+
+Both modes can be independently case-sensitive or case-insensitive.
+Case-insensitive matching uses deterministic string lowercasing rather than
+locale-specific comparison.
 
 Every enabled matching definition fires independently in definition order, so
 one received line may trigger several alerts. Text matching has no threshold
@@ -183,9 +206,9 @@ Alerts remain outbound-silent:
 - they never execute shell or TinyFugue source; and
 - they do not weaken the `StateSource` / `ActionSink` separation.
 
-Received MUD text is bounded untrusted input. It is used only for literal
-matching and is never interpreted as a command, expression, regular expression,
-or executable source.
+Received MUD text is bounded untrusted input. It is used only for bounded
+Contains/Wildcard matching and is never interpreted as a command, expression,
+regular expression, or executable source.
 
 ## Verification
 
@@ -203,15 +226,28 @@ Deterministic desktop tests cover:
 - tray mute suppression; and
 - effect failure isolation;
 - synchronous transient-text fan-out without `HudModel` retention;
-- literal substring text matching and case-sensitivity behavior;
-- repeated identical line handling and multiple-definition matching; and
+- Contains and whole-line Wildcard matching semantics;
+- literal `*` behavior in Contains mode and zero-or-more behavior in Wildcard mode;
+- exact whole-line Wildcard matching when no `*` is present;
+- case-sensitive and case-insensitive matching;
+- legacy text-definition migration to Contains and rejection of unknown modes;
+- repeated identical line handling and multiple-definition matching;
+- persisted quick enable/disable behavior; and
 - stable alert ids with configured-label-only text notification bodies.
 
 Native/live acceptance additionally verified creation and editing of a
 received-text alert, persistence after reopening the manager, repeated
-identical matches, case-sensitive and case-insensitive behavior, literal
-non-regex matching, sound and notification delivery, and that the notification
+identical matches, sound and notification delivery, and that the notification
 body contains only the configured label rather than raw received MUD text.
+
+The final Windows-native Slice 10 smoke also verified the optimized wildcard
+matcher: `*` consumed both zero and multiple characters, whole-line anchoring
+held at both ends, leading/trailing `*` relaxed those edges, wildcard mode with
+no star required exact whole-line equality, Contains kept `*` literal, and
+case-insensitive wildcard matching worked. Bell quick toggles immediately
+disabled and re-enabled the same live text-alert definition set. Compact and
+expanded Bell panels, intrinsic expanded Settings/Alerts sizing, and compact
+zero-definition Actions/Alerts affordances were also exercised successfully.
 
 Status: verified for configurable vital and received-text alerts
 Verified against: desktop unit tests, strict Svelte/TypeScript checking, and

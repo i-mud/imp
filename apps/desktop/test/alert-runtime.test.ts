@@ -136,6 +136,7 @@ describe('evaluateVitalAlerts', () => {
     const text: AlertDefinition = {
       id: 'tell',
       kind: 'text',
+      matchMode: 'contains',
       label: 'Tell',
       enabled: true,
       pattern: 'tells you',
@@ -164,6 +165,7 @@ describe('evaluateTextAlerts', () => {
   const tell: TextAlertDefinition = {
     id: 'tell',
     kind: 'text',
+    matchMode: 'contains',
     label: 'Incoming tell',
     enabled: true,
     pattern: 'tells you',
@@ -175,6 +177,7 @@ describe('evaluateTextAlerts', () => {
   const exact: TextAlertDefinition = {
     id: 'exact',
     kind: 'text',
+    matchMode: 'contains',
     label: 'Exact marker',
     enabled: true,
     pattern: '[ALERT]',
@@ -218,6 +221,109 @@ describe('evaluateTextAlerts', () => {
     expect(
       evaluateTextAlerts([tell, second], 'Aria tells you hello.').map((item) => item.definition.id),
     ).toEqual(['tell', 'second']);
+  });
+
+  it('matches wildcard patterns against the whole received line', () => {
+    const wildcard: TextAlertDefinition = {
+      ...tell,
+      id: 'wildcard',
+      matchMode: 'wildcard',
+      pattern: 'Aria*tells you*hello',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([wildcard], 'Aria quickly tells you hello')).toEqual([
+      { definition: wildcard },
+    ]);
+    expect(evaluateTextAlerts([wildcard], 'prefix Aria quickly tells you hello')).toEqual([]);
+  });
+
+  it('requires an exact whole-line match when wildcard mode contains no star', () => {
+    const wildcard: TextAlertDefinition = {
+      ...tell,
+      id: 'wildcard-exact',
+      matchMode: 'wildcard',
+      pattern: 'exact line',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([wildcard], 'exact line')).toEqual([{ definition: wildcard }]);
+    expect(evaluateTextAlerts([wildcard], 'prefix exact line')).toEqual([]);
+    expect(evaluateTextAlerts([wildcard], 'exact line suffix')).toEqual([]);
+  });
+
+  it('accepts consecutive stars and a star-only wildcard', () => {
+    const consecutive: TextAlertDefinition = {
+      ...tell,
+      id: 'consecutive',
+      matchMode: 'wildcard',
+      pattern: 'foo**bar',
+      caseSensitive: true,
+    };
+
+    const anyLine: TextAlertDefinition = {
+      ...tell,
+      id: 'any-line',
+      matchMode: 'wildcard',
+      pattern: '*',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([consecutive], 'foo middle bar')).toEqual([{ definition: consecutive }]);
+    expect(evaluateTextAlerts([anyLine], 'anything at all')).toEqual([{ definition: anyLine }]);
+  });
+
+  it('allows wildcard stars to match zero or more characters', () => {
+    const wildcard: TextAlertDefinition = {
+      ...tell,
+      id: 'wildcard',
+      matchMode: 'wildcard',
+      pattern: 'foo*bar',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([wildcard], 'foobar')).toEqual([{ definition: wildcard }]);
+    expect(evaluateTextAlerts([wildcard], 'foo something bar')).toEqual([{ definition: wildcard }]);
+  });
+
+  it('treats every wildcard character other than star literally', () => {
+    const wildcard: TextAlertDefinition = {
+      ...tell,
+      id: 'wildcard',
+      matchMode: 'wildcard',
+      pattern: '^value.[?]$',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([wildcard], '^value.[?]$')).toEqual([{ definition: wildcard }]);
+    expect(evaluateTextAlerts([wildcard], 'valueXq')).toEqual([]);
+  });
+
+  it('applies case-insensitive matching before wildcard evaluation', () => {
+    const wildcard: TextAlertDefinition = {
+      ...tell,
+      id: 'wildcard',
+      matchMode: 'wildcard',
+      pattern: 'ARIA*TELLS YOU*',
+      caseSensitive: false,
+    };
+
+    expect(evaluateTextAlerts([wildcard], 'aria quietly tells you hello')).toEqual([
+      { definition: wildcard },
+    ]);
+  });
+
+  it('keeps star literal in contains mode', () => {
+    const contains: TextAlertDefinition = {
+      ...tell,
+      id: 'contains-star',
+      matchMode: 'contains',
+      pattern: '*',
+      caseSensitive: true,
+    };
+
+    expect(evaluateTextAlerts([contains], 'ordinary text')).toEqual([]);
+    expect(evaluateTextAlerts([contains], 'literal * marker')).toEqual([{ definition: contains }]);
   });
 
   it('has no crossing memory, so identical lines match repeatedly', () => {
