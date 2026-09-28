@@ -50,6 +50,8 @@ First alpha release.
   sending and never retargets stale work to another world.
 - Managed SSH never kills an unrelated process occupying its local port and
   owns only the child process it spawned.
+- Windows release builds start the managed SSH child without opening a
+  persistent console window.
 
 ### Initial release limitations
 

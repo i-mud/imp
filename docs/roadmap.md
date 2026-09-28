@@ -149,6 +149,26 @@ The existing source-development paths remain supported for contributors.
 Linux and macOS may continue to build from source, but Slice 13 does not claim
 release support for platforms without native release acceptance.
 
+### Current state
+
+Release-readiness implementation is substantially complete:
+
+- the MIT license and changelog are tracked;
+- the `0.1.0` version contract and tag/version check are implemented;
+- the native application reports its Tauri-owned version;
+- Windows x64 NSIS candidate builds run on GitHub Actions;
+- end-user Windows installation and connection setup are documented;
+- the first produced installer passed installed-app state/action acceptance;
+- the managed-SSH console-window defect found by that acceptance is fixed and
+  verified in a subsequent local release build; and
+- the tag-driven release workflow can be manually dispatched for an
+  unpublished candidate and publishes only from a matching `v*` tag.
+
+Remaining Slice 13 work is intentionally narrow: pass the final PR gates, merge
+the completed tree to `main`, build that exact tree through the release
+workflow, perform final clean-install/uninstall/reinstall acceptance, then
+create `v0.1.0` and verify the published GitHub prerelease artifact.
+
 ### Release contract
 
 The `v0.1.0` tag is created only after the release candidate has passed the
