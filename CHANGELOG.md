@@ -52,6 +52,8 @@ First alpha release.
   owns only the child process it spawned.
 - Windows release builds start the managed SSH child without opening a
   persistent console window.
+- Exiting TinyScry terminates the managed SSH child it owns instead of leaving
+  an orphaned `ssh.exe` process.
 
 ### Initial release limitations
 
