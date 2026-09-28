@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Final
 
-from tinyscry_relay.protocol import LIMITS, StateContext
+from imp_relay.protocol import LIMITS, StateContext
 
-from tinyscry_tf.records import MAX_EPOCH_MS, MAX_RECORD_CHARS, Record, parse_record
+from imp_tf.records import MAX_EPOCH_MS, MAX_RECORD_CHARS, Record, parse_record
 
 MAX_EVENT_CHARS: Final = MAX_RECORD_CHARS + 512
 _SESSION = re.compile(r"^[A-Za-z0-9_]{1,128}$")
@@ -162,7 +162,7 @@ def parse_tf_event(line: str) -> EventResult:
     if len(raw) > MAX_EVENT_CHARS:
         return _invalid("raw_record_too_large")
     fields = raw.split(" ", 6)
-    if len(fields) < 2 or fields[0] != "TS2":
+    if len(fields) < 2 or fields[0] != "IMP2":
         return _invalid("invalid_event_version")
 
     kind = fields[1]

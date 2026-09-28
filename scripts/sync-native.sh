@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE="$HOME/src/tinyscry/"
-DEST="/mnt/c/src/tinyscry-native/"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="$(cd -- "$SCRIPT_DIR/.." && pwd)/"
+DEST="/mnt/c/src/imp-native/"
 
 rsync -a --delete \
   --exclude='.git/' \

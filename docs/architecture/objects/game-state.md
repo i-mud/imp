@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The normalized character/target state that TinyScry owns. Every component
+The normalized character/target state that Imp owns. Every component
 downstream of MUD normalization speaks this shape and only this shape.
 
 ## Canonical reference
@@ -17,14 +17,14 @@ impact.
 - `packages/protocol/src/messages.ts` - envelope types, `PROTOCOL_VERSION`
 - `packages/protocol/src/limits.ts` - `LIMITS`, `isSafeText`
 - `packages/protocol/src/decode.ts` - the TypeScript decoder
-- `services/relay/src/tinyscry_relay/protocol.py` - the Python decoder
+- `services/relay/src/imp_relay/protocol.py` - the Python decoder
 - `packages/protocol/fixtures/` - the shared conformance corpus
 
 ## Relationships
 
 Produced by:
 
-- `integrations/tinyfugue/src/tinyscry_tf/normalize.py` (from GMCP records)
+- `integrations/tinyfugue/src/imp_tf/normalize.py` (from GMCP records)
 - `apps/desktop/src/lib/source/mock.ts` (development source)
 
 Validated by:
@@ -44,13 +44,13 @@ Consumed by:
 Known first-order impacts of adding or changing a field:
 
 1. `packages/protocol/src/state.ts` and `packages/protocol/src/decode.ts`
-2. `services/relay/src/tinyscry_relay/protocol.py` - the dataclass, the
+2. `services/relay/src/imp_relay/protocol.py` - the dataclass, the
    decoder and the encoders; must move in lockstep or the corpus test fails
 3. `packages/protocol/fixtures/` - at least one accept case; a rejection case
    if new bounds were added
-4. `integrations/tinyfugue/src/tinyscry_tf/normalize.py` - the mapping table,
+4. `integrations/tinyfugue/src/imp_tf/normalize.py` - the mapping table,
    and its own name/value bounds if the change is a bound
-5. `integrations/tinyfugue/src/tinyscry_tf/publisher.py` - `state_to_wire()`
+5. `integrations/tinyfugue/src/imp_tf/publisher.py` - `state_to_wire()`
    and its per-field helpers spell the JSON by hand, so a new field is silently
    dropped on publish if this is missed
 6. `apps/desktop/src/lib/source/mock.ts` - the mock must keep producing valid

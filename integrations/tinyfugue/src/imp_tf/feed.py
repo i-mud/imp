@@ -15,15 +15,15 @@ from functools import partial
 from pathlib import Path
 from typing import Protocol
 
-from tinyscry_relay.protocol import GameState, StateContext, decode_game_state
+from imp_relay.protocol import GameState, StateContext, decode_game_state
 
-from tinyscry_tf.context import write_context_marker
-from tinyscry_tf.diagnostics import DiagnosticCapture
-from tinyscry_tf.events import GmcpEvent, ResetEvent, SelectEvent, TextEvent, parse_tf_event
-from tinyscry_tf.normalize import Normalizer
-from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
-from tinyscry_tf.records import JsonValue, Record
-from tinyscry_tf.spool import ProducerAlreadyRunning, RuntimeLayout, SpoolReader, acquire_producer_lock
+from imp_tf.context import write_context_marker
+from imp_tf.diagnostics import DiagnosticCapture
+from imp_tf.events import GmcpEvent, ResetEvent, SelectEvent, TextEvent, parse_tf_event
+from imp_tf.normalize import Normalizer
+from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
+from imp_tf.records import JsonValue, Record
+from imp_tf.spool import ProducerAlreadyRunning, RuntimeLayout, SpoolReader, acquire_producer_lock
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_POLL_INTERVAL_SECONDS = 0.2
@@ -91,31 +91,31 @@ def load_checkpoint(path: Path) -> FeedCheckpoint | None:
     except FileNotFoundError:
         return None
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
-        LOGGER.warning("ignored unreadable TinyScry runtime checkpoint")
+        LOGGER.warning("ignored unreadable Imp runtime checkpoint")
         return None
     if not isinstance(raw, dict) or raw.get("version") != 2 or not isinstance(raw.get("session"), str):
-        LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+        LOGGER.warning("ignored invalid Imp runtime checkpoint")
         return None
     session = raw["session"]
     if not session or len(session) > 128 or not session.replace("_", "a").isalnum():
-        LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+        LOGGER.warning("ignored invalid Imp runtime checkpoint")
         return None
     raw_worlds = raw.get("worlds")
     if not isinstance(raw_worlds, dict):
-        LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+        LOGGER.warning("ignored invalid Imp runtime checkpoint")
         return None
     worlds: dict[str, WorldCheckpoint] = {}
     for world, value in raw_worlds.items():
         if not isinstance(world, str) or not world or len(world) > 128 or not isinstance(value, dict):
-            LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+            LOGGER.warning("ignored invalid Imp runtime checkpoint")
             return None
         connection = value.get("connection")
         if isinstance(connection, bool) or not isinstance(connection, int) or connection < 1:
-            LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+            LOGGER.warning("ignored invalid Imp runtime checkpoint")
             return None
         decoded = decode_game_state(value.get("state"))
         if not decoded.ok or decoded.value is None:
-            LOGGER.warning("ignored invalid TinyScry runtime checkpoint")
+            LOGGER.warning("ignored invalid Imp runtime checkpoint")
             return None
         worlds[world] = WorldCheckpoint(connection, decoded.value)
     return FeedCheckpoint(session, worlds)
@@ -207,8 +207,8 @@ async def run_feed(
                 received += 1
 
                 # Received MUD text is deliberately transient. Even explicit
-                # diagnostic capture must never persist TS2 T payloads.
-                if diagnostics is not None and not line.startswith("TS2 T "):
+                # diagnostic capture must never persist IMP2 T payloads.
+                if diagnostics is not None and not line.startswith("IMP2 T "):
                     diagnostics.write(line)
 
                 parsed = parse_tf_event(line)

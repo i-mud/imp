@@ -4,9 +4,7 @@ import { actionUrlForStateUrl, createRuntimeClients, relayConnectionFromNative }
 
 describe('desktop runtime configuration', () => {
   it('preserves a reverse-proxy prefix when deriving the action endpoint', () => {
-    expect(actionUrlForStateUrl('wss://tinyscry.example/tinyscry/state')).toBe(
-      'wss://tinyscry.example/tinyscry/action',
-    );
+    expect(actionUrlForStateUrl('wss://imp.example/imp/state')).toBe('wss://imp.example/imp/action');
   });
 
   it('keeps the historical local action endpoint fallback', () => {
@@ -17,12 +15,12 @@ describe('desktop runtime configuration', () => {
     expect(
       relayConnectionFromNative({
         mode: 'direct',
-        stateUrl: 'wss://tinyscry.example/tinyscry/state',
+        stateUrl: 'wss://imp.example/imp/state',
         authenticationToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       }),
     ).toEqual({
       mode: 'direct',
-      stateUrl: 'wss://tinyscry.example/tinyscry/state',
+      stateUrl: 'wss://imp.example/imp/state',
       authenticationToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     });
   });
@@ -32,14 +30,14 @@ describe('desktop runtime configuration', () => {
       relayConnectionFromNative(
         {
           mode: 'direct',
-          stateUrl: 'wss://tinyscry.example/state',
+          stateUrl: 'wss://imp.example/state',
           authenticationToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
         },
         'not-a-url',
       ),
     ).toEqual({
       mode: 'direct',
-      stateUrl: 'wss://tinyscry.example/state',
+      stateUrl: 'wss://imp.example/state',
       authenticationToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     });
   });
@@ -48,7 +46,7 @@ describe('desktop runtime configuration', () => {
     expect(() =>
       relayConnectionFromNative({
         mode: 'direct',
-        stateUrl: 'ws://tinyscry.example/state',
+        stateUrl: 'ws://imp.example/state',
         authenticationToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       }),
     ).toThrow('must use wss');

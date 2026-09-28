@@ -1,4 +1,4 @@
-import { isValidActionCommand, type StateContext } from '@tinyscry/protocol';
+import { isValidActionCommand, type StateContext } from '@imp/protocol';
 
 import type { ActionResult, ActionSink } from './types.ts';
 

@@ -1,4 +1,4 @@
-import { isSafeText } from '@tinyscry/protocol';
+import { isSafeText } from '@imp/protocol';
 
 export type AlertVital = 'health' | 'mana' | 'moves' | 'target-health';
 export type TextMatchMode = 'contains' | 'wildcard';
@@ -33,8 +33,8 @@ export const MAX_ALERT_LABEL_CHARACTERS = 64;
 export const MAX_TEXT_PATTERN_CHARACTERS = 256;
 
 const MAX_ALERT_ID_CHARACTERS = 128;
-const ALERT_DEFINITIONS_STORAGE_KEY = 'tinyscry.alerts';
-const LEGACY_ALERT_SETTINGS_STORAGE_KEY = 'tinyscry.alert-settings';
+const ALERT_DEFINITIONS_STORAGE_KEY = 'imp.alerts';
+const LEGACY_ALERT_SETTINGS_STORAGE_KEY = 'imp.alert-settings';
 
 export const DEFAULT_LOW_HEALTH_ALERT: VitalAlertDefinition = {
   id: 'low-health',

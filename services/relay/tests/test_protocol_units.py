@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tinyscry_relay.protocol import (
+from imp_relay.protocol import (
     Character,
     GameState,
     PublishMessage,

@@ -42,14 +42,14 @@ relay, including one owned by another local OS user. The workstation side of an
 SSH forward has the same host-local property. Browser `Origin` checks are
 defense-in-depth against cross-site requests, not authentication.
 
-TinyScry therefore supports a single-user workstation and VPS, or hosts where
+Imp therefore supports a single-user workstation and VPS, or hosts where
 all local users and processes are mutually trusted. An untrusted multi-user
 host is outside the supported trust boundary.
 
 ## Consequences
 
 - A non-loopback bind is rejected. There is no override flag.
-- TinyScry has no per-user authentication on the VPS listener or workstation
+- Imp has no per-user authentication on the VPS listener or workstation
   forward; loopback must never be described as same-user isolation.
 - The relay must never grow authentication as a way to make public exposure
   acceptable. If public exposure is ever genuinely needed, that is a new

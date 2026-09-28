@@ -5,10 +5,10 @@ import stat
 from collections.abc import Callable
 from pathlib import Path
 
-from tinyscry_relay.protocol import GameState, StateContext
+from imp_relay.protocol import GameState, StateContext
 
-from tinyscry_tf.diagnostics import DiagnosticCapture
-from tinyscry_tf.feed import FeedCheckpoint, WorldCheckpoint, load_checkpoint, run_feed, store_checkpoint
+from imp_tf.diagnostics import DiagnosticCapture
+from imp_tf.feed import FeedCheckpoint, WorldCheckpoint, load_checkpoint, run_feed, store_checkpoint
 
 EMPTY = GameState(character=None, target=None)
 
@@ -81,10 +81,10 @@ def test_background_world_updates_cache_without_overwriting_foreground() -> None
     async def scenario() -> None:
         source = _FakeSource(
             [
-                ["TS2 S session1 1 1 Alpha 1"],
-                ['TS2 G session1 1 Alpha 2 Char.Status {"character_name":"Alice","health":"9"}'],
-                ['TS2 G session1 2 Beta 3 Char.Status {"character_name":"Bob","health":"7"}'],
-                ["TS2 S session1 2 2 Beta 4"],
+                ["IMP2 S session1 1 1 Alpha 1"],
+                ['IMP2 G session1 1 Alpha 2 Char.Status {"character_name":"Alice","health":"9"}'],
+                ['IMP2 G session1 2 Beta 3 Char.Status {"character_name":"Bob","health":"7"}'],
+                ["IMP2 S session1 2 2 Beta 4"],
             ]
         )
         publisher = _CollectingPublisher()
@@ -125,8 +125,8 @@ def test_selection_and_gmcp_from_one_spool_drain_keep_the_context_order() -> Non
         source = _FakeSource(
             [
                 [
-                    "TS2 S session1 1 1 Alpha 1",
-                    'TS2 G session1 1 Alpha 2 Char.Status {"character_name":"Alice"}',
+                    "IMP2 S session1 1 1 Alpha 1",
+                    'IMP2 G session1 1 Alpha 2 Char.Status {"character_name":"Alice"}',
                 ]
             ]
         )
@@ -145,12 +145,12 @@ def test_text_events_forward_only_for_the_selected_exact_connection() -> None:
         source = _FakeSource(
             [
                 [
-                    "TS2 S s1 1 1 Alpha 1",
-                    "TS2 T s1 1 Alpha 2 Alpha_32_one",
-                    "TS2 T s1 2 Beta 3 Background",
-                    "TS2 S s1 2 2 Beta 4",
-                    "TS2 T s1 1 Alpha 5 Old_32_foreground",
-                    "TS2 T s1 2 Beta 6 Beta_32_now",
+                    "IMP2 S s1 1 1 Alpha 1",
+                    "IMP2 T s1 1 Alpha 2 Alpha_32_one",
+                    "IMP2 T s1 2 Beta 3 Background",
+                    "IMP2 S s1 2 2 Beta 4",
+                    "IMP2 T s1 1 Alpha 5 Old_32_foreground",
+                    "IMP2 T s1 2 Beta 6 Beta_32_now",
                 ]
             ]
         )
@@ -171,8 +171,8 @@ def test_text_events_are_not_checkpointed_or_written_to_diagnostics(tmp_path: Pa
         source = _FakeSource(
             [
                 [
-                    "TS2 S s1 1 1 Alpha 1",
-                    "TS2 T s1 1 Alpha 2 Secret_32_received_32_line",
+                    "IMP2 S s1 1 1 Alpha 1",
+                    "IMP2 T s1 1 Alpha 2 Secret_32_received_32_line",
                 ]
             ]
         )
@@ -192,8 +192,8 @@ def test_text_events_are_not_checkpointed_or_written_to_diagnostics(tmp_path: Pa
             diagnostics.close()
 
         captured = (directory / "gmcp.raw").read_text(encoding="utf-8")
-        assert "TS2 S s1 1 1 Alpha 1" in captured
-        assert "TS2 T " not in captured
+        assert "IMP2 S s1 1 1 Alpha 1" in captured
+        assert "IMP2 T " not in captured
         assert "Secret" not in captured
         assert len(checkpoints) == 1
         assert publisher.texts == [(StateContext("s1", 1, 1), 2000, "Secret received line")]
@@ -205,11 +205,11 @@ def test_active_reset_clears_only_that_world_and_rejects_old_generation() -> Non
     async def scenario() -> None:
         source = _FakeSource(
             [
-                ["TS2 S s1 1 1 Alpha 1"],
-                ['TS2 G s1 1 Alpha 2 Char.Status {"character_name":"Alice"}'],
-                ["TS2 R s1 3 Alpha 3"],
-                ['TS2 G s1 1 Alpha 4 Char.Status {"character_name":"Old"}'],
-                ['TS2 G s1 3 Alpha 5 Char.Status {"character_name":"New"}'],
+                ["IMP2 S s1 1 1 Alpha 1"],
+                ['IMP2 G s1 1 Alpha 2 Char.Status {"character_name":"Alice"}'],
+                ["IMP2 R s1 3 Alpha 3"],
+                ['IMP2 G s1 1 Alpha 4 Char.Status {"character_name":"Old"}'],
+                ['IMP2 G s1 3 Alpha 5 Char.Status {"character_name":"New"}'],
             ]
         )
         publisher = _CollectingPublisher()
@@ -233,9 +233,9 @@ def test_new_session_invalidates_cached_world_state() -> None:
     async def scenario() -> None:
         source = _FakeSource(
             [
-                ['TS2 G old 1 Alpha 1 Char.Status {"character_name":"Old"}'],
-                ["TS2 S old 1 1 Alpha 2"],
-                ["TS2 S fresh 1 1 Alpha 3"],
+                ['IMP2 G old 1 Alpha 1 Char.Status {"character_name":"Old"}'],
+                ["IMP2 S old 1 1 Alpha 2"],
+                ["IMP2 S fresh 1 1 Alpha 3"],
             ]
         )
         publisher = _CollectingPublisher()
@@ -250,7 +250,7 @@ def test_new_session_invalidates_cached_world_state() -> None:
 
 def test_no_world_selects_empty_state_and_clears_marker() -> None:
     async def scenario() -> None:
-        source = _FakeSource([["TS2 S s1 1 1 Alpha 1", "TS2 S s1 2 0 - 2"]])
+        source = _FakeSource([["IMP2 S s1 1 1 Alpha 1", "IMP2 S s1 2 0 - 2"]])
         publisher = _CollectingPublisher()
         markers: list[StateContext | None] = []
 
@@ -280,17 +280,17 @@ def test_checkpoint_is_session_and_world_aware_and_private(tmp_path: Path) -> No
 
 def test_matching_checkpoint_seeds_world_but_different_session_discards_it() -> None:
     async def scenario() -> None:
-        from tinyscry_relay.protocol import Character
+        from imp_relay.protocol import Character
 
         seeded = GameState(character=Character("Seed", None, None, None), target=None)
         checkpoint = FeedCheckpoint("same", {"Alpha": WorldCheckpoint(1, seeded)})
 
         matching = _CollectingPublisher()
-        await _run(_FakeSource([["TS2 S same 1 1 Alpha 1"]]), matching, initial_checkpoint=checkpoint)
+        await _run(_FakeSource([["IMP2 S same 1 1 Alpha 1"]]), matching, initial_checkpoint=checkpoint)
         assert _character_name(matching.operations[0][2]) == "Seed"
 
         fresh = _CollectingPublisher()
-        await _run(_FakeSource([["TS2 S new 1 1 Alpha 1"]]), fresh, initial_checkpoint=checkpoint)
+        await _run(_FakeSource([["IMP2 S new 1 1 Alpha 1"]]), fresh, initial_checkpoint=checkpoint)
         assert _character_name(fresh.operations[0][2]) is None
 
     asyncio.run(scenario())
@@ -314,7 +314,7 @@ def test_relay_outage_does_not_stop_spool_draining_and_new_selection_cancels_old
                     raise
 
     async def scenario() -> None:
-        source = _FakeSource([["TS2 S s1 1 1 Alpha 1"], ["TS2 S s1 2 2 Beta 2"], [], []])
+        source = _FakeSource([["IMP2 S s1 1 1 Alpha 1"], ["IMP2 S s1 2 2 Beta 2"], [], []])
         publisher = _BlockedPublisher()
 
         await _run(source, publisher)

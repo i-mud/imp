@@ -106,7 +106,7 @@ describe('RelayStateSource', () => {
           type: 'hello',
           protocol: 2,
           at: 100,
-          relay: { name: 'tinyscry-relay', version: '0.1.0' },
+          relay: { name: 'imp-relay', version: '0.1.0' },
         }),
       }),
     );

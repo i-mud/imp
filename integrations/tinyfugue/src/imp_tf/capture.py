@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from tinyscry_tf.events import GmcpEvent, parse_tf_event
-from tinyscry_tf.records import ParseResult
+from imp_tf.events import GmcpEvent, parse_tf_event
+from imp_tf.records import ParseResult
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class CaptureStats:
 
 
 def parse_raw_gmcp(line: str) -> ParseResult:
-    """Parse one ``TS2 G`` spool event and return its checked GMCP record."""
+    """Parse one ``IMP2 G`` spool event and return its checked GMCP record."""
 
     parsed = parse_tf_event(line)
     if not parsed.ok:

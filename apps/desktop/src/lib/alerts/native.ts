@@ -52,7 +52,7 @@ async function showAlertNotification(event: AlertEvent): Promise<void> {
     if (!(await notificationPermissionGranted())) return;
 
     sendNotification({
-      title: 'TinyScry',
+      title: 'Imp',
       body: event.body,
     });
   } catch {

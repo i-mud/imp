@@ -37,14 +37,14 @@ Implemented by:
 
 Selected by:
 
-- `createRuntimeClients()` in `config.ts`. An explicit `VITE_TINYSCRY_SOURCE`
+- `createRuntimeClients()` in `config.ts`. An explicit `VITE_IMP_SOURCE`
   is authoritative. Without it, browser/development builds default to `mock`,
   while a Tauri build identified by `TAURI_ENV_PLATFORM` defaults to `relay`.
 - In relay mode, `connection_config` supplies the native runtime transport
   tuple. External and managed SSH modes use the local relay URL; Direct WSS
   supplies its `wss:` state URL and transient renderer authentication token
   from native application configuration.
-- `VITE_TINYSCRY_RELAY_URL` remains a local/custom relay override. Direct WSS
+- `VITE_IMP_RELAY_URL` remains a local/custom relay override. Direct WSS
   never reads a pairing token or remote URL from a build-time `VITE_*` value.
 
 - Native connection settings use separate `connection_settings` and

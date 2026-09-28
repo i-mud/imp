@@ -127,7 +127,7 @@
   </section>
 
   {#if appVersion !== null}
-    <div class="version-label">TinyScry v{appVersion}</div>
+    <div class="version-label">Imp v{appVersion}</div>
   {/if}
 </div>
 

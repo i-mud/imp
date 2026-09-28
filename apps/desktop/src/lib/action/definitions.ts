@@ -1,4 +1,4 @@
-import { isSafeText, isValidActionCommand } from '@tinyscry/protocol';
+import { isSafeText, isValidActionCommand } from '@imp/protocol';
 
 export interface ActionDefinition {
   readonly id: string;
@@ -9,7 +9,7 @@ export interface ActionDefinition {
 const MAX_ACTION_LABEL_CHARACTERS = 64;
 export const MAX_ACTION_DEFINITIONS = 64;
 
-const ACTION_DEFINITIONS_STORAGE_KEY = 'tinyscry.actions';
+const ACTION_DEFINITIONS_STORAGE_KEY = 'imp.actions';
 const MAX_ACTION_ID_CHARACTERS = 128;
 
 function isValidActionId(value: unknown): value is string {

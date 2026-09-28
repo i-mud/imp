@@ -5,7 +5,7 @@ import {
   type ProtocolError,
   type RelayInfo,
   type StateContext,
-} from '@tinyscry/protocol';
+} from '@imp/protocol';
 
 import type { ConnectionPhase, SourceEvent } from '../source/types.ts';
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Final
 from urllib.parse import urlsplit
 
-from tinyscry_relay.protocol import (
+from imp_relay.protocol import (
     Character,
     GameState,
     StateContext,

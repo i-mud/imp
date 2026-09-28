@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from tinyscry_relay.protocol import Character, Target, Vital
+from imp_relay.protocol import Character, Target, Vital
 
-from tinyscry_tf.normalize import Normalizer
-from tinyscry_tf.records import JsonValue, Record
+from imp_tf.normalize import Normalizer
+from imp_tf.records import JsonValue, Record
 
 
 def _record(package: str, payload: JsonValue) -> Record:

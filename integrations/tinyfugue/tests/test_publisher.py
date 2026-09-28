@@ -5,14 +5,14 @@ import json
 from typing import cast
 
 import pytest
-from tinyscry_relay.protocol import Character, GameState, StateContext, Target, Vital
-from tinyscry_relay.server import RelayServer
+from imp_relay.protocol import Character, GameState, StateContext, Target, Vital
+from imp_relay.server import RelayServer
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.asyncio.server import ServerConnection, serve
 
-import tinyscry_tf.publisher as publisher_module
-from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
+import imp_tf.publisher as publisher_module
+from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
 
 CONTEXT = StateContext("session1", 1, 1)
 OTHER_CONTEXT = StateContext("session1", 2, 2)

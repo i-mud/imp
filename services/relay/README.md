@@ -1,4 +1,4 @@
-# TinyScry relay and remote gateway
+# Imp relay and remote gateway
 
 The relay accepts producer publishes on `ws://127.0.0.1:8787/ingest` and serves
 retained state to subscribers on `ws://127.0.0.1:8787/state`.
@@ -10,7 +10,7 @@ Remote desktop access has two transport shapes:
 
 - SSH forwards the relay's desktop-facing state/action endpoints to the local
   workstation.
-- Direct WSS uses the separate `tinyscry-gateway`, which listens only on
+- Direct WSS uses the separate `imp-gateway`, which listens only on
   `127.0.0.1:8788`, authenticates the desktop before contacting the relay, and
   exposes only state and action capabilities behind a TLS reverse proxy.
 

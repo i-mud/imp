@@ -17,12 +17,12 @@ Requires the platform toolchain.
 
 ## Canonical checkout and Windows-native mirror
 
-The canonical checkout is `~/src/tinyscry` inside WSL2. Everything except the
+The canonical checkout is `~/src/imp` inside WSL2. Everything except the
 native Tauri build runs there.
 
 For native Windows builds, **do not build through `\\wsl$`**. Cargo on the 9P
 filesystem is dramatically slower and file watching is unreliable. The native
-Windows tree at `C:\src\tinyscry-native` is a disposable execution mirror, not
+Windows tree at `C:\src\imp-native` is a disposable execution mirror, not
 a Git checkout or source of truth. Make all source edits in WSL2; never edit
 the mirror.
 
@@ -116,7 +116,7 @@ constrains both implementations at once.
 
 ## Working on the relay
 
-`services/relay/src/tinyscry_relay/state.py` is transport-free and takes its
+`services/relay/src/imp_relay/state.py` is transport-free and takes its
 clock by injection. Test feed-status rules against it directly rather than
 standing up a server - `test_server.py` is for wire behaviour only.
 
@@ -133,7 +133,7 @@ Point the browser build at the tunnelled relay - no native build needed:
 
 ```bash
 ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
-VITE_TINYSCRY_SOURCE=relay npm run dev
+VITE_IMP_SOURCE=relay npm run dev
 ```
 
 If the HUD shows "no data" while connected, the relay is reachable but the feed

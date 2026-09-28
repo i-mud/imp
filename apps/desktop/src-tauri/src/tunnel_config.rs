@@ -333,7 +333,7 @@ pub fn load_or_init(path: &Path) -> TunnelConfig {
                 Ok(()) => config,
                 Err(reason) => {
                     eprintln!(
-                        "tinyscry: invalid tunnel config at {}: {reason}; using external mode",
+                        "imp: invalid tunnel config at {}: {reason}; using external mode",
                         path.display()
                     );
                     TunnelConfig::default()
@@ -341,7 +341,7 @@ pub fn load_or_init(path: &Path) -> TunnelConfig {
             },
             Err(error) => {
                 eprintln!(
-                    "tinyscry: invalid tunnel config at {}: {error}; using external mode",
+                    "imp: invalid tunnel config at {}: {error}; using external mode",
                     path.display()
                 );
                 TunnelConfig::default()
@@ -412,7 +412,7 @@ mod tests {
         std::fs::write(
             &path,
             format!(
-                r#"{{"mode":"direct","remoteUrl":"wss://tinyscry.example/state","pairingToken":"{VALID_TOKEN}"}}"#
+                r#"{{"mode":"direct","remoteUrl":"wss://imp.example/state","pairingToken":"{VALID_TOKEN}"}}"#
             ),
         )
         .unwrap();
@@ -420,14 +420,14 @@ mod tests {
         let config = load_or_init(&path);
 
         assert_eq!(config.mode, TunnelMode::Direct);
-        assert_eq!(config.remote_url, "wss://tinyscry.example/state");
+        assert_eq!(config.remote_url, "wss://imp.example/state");
         assert_eq!(config.pairing_token, VALID_TOKEN);
 
         let runtime = config.runtime_connection_config();
         assert_eq!(runtime.mode, RuntimeConnectionMode::Direct);
         assert_eq!(
             runtime.state_url.as_deref(),
-            Some("wss://tinyscry.example/state")
+            Some("wss://imp.example/state")
         );
         assert_eq!(runtime.authentication_token.as_deref(), Some(VALID_TOKEN));
 
@@ -441,7 +441,7 @@ mod tests {
         std::fs::write(
             &path,
             format!(
-                r#"{{"mode":"direct","remoteUrl":"wss://tinyscry.example/tinyscry/state","pairingToken":"{VALID_TOKEN}"}}"#
+                r#"{{"mode":"direct","remoteUrl":"wss://imp.example/imp/state","pairingToken":"{VALID_TOKEN}"}}"#
             ),
         )
         .unwrap();
@@ -449,7 +449,7 @@ mod tests {
         let config = load_or_init(&path);
 
         assert_eq!(config.mode, TunnelMode::Direct);
-        assert_eq!(config.remote_url, "wss://tinyscry.example/tinyscry/state");
+        assert_eq!(config.remote_url, "wss://imp.example/imp/state");
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -461,7 +461,7 @@ mod tests {
         std::fs::write(
             &path,
             format!(
-                r#"{{"mode":"direct","remoteUrl":"ws://tinyscry.example/state","pairingToken":"{VALID_TOKEN}"}}"#
+                r#"{{"mode":"direct","remoteUrl":"ws://imp.example/state","pairingToken":"{VALID_TOKEN}"}}"#
             ),
         )
         .unwrap();
@@ -475,10 +475,10 @@ mod tests {
         let dir = tempdir();
 
         for remote_url in [
-            "wss://tinyscry.example/ingest",
-            "wss://user@tinyscry.example/state",
-            "wss://tinyscry.example/state?token=nope",
-            "wss://tinyscry.example/state#fragment",
+            "wss://imp.example/ingest",
+            "wss://user@imp.example/state",
+            "wss://imp.example/state?token=nope",
+            "wss://imp.example/state#fragment",
         ] {
             let path = dir.join("tunnel.json");
             std::fs::write(
@@ -501,7 +501,7 @@ mod tests {
         let path = dir.join("tunnel.json");
         std::fs::write(
             &path,
-            r#"{"mode":"direct","remoteUrl":"wss://tinyscry.example/state","pairingToken":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB"}"#,
+            r#"{"mode":"direct","remoteUrl":"wss://imp.example/state","pairingToken":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB"}"#,
         )
         .unwrap();
 
@@ -532,7 +532,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
 
@@ -558,7 +558,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
 
@@ -567,7 +567,7 @@ mod tests {
         let serialized = json.to_string();
 
         assert_eq!(json["mode"], "direct");
-        assert_eq!(json["remoteUrl"], "wss://tinyscry.example/state");
+        assert_eq!(json["remoteUrl"], "wss://imp.example/state");
         assert_eq!(json["hasPairingToken"], true);
         assert!(json.get("pairingToken").is_none());
         assert!(!serialized.contains(VALID_TOKEN));
@@ -578,7 +578,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: "should-not-survive".into(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
 
@@ -599,7 +599,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
 
@@ -636,7 +636,7 @@ mod tests {
         let result = TunnelConfig::default().updated(ConnectionSettingsUpdate {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: None,
         });
 
@@ -700,7 +700,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
         persist_config(&path, &existing).unwrap();
@@ -785,7 +785,7 @@ mod tests {
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::Direct,
                 ssh_target: "ignored".into(),
-                remote_url: "wss://tinyscry.example/state".into(),
+                remote_url: "wss://imp.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
             .unwrap();
@@ -795,7 +795,7 @@ mod tests {
         let object = persisted.as_object().unwrap();
 
         assert_eq!(object["mode"], "direct");
-        assert_eq!(object["remoteUrl"], "wss://tinyscry.example/state");
+        assert_eq!(object["remoteUrl"], "wss://imp.example/state");
         assert_eq!(object["pairingToken"], VALID_TOKEN);
         assert!(!object.contains_key("sshTarget"));
 
@@ -915,7 +915,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://tinyscry.example/state".into(),
+            remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
         persist_config(&path, &config).unwrap();
@@ -928,7 +928,7 @@ mod tests {
 
     fn tempdir() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "tinyscry-tunnel-config-test-{}-{}",
+            "imp-tunnel-config-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tinyscry_relay.protocol import decode_client_message, decode_server_message
+from imp_relay.protocol import decode_client_message, decode_server_message
 
 FIXTURES = Path(__file__).resolve().parents[3] / "packages" / "protocol" / "fixtures"
 

@@ -1,17 +1,17 @@
 export type ThemePreference = 'dark' | 'light' | 'system';
 
-const THEME_STORAGE_KEY = 'tinyscry.theme';
+const THEME_STORAGE_KEY = 'imp.theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
 export function themeFromPersisted(value: string | null): ThemePreference {
-  return value === 'light' || value === 'system' ? value : 'dark';
+  return value === 'dark' || value === 'light' ? value : 'system';
 }
 
 export function loadTheme(): ThemePreference {
   try {
     return themeFromPersisted(globalThis.localStorage?.getItem(THEME_STORAGE_KEY) ?? null);
   } catch {
-    return 'dark';
+    return 'system';
   }
 }
 

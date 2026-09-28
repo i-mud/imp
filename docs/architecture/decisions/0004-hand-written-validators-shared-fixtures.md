@@ -15,7 +15,7 @@ Both decoders are hand-written against the same spec, and both test suites run
 the same JSON fixture corpus in `packages/protocol/fixtures/`.
 
 - TypeScript: `packages/protocol/src/decode.ts`
-- Python: `services/relay/src/tinyscry_relay/protocol.py`
+- Python: `services/relay/src/imp_relay/protocol.py`
 - Corpus consumers: `packages/protocol/test/fixtures.test.ts` and
   `services/relay/tests/test_protocol_fixtures.py`
 

@@ -1,4 +1,4 @@
-import type { StateContext } from '@tinyscry/protocol';
+import type { StateContext } from '@imp/protocol';
 
 import type { ActionDefinition } from './definitions.ts';
 import { describeActionResult, LOCAL_ACTION_UNAVAILABLE } from './presentation.ts';

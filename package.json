@@ -1,8 +1,8 @@
 {
-  "name": "tinyscry",
+  "name": "imp",
   "version": "0.1.0",
   "private": true,
-  "description": "Always-on-top companion HUD for MUDs",
+  "description": "A cross-platform MUD companion for live state, alerts, and trusted actions.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -13,9 +13,9 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @tinyscry/desktop",
-    "tauri": "npm run tauri --workspace @tinyscry/desktop --",
-    "tauri:dev": "npm run tauri --workspace @tinyscry/desktop -- dev",
+    "dev": "npm run dev --workspace @imp/desktop",
+    "tauri": "npm run tauri --workspace @imp/desktop --",
+    "tauri:dev": "npm run tauri --workspace @imp/desktop -- dev",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -24,10 +24,10 @@
     "native:sync": "bash scripts/sync-native.sh",
     "vps:sync": "bash scripts/sync-vps.sh",
     "native:watch": "bash scripts/watch-native-mirror.sh",
-    "relay": "uv run --directory services/relay tinyscry-relay",
+    "relay": "uv run --directory services/relay imp-relay",
     "relay:test": "uv run --directory services/relay pytest",
     "relay:lint": "uv run --directory services/relay ruff check . && uv run --directory services/relay ruff format --check . && uv run --directory services/relay mypy src tests",
-    "tf:replay": "uv run --directory integrations/tinyfugue python -m tinyscry_tf.replay",
+    "tf:replay": "uv run --directory integrations/tinyfugue python -m imp_tf.replay",
     "tf:test": "uv run --directory integrations/tinyfugue pytest",
     "tf:lint": "uv run --directory integrations/tinyfugue ruff check . && uv run --directory integrations/tinyfugue ruff format --check . && uv run --directory integrations/tinyfugue mypy src tests",
     "test:e2e": "uv run --project services/relay python tests/e2e/relay_roundtrip.py",

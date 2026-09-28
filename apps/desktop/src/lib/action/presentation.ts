@@ -10,7 +10,7 @@ export function describeActionResult(result: ActionResult): string {
   if (result.status === 'unknown') {
     const detail = result.detail ?? 'No result was returned';
     const punctuation = /[.!?]$/u.test(detail) ? '' : '.';
-    return `Delivery uncertain. TinyScry did not retry. Detail: ${detail}${punctuation}`;
+    return `Delivery uncertain. Imp did not retry. Detail: ${detail}${punctuation}`;
   }
 
   switch (result.detail) {

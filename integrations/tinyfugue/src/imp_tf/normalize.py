@@ -1,4 +1,4 @@
-"""Conservative, side-effect-free normalization from GMCP to TinyScry state."""
+"""Conservative, side-effect-free normalization from GMCP to Imp state."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from tinyscry_relay.protocol import Character, GameState, Target, Vital
+from imp_relay.protocol import Character, GameState, Target, Vital
 
-from tinyscry_tf.records import JsonValue, Record
+from imp_tf.records import JsonValue, Record
 
 MAX_VITAL: Final = 1_000_000_000
 MAX_NAME_CHARS: Final = 64

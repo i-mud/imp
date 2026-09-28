@@ -22,7 +22,7 @@ __pycache__/
 .vite/
 
 # Local configuration and secrets.
-# TinyScry never persists credentials; these patterns exist so a stray local
+# Imp never persists credentials; these patterns exist so a stray local
 # file can never be committed by accident.
 .env
 .env.*

@@ -1,8 +1,8 @@
 {
-  "name": "@tinyscry/protocol",
+  "name": "@imp/protocol",
   "version": "0.1.0",
   "private": true,
-  "description": "Canonical TinyScry wire protocol: types, limits and fail-closed validation",
+  "description": "Canonical Imp wire protocol: types, limits and fail-closed validation",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

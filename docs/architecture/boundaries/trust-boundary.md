@@ -4,17 +4,17 @@
 
 Everything that originates from the MUD is untrusted, transitively. A MUD
 operator can put arbitrary bytes in a character name, a room title or a GMCP
-payload. TinyScry treats all of it as adversarial input.
+payload. Imp treats all of it as adversarial input.
 
 ## Where untrusted data is checked
 
 | Boundary                    | Enforced by                                                |
 | --------------------------- | ---------------------------------------------------------- |
-| versioned TF spool event    | `integrations/tinyfugue/src/tinyscry_tf/events.py`         |
-| offline adapter record      | `integrations/tinyfugue/src/tinyscry_tf/records.py`        |
-| GMCP -> normalized state    | `integrations/tinyfugue/src/tinyscry_tf/normalize.py`      |
+| versioned TF spool event    | `integrations/tinyfugue/src/imp_tf/events.py`              |
+| offline adapter record      | `integrations/tinyfugue/src/imp_tf/records.py`             |
+| GMCP -> normalized state    | `integrations/tinyfugue/src/imp_tf/normalize.py`           |
 | producer output             | `publisher.py`, via protocol encoders before sending       |
-| relay ingest/action/helper  | `services/relay/src/tinyscry_relay/protocol.py`            |
+| relay ingest/action/helper  | `services/relay/src/imp_relay/protocol.py`                 |
 | HUD state and action result | `packages/protocol/src/decode.ts`                          |
 | TF action delivery          | `action_consumer.py` plus the private exact-context marker |
 
@@ -41,7 +41,7 @@ An `Origin` header is not process identity and is not authentication.
 
 Supported deployment therefore still requires a single-user workstation and
 VPS, or mutual trust among every host-local user and process. An untrusted
-multi-user host is outside TinyScry's supported trust boundary.
+multi-user host is outside Imp's supported trust boundary.
 
 ## Why validation is repeated
 
@@ -64,17 +64,17 @@ point a control character is a bug, and the decoder says so.
 No server-provided value is ever interpolated into a shell command, in any
 component. Concretely:
 
-- The TF hook appends versioned `TS2` events to the fixed private spool path.
+- The TF hook appends versioned `IMP2` events to the fixed private spool path.
   Session, generation, and world tokens come from local TinyFugue state. Raw
   GMCP remains the final data field and is parsed only by Python. No MUD value
   is evaluated as TF source or placed in a command line.
-- `integrations/tinyfugue/src/tinyscry_tf/bridge.py` uses no `shell=True`, no
+- `integrations/tinyfugue/src/imp_tf/bridge.py` uses no `shell=True`, no
   `os.system`, and constructs no subprocess from record content.
 - The relay executes nothing. Its outbound broker only moves a bounded
   printable-ASCII command between WebSocket peers.
 - The action helper receives the raw command only as decoded WebSocket data. It
   verifies the private exact-context marker, converts the command with the
-  `textencode.tf` representation, and writes one fixed `/tinyscry_send
+  `textencode.tf` representation, and writes one fixed `/imp_send
 <session> <foreground> <connection> <world-token> <encoded-data>` line to its
   stdout pipe. TinyFugue rechecks that locally generated context and the
   quote-pinned current world before decoding the command, calling `send()`, and
@@ -82,7 +82,7 @@ component. Concretely:
   recreate its old context. The raw command is never shell argv, shell syntax,
   a generated macro name, or evaluated TF source.
 - TinyFugue's asynchronous `/quote -dexec` starts only the fixed
-  `tinyscry-action-consumer` executable with locally generated session,
+  `imp-action-consumer` executable with locally generated session,
   generation, and encoded-world arguments. Blank `-w` pins its output to the
   world selected when the helper started. Each registration accepts at most one
   dispatch; after one fixed write and flush the helper exits and closes stdout.
@@ -117,7 +117,7 @@ into argv requires investigation.
 
 ## Credentials and local command text
 
-TinyScry supports two remote desktop transports with different credential
+Imp supports two remote desktop transports with different credential
 boundaries.
 
 SSH mode still requests, stores, and manages no SSH password or private key.
@@ -145,7 +145,7 @@ gateway:
 - the renderer may hold the active token transiently only to authenticate a
   direct WSS connection;
 - possession of the token grants remote state observation and context-bound
-  action requests for that TinyScry installation, so compromise requires
+  action requests for that Imp installation, so compromise requires
   rotation.
 
 The relay itself remains unauthenticated and permanently loopback-only.
@@ -185,8 +185,8 @@ Touching any file in the table above is a security change.
 A bound is defined in **three** places, and all three must move together:
 
 1. `packages/protocol/src/limits.ts` - `LIMITS`, the TypeScript decoder's source
-2. `services/relay/src/tinyscry_relay/protocol.py` - the Python `LIMITS`
-3. `integrations/tinyfugue/src/tinyscry_tf/normalize.py` - the normalizer's own
+2. `services/relay/src/imp_relay/protocol.py` - the Python `LIMITS`
+3. `integrations/tinyfugue/src/imp_tf/normalize.py` - the normalizer's own
    truncation bound, which must not exceed the protocol's or it will emit state
    the relay rejects
 

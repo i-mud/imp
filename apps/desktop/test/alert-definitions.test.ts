@@ -135,8 +135,8 @@ describe('alert definition persistence', () => {
 
   it('prefers the generalized store once it exists, including an empty list', () => {
     const getItem = vi.fn((key: string) => {
-      if (key === 'tinyscry.alerts') return '[]';
-      if (key === 'tinyscry.alert-settings') {
+      if (key === 'imp.alerts') return '[]';
+      if (key === 'imp.alert-settings') {
         return JSON.stringify({ lowHpEnabled: true });
       }
       return null;
@@ -148,8 +148,8 @@ describe('alert definition persistence', () => {
 
   it('uses legacy settings only while the generalized store is absent', () => {
     const getItem = vi.fn((key: string) => {
-      if (key === 'tinyscry.alerts') return null;
-      if (key === 'tinyscry.alert-settings') {
+      if (key === 'imp.alerts') return null;
+      if (key === 'imp.alert-settings') {
         return JSON.stringify({
           lowHpEnabled: false,
           lowHpThresholdPercent: 40,

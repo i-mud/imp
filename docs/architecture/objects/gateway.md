@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`tinyscry-gateway` is TinyScry's public-network authentication boundary for
+`imp-gateway` is Imp's public-network authentication boundary for
 Direct WSS desktop transport. The process itself remains loopback-only. A
 separate TLS reverse proxy owns the public listener and forwards only the
 gateway's desktop-facing routes.
@@ -13,13 +13,13 @@ loopback relay.
 
 ## Source
 
-- `services/relay/src/tinyscry_relay/gateway.py` - listener, authentication,
+- `services/relay/src/imp_relay/gateway.py` - listener, authentication,
   endpoint policy, and relay bridging.
-- `services/relay/src/tinyscry_relay/gateway_config.py` - validated loopback
+- `services/relay/src/imp_relay/gateway_config.py` - validated loopback
   listener/upstream configuration and pairing-token digest input.
-- `services/relay/src/tinyscry_relay/gateway_main.py` - process entry point and
+- `services/relay/src/imp_relay/gateway_main.py` - process entry point and
   bounded lifecycle logging.
-- `deploy/systemd/tinyscry-gateway.service` - VPS user-service shape.
+- `deploy/systemd/imp-gateway.service` - VPS user-service shape.
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - native Direct-WSS endpoint
   and pairing-token configuration.
 - `apps/desktop/src/lib/config.ts` - renderer runtime transport selection.
@@ -102,7 +102,7 @@ selection, so a process-level proxy setting cannot redirect the trusted
 loopback hop.
 
 Browser `Origin` checking remains defense in depth. The accepted browser
-origins are TinyScry's Vite development origin and Tauri origin; clients
+origins are Imp's Vite development origin and Tauri origin; clients
 without an `Origin` header are also permitted. Origin is not authentication.
 
 TLS termination belongs to the reverse proxy. Direct desktop configuration

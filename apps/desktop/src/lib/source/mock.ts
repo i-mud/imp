@@ -1,4 +1,4 @@
-import { decodeServerMessage, PROTOCOL_VERSION, type GameState, type StateContext } from '@tinyscry/protocol';
+import { decodeServerMessage, PROTOCOL_VERSION, type GameState, type StateContext } from '@imp/protocol';
 
 import type { SourceEvent, StateSource } from './types.ts';
 

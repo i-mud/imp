@@ -3,7 +3,7 @@ import {
   isValidActionCommand,
   PROTOCOL_VERSION,
   type StateContext,
-} from '@tinyscry/protocol';
+} from '@imp/protocol';
 
 import type { ActionResult, ActionSink } from './types.ts';
 

@@ -1,4 +1,4 @@
-import type { FeedStatus, GameState, ProtocolError, RelayInfo, StateContext } from '@tinyscry/protocol';
+import type { FeedStatus, GameState, ProtocolError, RelayInfo, StateContext } from '@imp/protocol';
 
 export type ConnectionPhase = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 

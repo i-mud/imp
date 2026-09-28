@@ -8,7 +8,7 @@ is the most likely bug in this area:
 - **Socket liveness** - can the HUD reach its selected desktop transport and
   receive the relay stream? Owned by `apps/desktop/src/lib/source/relay.ts`.
 - **Feed liveness** - is the MUD still feeding the relay? Owned by
-  `services/relay/src/tinyscry_relay/state.py` and reported as `status.feed`.
+  `services/relay/src/imp_relay/state.py` and reported as `status.feed`.
 
 A healthy socket with a dead feed is a real and common state: the relay is
 fine, TinyFugue is gone. The HUD must show "no data", not confidently stale

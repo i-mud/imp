@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Final, TextIO
 from urllib.parse import urlsplit
 
-from tinyscry_relay.protocol import (
+from imp_relay.protocol import (
     ConsumerReadyMessage,
     DispatchMessage,
     StateContext,
@@ -22,8 +22,8 @@ from tinyscry_relay.protocol import (
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-from tinyscry_tf.context import read_context_marker
-from tinyscry_tf.events import decode_tf_token
+from imp_tf.context import read_context_marker
+from imp_tf.events import decode_tf_token
 
 DEFAULT_CONSUMER_URL: Final = "ws://127.0.0.1:8787/action-consumer"
 _INITIAL_READY_SECONDS: Final = 5.0
@@ -43,7 +43,7 @@ def encode_tf_dispatch(context: StateContext, world: str, command: str) -> str:
     if decode_tf_token(world) is None:
         raise ValueError("world must be a valid textencode.tf token")
     return (
-        f"/tinyscry_send {context.session} {context.foreground} {context.connection} "
+        f"/imp_send {context.session} {context.foreground} {context.connection} "
         f"{world} {encode_tf_token(command)}\n"
     )
 
@@ -224,9 +224,7 @@ def _arguments() -> argparse.ArgumentParser:
     parser.add_argument("--foreground", required=True, type=int)
     parser.add_argument("--connection", required=True, type=int)
     parser.add_argument("--world", required=True)
-    parser.add_argument(
-        "--marker", type=Path, default=Path.home() / ".local" / "state" / "tinyscry" / "context"
-    )
+    parser.add_argument("--marker", type=Path, default=Path.home() / ".local" / "state" / "imp" / "context")
     return parser
 
 
@@ -236,7 +234,7 @@ def main() -> None:
     try:
         asyncio.run(run_action_consumer(args.relay_url, context, args.world, args.marker, sys.stdout))
     except (OSError, RuntimeError, ValueError) as error:
-        print(f"tinyscry action consumer stopped: {error}", file=sys.stderr)
+        print(f"imp action consumer stopped: {error}", file=sys.stderr)
         raise SystemExit(1) from None
 
 

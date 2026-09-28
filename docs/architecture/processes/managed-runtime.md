@@ -3,7 +3,7 @@
 ## Why this is a process card
 
 The managed runtime crosses two machines and three independent owners. Process
-ownership must stay explicit: TinyScry owns its relay, feed, and SSH child; it
+ownership must stay explicit: Imp owns its relay, feed, and SSH child; it
 never owns or daemonizes the operator's interactive TinyFugue session.
 
 ## Ownership
@@ -13,16 +13,16 @@ never owns or daemonizes the operator's interactive TinyFugue session.
 | TinyFugue session                             | operator                       | started and stopped interactively                          |
 | capture/select/action definitions             | TinyFugue startup config       | fixed named `/def`; repeated loads replace                 |
 | per-dispatch action helper                    | TinyFugue `/quote`             | reader loss or one line ends it; guarded macro replaces it |
-| spool, per-world normalize, selected publish  | `tinyscry-feed.service`        | one locked process, `Restart=on-failure`                   |
-| loopback state/action relay                   | `tinyscry-relay.service`       | `systemd --user`, `Restart=on-failure`                     |
-| authenticated remote gateway                  | `tinyscry-gateway.service`     | loopback user service; state/action only                   |
-| local SSH forward                             | desktop `TunnelSupervisor`     | at most one owned child per TinyScry process               |
+| spool, per-world normalize, selected publish  | `imp-feed.service`             | one locked process, `Restart=on-failure`                   |
+| loopback state/action relay                   | `imp-relay.service`            | `systemd --user`, `Restart=on-failure`                     |
+| authenticated remote gateway                  | `imp-gateway.service`          | loopback user service; state/action only                   |
+| local SSH forward                             | desktop `TunnelSupervisor`     | at most one owned child per Imp process                    |
 | pre-existing relay endpoint on the local port | whoever started it             | adopted and monitored; never owned, signalled or replaced  |
 | WebSocket reconnect and public HUD state      | `RelayStateSource` / HUD model | unchanged freshness presentation                           |
 
 Live VPS reboot verification confirmed that user lingering (`Linger=yes`) keeps
 both VPS user units available without a root-owned service or administrative SSH
-session: `tinyscry-feed` and `tinyscry-relay` returned before interactive login.
+session: `imp-feed` and `imp-relay` returned before interactive login.
 TinyFugue intentionally did not auto-start. The feed `Wants=` the relay but
 does not `Require=` it: its existing publisher reconnect loop owns a relay outage.
 
@@ -38,9 +38,9 @@ capabilities and send `Char.Login`. The invariant is the capability, not a
 version string - public version numbering does not prove `GMCP_LOGIN` is
 compiled in - though the build verified live is `5.2.2-3-g4f0ff34`. The
 previously installed TinyFugue binary did not provide `GMCP_LOGIN`, and
-TinyScry stayed identity-less after reboot with it.
+Imp stayed identity-less after reboot with it.
 
-TinyScry holds no workaround for a missing identity. It does not infer the
+Imp holds no workaround for a missing identity. It does not infer the
 local character from `Room.Players` or `Char.Group.List`, does not persist
 identity outside `$XDG_RUNTIME_DIR`, and sends no GMCP request of its own.
 
@@ -48,11 +48,11 @@ identity outside `$XDG_RUNTIME_DIR`, and sends no GMCP request of its own.
 
 ```text
 interactive TinyFugue
-  -> fixed-path TS2 fwrite hooks
-  -> ~/.local/state/tinyscry/spool (symlink)
-  -> private $XDG_RUNTIME_DIR/tinyscry/spool
-  -> tinyscry-feed (strict parse -> per-world normalize -> selected publish)
-  -> tinyscry-relay on 127.0.0.1:8787
+  -> fixed-path IMP2 fwrite hooks
+  -> ~/.local/state/imp/spool (symlink)
+  -> private $XDG_RUNTIME_DIR/imp/spool
+  -> imp-feed (strict parse -> per-world normalize -> selected publish)
+  -> imp-relay on 127.0.0.1:8787
   -> either:
        system OpenSSH local forward
        or authenticated gateway on 127.0.0.1:8788 -> TLS reverse proxy -> WSS
@@ -62,7 +62,7 @@ interactive TinyFugue
 The reverse action hop returns through the same tunnel and relay to one helper
 whose context exactly matches the selection. TinyFugue owns that asynchronous,
 world-pinned child. It emits at most one line and exits; the fenced
-`/tinyscry_send` macro starts the next helper only when the context still
+`/imp_send` macro starts the next helper only when the context still
 matches. If TinyFugue closes the quote-pipe reader first, the idle helper detects
 the terminal descriptor state without writing and exits, allowing the shell
 intermediary and TinyFugue teardown to complete.
@@ -90,16 +90,16 @@ bounded reconnect backoff. It does not parse SSH config or handle credentials.
 The target is an existing SSH `Host` alias, so OpenSSH continues to own agent,
 `IdentityFile`, `ProxyJump`, `known_hosts`, and host verification.
 
-Port `8787` is fixed on both sides. Managed mode distinguishes a TinyScry-shaped
+Port `8787` is fixed on both sides. Managed mode distinguishes an Imp-shaped
 `/healthz` endpoint from an unrelated listener, and never kills either.
 
-A verified existing endpoint is _adopted_, not owned: TinyScry reports
+A verified existing endpoint is _adopted_, not owned: Imp reports
 `ExternalPortInUse`, spawns no child on top of it, holds no handle to it, and
 re-probes it about once a second. Adoption is therefore temporary rather than
 terminal. When the adopted endpoint disappears and the port is free, the same
 supervisor spawns and supervises its own SSH child in its place, with no
 application restart. If the endpoint stops answering as a relay while some
-process still holds the port, the forward is reported unavailable and TinyScry
+process still holds the port, the forward is reported unavailable and Imp
 keeps waiting rather than binding or killing over it. An unrelated listener
 already holding the port at startup is a refusal instead: no child, no
 supervision. `down`, `stale` and `live` are all valid relay health states, so a
@@ -147,29 +147,29 @@ not replace the running source, action sink, or SSH supervisor.
 
 ## Failure boundaries
 
-| Failure                                | Recovery / visible result                                                                                                                                                                                                                            |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| relay process exits                    | systemd restarts it; feed publisher reconnects; gateway state clients disconnect and reconnect from the desktop                                                                                                                                      |
-| gateway process exits                  | systemd restarts it; relay/feed continue unaffected; direct-WSS desktop reconnects                                                                                                                                                                   |
-| feed process exits                     | lock releases with the process; systemd starts one replacement                                                                                                                                                                                       |
-| normalized checkpoint lost at reboot   | identity is re-established at the next character login only if the capture hook was loaded by the active startup file beforehand and the TinyFugue build provides `GMCP_LOGIN` for the operator login scripts; until then TinyScry publishes nothing |
-| TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                                                                                                                                                 |
-| spool target replaced                  | next TinyFugue hook call reopens the stable path                                                                                                                                                                                                     |
-| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                                                                                                                                               |
-| local port occupied by TinyScry relay  | adopt and monitor that endpoint; spawn no child                                                                                                                                                                                                      |
-| adopted relay endpoint disappears      | the same supervisor spawns its own SSH child once the port is free; no application restart                                                                                                                                                           |
-| local port occupied by another service | report unavailable; spawn, bind and kill nothing                                                                                                                                                                                                     |
-| TinyFugue closes action pipe reader    | idle helper writes nothing, closes its WebSocket, and exits; no reconnect or action result                                                                                                                                                           |
-| TinyScry closes                        | terminate and reap only its owned SSH child                                                                                                                                                                                                          |
+| Failure                                | Recovery / visible result                                                                                                                                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| relay process exits                    | systemd restarts it; feed publisher reconnects; gateway state clients disconnect and reconnect from the desktop                                                                                                                                 |
+| gateway process exits                  | systemd restarts it; relay/feed continue unaffected; direct-WSS desktop reconnects                                                                                                                                                              |
+| feed process exits                     | lock releases with the process; systemd starts one replacement                                                                                                                                                                                  |
+| normalized checkpoint lost at reboot   | identity is re-established at the next character login only if the capture hook was loaded by the active startup file beforehand and the TinyFugue build provides `GMCP_LOGIN` for the operator login scripts; until then Imp publishes nothing |
+| TinyFugue absent                       | services stay healthy; relay reports feed down/stale                                                                                                                                                                                            |
+| spool target replaced                  | next TinyFugue hook call reopens the stable path                                                                                                                                                                                                |
+| SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                                                                                                                                                                          |
+| local port occupied by Imp relay       | adopt and monitor that endpoint; spawn no child                                                                                                                                                                                                 |
+| adopted relay endpoint disappears      | the same supervisor spawns its own SSH child once the port is free; no application restart                                                                                                                                                      |
+| local port occupied by another service | report unavailable; spawn, bind and kill nothing                                                                                                                                                                                                |
+| TinyFugue closes action pipe reader    | idle helper writes nothing, closes its WebSocket, and exits; no reconnect or action result                                                                                                                                                      |
+| Imp closes                             | terminate and reap only its owned SSH child                                                                                                                                                                                                     |
 
 ## Source and checks
 
-- `integrations/tinyfugue/src/tinyscry_tf/feed.py` - per-world feed orchestration
-- `integrations/tinyfugue/src/tinyscry_tf/spool.py` - private spool and producer lock
-- `integrations/tinyfugue/src/tinyscry_tf/action_consumer.py` - context-bound
+- `integrations/tinyfugue/src/imp_tf/feed.py` - per-world feed orchestration
+- `integrations/tinyfugue/src/imp_tf/spool.py` - private spool and producer lock
+- `integrations/tinyfugue/src/imp_tf/action_consumer.py` - context-bound
   fixed-macro delivery
-- `integrations/tinyfugue/src/tinyscry_tf/diagnostics.py` - opt-in bounded capture
-- `integrations/tinyfugue/tinyscry.tf` - idempotent fixed-path hooks
+- `integrations/tinyfugue/src/imp_tf/diagnostics.py` - opt-in bounded capture
+- `integrations/tinyfugue/imp.tf` - idempotent fixed-path hooks
 - `deploy/systemd/` - VPS user units
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership and adopted-endpoint watch
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - native connection validation,
@@ -212,7 +212,7 @@ Live operator verification covered both desktop transport modes:
 
 Status: verified for the established service/tunnel lifecycle, including
 adopted-endpoint takeover - a Windows-native run adopted a manual SSH forward
-exposing the remote TinyScry relay and, when that forward was terminated, took
+exposing the remote Imp relay and, when that forward was terminated, took
 the forward over with its own supervised child without a restart. That run
 performed no VPS reboot and did not confirm the child's parent PID.
 

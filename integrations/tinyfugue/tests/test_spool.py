@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tinyscry_tf.spool import ProducerAlreadyRunning, RuntimeLayout, SpoolReader, acquire_producer_lock
+from imp_tf.spool import ProducerAlreadyRunning, RuntimeLayout, SpoolReader, acquire_producer_lock
 
 
 def _layout(tmp_path: Path) -> RuntimeLayout:
@@ -28,9 +28,9 @@ def test_resolve_uses_xdg_runtime_but_keeps_the_hook_at_its_fixed_tf_path(
 
     layout = RuntimeLayout.resolve()
 
-    assert layout.runtime_dir == tmp_path / "run" / "tinyscry"
+    assert layout.runtime_dir == tmp_path / "run" / "imp"
     assert layout.spool == layout.runtime_dir / "spool"
-    assert layout.hook_spool == tmp_path / "home" / ".local" / "state" / "tinyscry" / "spool"
+    assert layout.hook_spool == tmp_path / "home" / ".local" / "state" / "imp" / "spool"
     assert layout.checkpoint == layout.runtime_dir / "state.json"
 
 

@@ -1,4 +1,4 @@
-import type { Character, Target, Vital } from '@tinyscry/protocol';
+import type { Character, Target, Vital } from '@imp/protocol';
 
 import type {
   AlertDefinition,

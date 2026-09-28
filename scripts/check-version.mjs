@@ -88,22 +88,22 @@ const checks = [
   ['apps/desktop/src-tauri/tauri.conf.json', tauriConfig.version],
   ['apps/desktop/src-tauri/Cargo.toml', tomlSectionVersion('apps/desktop/src-tauri/Cargo.toml', 'package')],
   [
-    'apps/desktop/src-tauri/Cargo.lock tinyscry-desktop',
-    lockPackageVersion('apps/desktop/src-tauri/Cargo.lock', 'tinyscry-desktop'),
+    'apps/desktop/src-tauri/Cargo.lock imp-desktop',
+    lockPackageVersion('apps/desktop/src-tauri/Cargo.lock', 'imp-desktop'),
   ],
   ['services/relay/pyproject.toml', tomlSectionVersion('services/relay/pyproject.toml', 'project')],
-  ['services/relay/uv.lock tinyscry-relay', lockPackageVersion('services/relay/uv.lock', 'tinyscry-relay')],
+  ['services/relay/uv.lock imp-relay', lockPackageVersion('services/relay/uv.lock', 'imp-relay')],
   [
     'integrations/tinyfugue/pyproject.toml',
     tomlSectionVersion('integrations/tinyfugue/pyproject.toml', 'project'),
   ],
   [
-    'integrations/tinyfugue/uv.lock tinyscry-tinyfugue',
-    lockPackageVersion('integrations/tinyfugue/uv.lock', 'tinyscry-tinyfugue'),
+    'integrations/tinyfugue/uv.lock imp-tinyfugue',
+    lockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-tinyfugue'),
   ],
   [
-    'integrations/tinyfugue/uv.lock tinyscry-relay',
-    lockPackageVersion('integrations/tinyfugue/uv.lock', 'tinyscry-relay'),
+    'integrations/tinyfugue/uv.lock imp-relay',
+    lockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-relay'),
   ],
 ];
 

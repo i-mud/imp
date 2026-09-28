@@ -16,8 +16,8 @@ class RelayConfig:
 
 
 def parse_args(argv: list[str] | None = None) -> RelayConfig:
-    parser = argparse.ArgumentParser(description="TinyScry loopback state relay")
-    parser.add_argument("--host", default=os.environ.get("TINYSCRY_RELAY_HOST", "127.0.0.1"))
+    parser = argparse.ArgumentParser(description="Imp loopback state relay")
+    parser.add_argument("--host", default=os.environ.get("IMP_RELAY_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=_env_port())
     parser.add_argument("--stale-after", type=float, default=10.0, metavar="SECONDS")
     parser.add_argument(
@@ -39,8 +39,8 @@ def parse_args(argv: list[str] | None = None) -> RelayConfig:
 
 
 def _env_port() -> int:
-    raw_port = os.environ.get("TINYSCRY_RELAY_PORT", "8787")
+    raw_port = os.environ.get("IMP_RELAY_PORT", "8787")
     try:
         return int(raw_port)
     except ValueError as error:
-        raise ValueError("TINYSCRY_RELAY_PORT must be an integer") from error
+        raise ValueError("IMP_RELAY_PORT must be an integer") from error

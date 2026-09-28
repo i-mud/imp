@@ -1,0 +1,15 @@
+[Unit]
+Description=Imp authenticated remote gateway
+After=network.target imp-relay.service
+Wants=imp-relay.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/imp/gateway.env
+ExecStart=%h/imp/services/relay/.venv/bin/imp-gateway --host 127.0.0.1 --port 8788 --relay-url ws://127.0.0.1:8787
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

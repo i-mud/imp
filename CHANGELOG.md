@@ -1,6 +1,6 @@
 # Changelog
 
-This file records notable user-facing changes to TinyScry.
+This file records notable user-facing changes to Imp.
 
 Release versions use semantic versioning. Development slices and their
 descriptive Git tags remain historical implementation milestones rather than
@@ -12,12 +12,13 @@ No unreleased changes recorded yet.
 
 ## [0.1.0] - 2026-09-28
 
-First alpha release.
+First alpha release of Imp — Interactive MUD Peripheral.
 
 ### Added
 
-- Always-on-top Tauri desktop HUD with compact and expanded layouts, Dark,
-  Light, and System themes, tray controls, and persisted window position.
+- Always-on-top Tauri desktop HUD with compact and expanded layouts, System,
+  Dark, and Light themes, tray controls, and persisted window position.
+- Compact layout and System theme as the fresh-install defaults.
 - Normalized character HP, mana, movement, identity, and target-health display
   sourced from TinyFugue GMCP.
 - External SSH, managed SSH, and authenticated Direct WSS desktop transports.
@@ -25,7 +26,7 @@ First alpha release.
   manually editing application configuration.
 - Managed SSH supervision with bounded reconnect, existing-relay adoption, and
   takeover when an adopted forward disappears.
-- Authenticated Direct WSS gateway that leaves the TinyScry relay loopback-only.
+- Authenticated Direct WSS gateway that leaves the Imp relay loopback-only.
 - Configurable desktop alerts for vitals and received text, with sound and
   native notifications.
 - Configurable outbound action shortcuts for operator-defined MUD commands.
@@ -52,7 +53,7 @@ First alpha release.
   owns only the child process it spawned.
 - Windows release builds start the managed SSH child without opening a
   persistent console window.
-- Exiting TinyScry terminates the managed SSH child it owns instead of leaving
+- Exiting Imp terminates the managed SSH child it owns instead of leaving
   an orphaned `ssh.exe` process.
 
 ### Initial release limitations

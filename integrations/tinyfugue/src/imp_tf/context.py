@@ -6,11 +6,11 @@ import os
 import re
 from pathlib import Path
 
-from tinyscry_relay.protocol import StateContext
+from imp_relay.protocol import StateContext
 
 _MARKER_MODE = 0o600
 _DIRECTORY_MODE = 0o700
-_MARKER = re.compile(rb"TSCTX 2 ([A-Za-z0-9_]{1,128}) ([1-9][0-9]*) ([1-9][0-9]*)\n")
+_MARKER = re.compile(rb"IMPCTX 2 ([A-Za-z0-9_]{1,128}) ([1-9][0-9]*) ([1-9][0-9]*)\n")
 
 
 def read_context_marker(path: Path) -> StateContext | None:
@@ -32,7 +32,7 @@ def write_context_marker(path: Path, context: StateContext | None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, _DIRECTORY_MODE)
     staged = path.with_name(f".{path.name}.{os.getpid()}")
-    payload = f"TSCTX 2 {context.session} {context.foreground} {context.connection}\n".encode("ascii")
+    payload = f"IMPCTX 2 {context.session} {context.foreground} {context.connection}\n".encode("ascii")
     fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _MARKER_MODE)
     try:
         os.fchmod(fd, _MARKER_MODE)

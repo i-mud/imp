@@ -11,7 +11,7 @@ const DEFAULT_RELAY_URL = 'ws://127.0.0.1:8787/state';
 function readRelayUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
-    throw new Error('VITE_TINYSCRY_RELAY_URL must use ws: or wss:.');
+    throw new Error('VITE_IMP_RELAY_URL must use ws: or wss:.');
   }
   return url.toString();
 }
@@ -20,21 +20,21 @@ function readDirectStateUrl(value: string): string {
   const url = new URL(value);
 
   if (url.protocol !== 'wss:') {
-    throw new Error('Direct TinyScry transport must use wss:.');
+    throw new Error('Direct Imp transport must use wss:.');
   }
   if (url.hostname.length === 0) {
-    throw new Error('Direct TinyScry transport requires a host.');
+    throw new Error('Direct Imp transport requires a host.');
   }
   if (url.username !== '' || url.password !== '') {
-    throw new Error('Direct TinyScry transport URL must not contain credentials.');
+    throw new Error('Direct Imp transport URL must not contain credentials.');
   }
   if (url.search !== '' || url.hash !== '') {
-    throw new Error('Direct TinyScry transport URL must not contain query or fragment data.');
+    throw new Error('Direct Imp transport URL must not contain query or fragment data.');
   }
 
   const segments = url.pathname.split('/');
   if (segments.at(-1) !== 'state') {
-    throw new Error('Direct TinyScry transport URL must end at /state.');
+    throw new Error('Direct Imp transport URL must end at /state.');
   }
 
   return url.toString();
@@ -42,13 +42,12 @@ function readDirectStateUrl(value: string): string {
 
 function configuredSource(): string {
   return (
-    import.meta.env.VITE_TINYSCRY_SOURCE ??
-    (import.meta.env.TAURI_ENV_PLATFORM === undefined ? 'mock' : 'relay')
+    import.meta.env.VITE_IMP_SOURCE ?? (import.meta.env.TAURI_ENV_PLATFORM === undefined ? 'mock' : 'relay')
   );
 }
 
 function configuredRelayUrl(): string {
-  return readRelayUrl(import.meta.env.VITE_TINYSCRY_RELAY_URL ?? DEFAULT_RELAY_URL);
+  return readRelayUrl(import.meta.env.VITE_IMP_RELAY_URL ?? DEFAULT_RELAY_URL);
 }
 
 export function actionUrlForStateUrl(stateUrl: string): string {
@@ -112,7 +111,7 @@ export async function createRuntimeClients(): Promise<AppRuntime> {
   }
 
   if (sourceKind !== 'relay') {
-    throw new Error('VITE_TINYSCRY_SOURCE must be "mock" or "relay".');
+    throw new Error('VITE_IMP_SOURCE must be "mock" or "relay".');
   }
 
   const native = await loadConnectionConfig();

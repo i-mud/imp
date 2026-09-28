@@ -1,6 +1,6 @@
 use tauri::WebviewWindow;
 
-/// Reinforce TinyScry's always-on-top window contract.
+/// Reinforce Imp's always-on-top window contract.
 pub fn install(window: &WebviewWindow) -> tauri::Result<()> {
     window.set_always_on_top(true)?;
 
@@ -53,7 +53,7 @@ mod windows {
 
     fn install_system_menu_policy(window: &WebviewWindow) {
         let Some(hwnd) = hwnd(window) else {
-            eprintln!("TinyScry could not obtain the native HUD window handle");
+            eprintln!("Imp could not obtain the native HUD window handle");
             return;
         };
 
@@ -70,7 +70,7 @@ mod windows {
 
         if installed == 0 {
             eprintln!(
-                "TinyScry could not install the HUD system-menu policy: {}",
+                "Imp could not install the HUD system-menu policy: {}",
                 std::io::Error::last_os_error()
             );
         }
@@ -109,7 +109,7 @@ mod windows {
 
     fn enforce(window: &WebviewWindow, reason: &str) {
         let Some(hwnd) = hwnd(window) else {
-            eprintln!("TinyScry could not obtain the native HUD window handle");
+            eprintln!("Imp could not obtain the native HUD window handle");
             return;
         };
 
@@ -117,7 +117,7 @@ mod windows {
             unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST as isize != 0 };
 
         if !was_topmost {
-            eprintln!("TinyScry HUD lost native WS_EX_TOPMOST state during {reason}; restoring it");
+            eprintln!("Imp HUD lost native WS_EX_TOPMOST state during {reason}; restoring it");
         }
 
         let result = unsafe {
@@ -134,7 +134,7 @@ mod windows {
 
         if result == 0 {
             eprintln!(
-                "TinyScry could not restore native always-on-top state during {reason}: {}",
+                "Imp could not restore native always-on-top state during {reason}: {}",
                 std::io::Error::last_os_error()
             );
         }

@@ -2,7 +2,7 @@
 
 ## The split
 
-TinyScry has two build surfaces with very different requirements.
+Imp has two build surfaces with very different requirements.
 
 | Surface                                     | Needs                                    | Execution                                     |
 | ------------------------------------------- | ---------------------------------------- | --------------------------------------------- |
@@ -50,8 +50,8 @@ faking that is a large amount of fragile machinery to avoid one checkout.
 
 ## Working across WSL2 and Windows
 
-The canonical checkout is `~/src/tinyscry` in WSL2. The native Windows tree at
-`C:\src\tinyscry-native` is a disposable execution mirror, not a second Git
+The canonical checkout is `~/src/imp` in WSL2. The native Windows tree at
+`C:\src\imp-native` is a disposable execution mirror, not a second Git
 checkout and never a source of truth.
 
 Use `npm run native:sync` for a one-shot mirror refresh or
@@ -67,7 +67,7 @@ sides.
 These exist so the HUD does not become Windows-only by accident:
 
 - Always-on-top and non-maximizable behavior are configured declaratively in
-  `tauri.conf.json`, not through per-platform native calls. TinyScry-owned size
+  `tauri.conf.json`, not through per-platform native calls. Imp-owned size
   changes still use the normal window API while manual resizing remains off.
 - Transparency and `backdrop-filter` are treated as enhancements. The panel
   must stay fully legible without them, which is why its base colour is opaque

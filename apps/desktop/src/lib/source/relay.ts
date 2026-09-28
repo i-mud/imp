@@ -1,4 +1,4 @@
-import { decodeServerMessage } from '@tinyscry/protocol';
+import { decodeServerMessage } from '@imp/protocol';
 
 import type { SourceEvent, StateSource } from './types.ts';
 

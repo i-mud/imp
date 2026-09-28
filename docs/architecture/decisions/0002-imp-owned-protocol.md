@@ -1,4 +1,4 @@
-# 0002 - TinyScry owns its protocol; GMCP never reaches the HUD
+# 0002 - Imp owns its protocol; GMCP never reaches the HUD
 
 Status: accepted
 Date: 2026-09-15
@@ -11,10 +11,10 @@ to render.
 
 ## Decision
 
-`packages/protocol` defines a versioned, TinyScry-owned wire format. Nothing
+`packages/protocol` defines a versioned, Imp-owned wire format. Nothing
 downstream of normalization ever sees a GMCP package name, a GMCP key, or a
 GMCP value type. MUD-specific mapping lives only in
-`integrations/tinyfugue/src/tinyscry_tf/normalize.py`.
+`integrations/tinyfugue/src/imp_tf/normalize.py`.
 
 ## Rationale
 

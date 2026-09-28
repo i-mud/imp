@@ -3,7 +3,7 @@ import { freshnessOf, type HudModel } from './model.ts';
 export type DisplayMode = 'expanded' | 'compact';
 export type StatusIndicatorState = 'up' | 'stale' | 'down';
 
-const DISPLAY_MODE_STORAGE_KEY = 'tinyscry.display-mode';
+const DISPLAY_MODE_STORAGE_KEY = 'imp.display-mode';
 
 export function statusIndicatorOf(model: HudModel): StatusIndicatorState {
   const freshness = freshnessOf(model);
@@ -26,14 +26,14 @@ export function statusLabelOf(model: HudModel): string {
 }
 
 export function displayModeFromPersisted(value: string | null): DisplayMode {
-  return value === 'compact' ? 'compact' : 'expanded';
+  return value === 'expanded' ? 'expanded' : 'compact';
 }
 
 export function loadDisplayMode(): DisplayMode {
   try {
     return displayModeFromPersisted(globalThis.localStorage?.getItem(DISPLAY_MODE_STORAGE_KEY) ?? null);
   } catch {
-    return 'expanded';
+    return 'compact';
   }
 }
 

@@ -6,10 +6,10 @@ import sys
 from io import StringIO
 from typing import cast
 
-from tinyscry_relay.protocol import GameState, StateContext
+from imp_relay.protocol import GameState, StateContext
 from websockets.asyncio.server import ServerConnection, serve
 
-from tinyscry_tf.bridge import process_lines
+from imp_tf.bridge import process_lines
 
 
 def _record(at: int, payload: dict[str, str]) -> bytes:
@@ -42,7 +42,7 @@ def test_bridge_reconnects_after_relay_closes_producer() -> None:
             bridge = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
-                "tinyscry_tf.bridge",
+                "imp_tf.bridge",
                 "--relay-url",
                 f"ws://127.0.0.1:{port}/ingest",
                 stdin=asyncio.subprocess.PIPE,

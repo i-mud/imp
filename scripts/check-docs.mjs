@@ -21,7 +21,7 @@ const repoRoot = resolve(import.meta.dirname, '..');
  */
 const PLANNED = new Set();
 
-const SKIP_PREFIX = ['http', 'ws:', 'wss:', 'mailto', '@', 'tinyscry_', 'dev.', '\\'];
+const SKIP_PREFIX = ['http', 'ws:', 'wss:', 'mailto', '@', 'imp_', 'dev.', '\\'];
 
 const docs = globSync('**/*.md', {
   cwd: repoRoot,

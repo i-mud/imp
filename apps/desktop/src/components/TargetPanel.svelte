@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Target } from '@tinyscry/protocol';
+  import type { Target } from '@imp/protocol';
 
   let { target }: { target: Target } = $props();
 </script>

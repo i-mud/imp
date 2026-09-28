@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from tinyscry_tf.records import MAX_RECORD_CHARS
+from imp_tf.records import MAX_RECORD_CHARS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ _RETIRED_NAME: Final = "spool.retired"
 
 
 class ProducerAlreadyRunning(RuntimeError):
-    """Another TinyScry feed already owns the runtime lock."""
+    """Another Imp feed already owns the runtime lock."""
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ class RuntimeLayout:
             lock=runtime / "feed.lock",
             # TinyFugue's verified path expansion handles "~" but does not give
             # the hook an XDG_STATE_HOME lookup. Keep this path exactly aligned
-            # with tinyscry.tf instead of silently diverging when XDG_STATE_HOME
+            # with imp.tf instead of silently diverging when XDG_STATE_HOME
             # is customized.
             hook_spool=state / "spool",
             diagnostics=state / "diagnostics",
@@ -84,15 +84,15 @@ class RuntimeLayout:
 
 
 def _default_state_dir() -> Path:
-    # Must match the literal path used by integrations/tinyfugue/tinyscry.tf.
-    return Path.home() / ".local" / "state" / "tinyscry"
+    # Must match the literal path used by integrations/tinyfugue/imp.tf.
+    return Path.home() / ".local" / "state" / "imp"
 
 
 def _default_runtime_dir() -> Path:
     runtime_home = os.environ.get("XDG_RUNTIME_DIR")
     if not runtime_home:
-        raise RuntimeError("XDG_RUNTIME_DIR is required for the live TinyScry spool")
-    return Path(runtime_home) / "tinyscry"
+        raise RuntimeError("XDG_RUNTIME_DIR is required for the live Imp spool")
+    return Path(runtime_home) / "imp"
 
 
 def acquire_producer_lock(path: Path) -> int:
@@ -107,7 +107,7 @@ def acquire_producer_lock(path: Path) -> int:
         holder = _lock_holder(path)
         os.close(fd)
         raise ProducerAlreadyRunning(
-            f"another TinyScry feed holds {path}" + (f" (pid {holder})" if holder else "")
+            f"another Imp feed holds {path}" + (f" (pid {holder})" if holder else "")
         ) from error
     os.ftruncate(fd, 0)
     os.write(fd, f"{os.getpid()}\n".encode())

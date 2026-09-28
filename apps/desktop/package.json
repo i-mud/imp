@@ -1,8 +1,8 @@
 {
-  "name": "@tinyscry/desktop",
+  "name": "@imp/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "TinyScry always-on-top HUD window",
+  "description": "Imp desktop companion for live MUD state, alerts, and trusted actions",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,7 @@
     "@lucide/svelte": "^1.47.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-notification": "^2.4.0",
-    "@tinyscry/protocol": "*"
+    "@imp/protocol": "*"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",

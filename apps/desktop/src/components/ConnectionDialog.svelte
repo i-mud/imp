@@ -102,7 +102,7 @@
   <header class="dialog-titlebar" data-tauri-drag-region>
     <div class="dialog-title" data-tauri-drag-region>
       <h2 id="connection-dialog-title">Connection</h2>
-      <p>Choose how TinyScry reaches the VPS. Changes take effect after restart.</p>
+      <p>Choose how Imp reaches the VPS. Changes take effect after restart.</p>
     </div>
 
     <button
@@ -160,7 +160,7 @@
 
         {#if mode === 'external'}
           <p class="mode-help">
-            TinyScry expects an existing local forward to the loopback relay and owns no SSH process.
+            Imp expects an existing local forward to the loopback relay and owns no SSH process.
           </p>
         {:else if mode === 'managed'}
           <label>
@@ -179,7 +179,7 @@
           </label>
 
           <p class="mode-help">
-            Use an existing Host alias from your SSH configuration. TinyScry uses the system OpenSSH client.
+            Use an existing Host alias from your SSH configuration. Imp uses the system OpenSSH client.
           </p>
         {:else}
           <label>
@@ -189,7 +189,7 @@
               type="url"
               spellcheck="false"
               autocomplete="off"
-              placeholder="wss://tinyscry.example/state"
+              placeholder="wss://imp.example/state"
               disabled={saving}
               oninput={() => {
                 saved = false;
@@ -224,7 +224,7 @@
         {/if}
 
         {#if saved}
-          <p class="saved-message" role="status">Saved. Restart TinyScry to use this connection.</p>
+          <p class="saved-message" role="status">Saved. Restart Imp to use this connection.</p>
         {/if}
 
         <div class="form-actions">

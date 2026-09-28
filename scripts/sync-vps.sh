@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE="$HOME/src/tinyscry/"
-HOST="${TINYSCRY_VPS_HOST:-avatar}"
-DEST="${TINYSCRY_VPS_DEST:-~/tinyscry/}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="$(cd -- "$SCRIPT_DIR/.." && pwd)/"
+HOST="${IMP_VPS_HOST:-avatar}"
+DEST="${IMP_VPS_DEST:-~/imp/}"
 
 rsync -a --delete \
   --exclude='.git/' \
