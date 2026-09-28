@@ -3,19 +3,34 @@
 TinyScry keeps MUD-specific data outside the desktop application:
 
 ```text
-MUD GMCP -> TinyFugue hook -> private spool -> tinyscry-feed -> relay ingest (loopback) -> SSH tunnel -> desktop HUD
+MUD GMCP -> TinyFugue hook -> private spool -> tinyscry-feed
+                                                   |
+                                                   v
+                                        relay 127.0.0.1:8787
+                                          |               |
+                                   SSH local forward       +-> gateway 127.0.0.1:8788
+                                          |                         |
+                                          |                       TLS/WSS
+                                          +---------> desktop HUD <-+
 ```
 
-`tinyscry-feed` and `tinyscry-action-consumer` accept loopback relay URLs only.
-Loopback prevents remote network access; it does not enforce OS-user ownership.
-Any process in the VPS network namespace, including another local user, can
-reach ingest and action-consumer endpoints. The forwarded workstation listener
-has the same property for state and action endpoints. Browser `Origin` checks
-are defense-in-depth against cross-site requests, not authentication. TinyScry
-provides no per-user endpoint authentication. Supported deployment therefore
-requires a single-user workstation and VPS, or mutual trust among every
-host-local user and process; an untrusted multi-user host is out of scope.
-There is no non-loopback override.
+`tinyscry-feed` and `tinyscry-action-consumer` accept loopback relay URLs only,
+and both the relay and authenticated gateway listen only on loopback. Loopback
+prevents remote network access but does not enforce OS-user ownership. Any
+process in the VPS network namespace, including another local user, can reach
+the relay's local endpoints.
+
+SSH transport forwards the relay's desktop-facing state/action endpoints to
+the workstation without adding application authentication, so the forwarded
+local listener has the same host-local trust requirement. Direct WSS instead
+authenticates one pairing token at the separate gateway before the gateway
+opens a relay connection. That is transport authentication, not per-user
+authorization. Browser `Origin` checks remain defense-in-depth rather than
+authentication.
+
+Supported deployment therefore requires a single-user workstation and VPS, or
+mutual trust among host-local users and processes. An untrusted multi-user host
+is out of scope. The relay and gateway have no non-loopback bind override.
 
 ## Versioned spool event contract
 

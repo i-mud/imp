@@ -148,5 +148,7 @@ see
 npm run check
 ```
 
-Chains lint, typecheck, both test suites and the end-to-end check. CI should
-run exactly this.
+Chains lint/docs/version checks, TypeScript typechecks and tests, relay and
+TinyFugue lint/tests, the cross-component end-to-end check, and the frontend
+production build. The Linux CI job runs exactly this. Native Rust tests and
+Windows NSIS builds are separate native gates.

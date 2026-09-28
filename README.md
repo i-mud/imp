@@ -65,7 +65,7 @@ Required for everything:
 - **[uv](https://docs.astral.sh/uv/)** (manages the Python environments; Python
   3.12+)
 
-Required only to build the **native** desktop window:
+Required for **native Tauri testing and builds**:
 
 | Target  | Toolchain                                                                                    |
 | ------- | -------------------------------------------------------------------------------------------- |
@@ -73,9 +73,11 @@ Required only to build the **native** desktop window:
 | Linux   | Rust, plus `webkit2gtk-4.1`, `libgtk-3`, `librsvg2`, `libayatana-appindicator3` dev packages |
 | macOS   | Rust, Xcode command line tools                                                               |
 
-You do **not** need Rust to develop the HUD, run the relay, or run any check.
-`npm run dev` renders the real HUD in a browser against the mock source. See
-[`docs/development.md`](docs/development.md) for the WSL2/Windows split.
+You do **not** need Rust to develop the HUD, run the relay, or run the
+platform-independent `npm run check` gate. Native Tauri tests and release
+builds use Rust separately. `npm run dev` renders the real HUD in a browser
+against the mock source. See [`docs/development.md`](docs/development.md) for
+the WSL2/Windows split.
 
 ## Windows release
 

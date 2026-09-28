@@ -214,9 +214,14 @@ Status: verified for the established service/tunnel lifecycle, including
 adopted-endpoint takeover - a Windows-native run adopted a manual SSH forward
 exposing the remote TinyScry relay and, when that forward was terminated, took
 the forward over with its own supervised child without a restart. That run
-performed no VPS reboot and did not confirm the child's parent PID. The
-context/action path remains deterministic only; its pending live procedure is
-in `integrations/tinyfugue/README.md`.
+performed no VPS reboot and did not confirm the child's parent PID.
+
+The context/action path is also live-verified. The connectionless TinyFugue
+procedure in `integrations/tinyfugue/README.md` exercised exact-current
+delivery, context fences, helper replacement/loss, relay restart, and prompt
+shutdown on the pinned TinyFugue build. Separate native UI acceptance sent a
+real `look` action through the relay and TinyFugue path to the MUD. The precise
+scope of that evidence remains recorded in `docs/status.md`.
 
 The deterministic gate and the live evidence prove different things, and neither
 substitutes for the other. The gate proves unit-level invariants: that a
