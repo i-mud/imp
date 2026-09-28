@@ -19,7 +19,7 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "lint": "eslint . && prettier --check . && node scripts/check-docs.mjs",
+    "lint": "eslint . && prettier --check . && node scripts/check-docs.mjs && node scripts/check-version.mjs",
     "lint:fix": "eslint . --fix && prettier --write .",
     "native:sync": "bash scripts/sync-native.sh",
     "vps:sync": "bash scripts/sync-vps.sh",
@@ -31,7 +31,8 @@
     "tf:test": "uv run --directory integrations/tinyfugue pytest",
     "tf:lint": "uv run --directory integrations/tinyfugue ruff check . && uv run --directory integrations/tinyfugue ruff format --check . && uv run --directory integrations/tinyfugue mypy src tests",
     "test:e2e": "uv run --project services/relay python tests/e2e/relay_roundtrip.py",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build"
+    "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build",
+    "release:check-version": "node scripts/check-version.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
