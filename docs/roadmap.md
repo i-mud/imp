@@ -115,7 +115,7 @@ credentials, and first-run deployment automation remain separate future work.
 
 ## Slice 13 - First release readiness
 
-Slug: `first-release-readiness`. In progress.
+Slug: `first-release-readiness`. Complete.
 
 Slice 13 prepares TinyScry's first intentionally distributable release:
 `v0.1.0`, an alpha release with Windows x64 as the supported desktop binary
@@ -151,23 +151,20 @@ release support for platforms without native release acceptance.
 
 ### Current state
 
-Release-readiness implementation is substantially complete:
+Slice 13 is complete:
 
 - the MIT license and changelog are tracked;
 - the `0.1.0` version contract and tag/version check are implemented;
 - the native application reports its Tauri-owned version;
-- Windows x64 NSIS candidate builds run on GitHub Actions;
+- Windows x64 NSIS builds run through the release workflow;
 - end-user Windows installation and connection setup are documented;
-- the first produced installer passed installed-app state/action acceptance;
-- the managed-SSH console-window defect found by that acceptance is fixed and
-  verified in a subsequent local release build; and
-- the tag-driven release workflow can be manually dispatched for an
-  unpublished candidate and publishes only from a matching `v*` tag.
-
-Remaining Slice 13 work is intentionally narrow: pass the final PR gates, merge
-the completed tree to `main`, build that exact tree through the release
-workflow, perform final clean-install/uninstall/reinstall acceptance, then
-create `v0.1.0` and verify the published GitHub prerelease artifact.
+- release acceptance passed clean install, live state, an approved outbound
+  action, managed-SSH cleanup, uninstall, and reinstall independently of the
+  WSL/native development mirror;
+- the managed-SSH console-window and orphaned-child defects found during
+  release acceptance were fixed and reverified before tagging; and
+- `v0.1.0` was created from the exact accepted commit and published as a GitHub
+  prerelease with the Windows x64 NSIS installer.
 
 ### Release contract
 
