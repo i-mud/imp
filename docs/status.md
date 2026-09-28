@@ -112,6 +112,12 @@ infrastructure and remain separate from CI:
   managed SSH child. A subsequent local release build verified that Managed SSH
   connected without opening the extra console window, and the native Rust gate
   passed 40 library tests.
+- Final-candidate acceptance exposed a second Windows lifecycle defect: after
+  TinyScry exited, its owned managed `ssh.exe` child could remain running as an
+  orphan. Cleanup now runs on Tauri's actual `RunEvent::Exit` boundary rather
+  than `ExitRequested`. A local release build verified both normal window close
+  and tray **Quit TinyScry**: in each case the exact managed SSH PID terminated
+  and no matching managed `ssh.exe` remained.
 - The Windows installer remains intentionally unsigned for this alpha. The
   candidate tested did not display a SmartScreen warning on that machine and
   download path, but absence of such a warning is not claimed generally.
