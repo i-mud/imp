@@ -126,11 +126,13 @@ cheap and follows the chain in `docs/architecture/objects/game-state.md`.
 
 The original TF -> bridge hop was verified against TinyFugue
 5.1.6-4-ga15a165 on the VPS and a target-MUD capture. The current versioned
-spool and action path have deterministic protocol/process coverage, but the
-macro test is structural and does not execute TinyFugue. Run the connectionless
-outbound procedure in `integrations/tinyfugue/README.md` before recording live
-action evidence. Mappings in `normalize.py` remain limited to observed
-`Char.Status` and `Char.Vitals` fields.
+spool and action path have deterministic protocol/process coverage plus the
+live evidence recorded below. The macro test itself remains structural and does
+not execute TinyFugue, so changes to TinyFugue macro/context semantics require
+rerunning the connectionless procedure in `integrations/tinyfugue/README.md`
+before claiming the changed behavior is live-verified. Mappings in
+`normalize.py` remain limited to observed `Char.Status` and `Char.Vitals`
+fields.
 
 ## Verification
 

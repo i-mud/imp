@@ -4,27 +4,36 @@
 
 TinyScry has two build surfaces with very different requirements.
 
-| Surface                                                  | Needs                                    | Runs in WSL2       |
-| -------------------------------------------------------- | ---------------------------------------- | ------------------ |
-| Protocol, relay, TF adapter, HUD frontend, all checks    | Node + uv                                | yes                |
-| Tauri shell (native window, always-on-top, transparency) | platform Rust toolchain + system webview | no, as provisioned |
+| Surface                                     | Needs                                    | Execution                                     |
+| ------------------------------------------- | ---------------------------------------- | --------------------------------------------- |
+| Platform-independent `npm run check` gate   | Node + uv                                | WSL2 and Linux CI                             |
+| Tauri Rust tests                            | Rust + target native dependencies        | any supported host when dependencies exist    |
+| Native desktop build and runtime acceptance | platform Rust toolchain + system webview | target OS; Windows release builds use Windows |
 
-Everything in the first row is the daily loop. Reasoning in
+The platform-independent gate is the daily loop. Native tests and packaging are
+separate because Tauri ultimately depends on the target OS's native webview and
+toolchain. Reasoning lives in
 `docs/architecture/decisions/0008-wsl2-canonical-checkout.md`.
 
-## Measured environment
+## Toolchain contract
 
-Observed on this machine:
+This boundary records durable requirements rather than a live workstation
+inventory:
 
-- WSL2: Node 24.12.0, npm 11.6.2, Python 3.14.4, uv 0.12.5, Docker 29.8.0.
-  **No** Rust toolchain, **no** `pkg-config`, **no** `webkit2gtk`, and **no**
-  passwordless sudo.
-- Windows 11 x64: Node 26.2.0, npm 12.0.2, Rust 1.98.1 stable with the
-  `x86_64-pc-windows-msvc` host, Visual Studio Professional 2022 with the
-  native desktop C++ workload, Windows SDK 10.0.22621.0, and WebView2 runtime
-  152.0.4191.66.
+- the root package requires Node.js 24 or newer;
+- both Python projects require Python 3.12 or newer and use `uv`;
+- Linux CI runs `npm run check` with Node 24, Python 3.12, and the repository's
+  pinned `uv` setup;
+- Windows CI runs the native Rust tests and builds the x64 NSIS installer with
+  Node 24 and stable Rust; and
+- native Windows development requires the MSVC Rust host, Microsoft C++ build
+  tools, and WebView2.
 
-The native shell was built and launched from a disposable Windows-filesystem
+The dated bootstrap machine snapshot remains in ADR 0008 as historical context.
+Local Node, npm, Python, Rust, SDK, and WebView versions are operational
+evidence, not architectural constants; re-measure them when they matter.
+
+The native shell is built and launched from a disposable Windows-filesystem
 mirror of the canonical WSL2 tree. `npm run dev` remains the fast frontend
 loop; `npm run tauri:dev` is the native window verification loop.
 
@@ -95,9 +104,13 @@ per platform.
 ## Verification
 
 Status: verified
-Verified against: Windows 11 native launch and direct window interaction at the
-versions above; Linux Rust compilation remains container-verified. Slice 6
-native acceptance covered non-maximizable drag-region behavior, settings
-presentation and restoration, bundled low-HP sound, native notification
-delivery, and target-driven expanded sizing.
-Version numbers here go stale quickly - re-measure rather than trusting them.
+
+Verified against the current Linux `npm run check` CI gate, the Windows native
+Rust-test/NSIS workflow, and Windows-native runtime acceptance through the
+`v0.1.0` release. Native evidence includes non-maximizable window behavior,
+notifications, connection management, managed-SSH process lifecycle, live
+state/actions, and clean installer/reinstall acceptance.
+
+Linux and macOS remain source-build targets without release acceptance.
+Machine-specific version numbers are intentionally not treated as durable
+architecture; re-measure them when they matter.
