@@ -8,6 +8,7 @@
   let {
     mode,
     theme,
+    appVersion,
     alertSaveError,
     onmodechange,
     onthemechange,
@@ -17,6 +18,7 @@
   }: {
     mode: DisplayMode;
     theme: ThemePreference;
+    appVersion: string | null;
     alertSaveError: string | null;
     onmodechange: (mode: DisplayMode) => void;
     onthemechange: (theme: ThemePreference) => void;
@@ -123,6 +125,10 @@
       >
     </div>
   </section>
+
+  {#if appVersion !== null}
+    <div class="version-label">TinyScry v{appVersion}</div>
+  {/if}
 </div>
 
 <style>
@@ -144,8 +150,16 @@
 
   /* Mirrors the inter-section padding so the last row is not flush with the
      panel edge. */
-  .settings-section:last-child {
+  .settings-section:last-of-type {
     padding-bottom: var(--space-3);
+  }
+
+  .version-label {
+    padding: 0 var(--space-2) var(--space-1);
+    color: var(--muted);
+    font-size: var(--font-2xs);
+    line-height: 1;
+    text-align: right;
   }
 
   .menu-title {
