@@ -92,6 +92,35 @@ infrastructure and remain separate from CI:
 | Outbound action path      | The Slice 7 connectionless fence procedure passed on pinned TinyFugue build `5.2.2-3-g4f0ff34` (`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`). Slice 8 then live-verified native UI `look` through `RelayActionSink` -> relay -> TinyFugue -> MUD with one independently observed execution. Consumer removal rejected without execution; restoration did not replay the rejected action; one fresh action executed once. `forwarded` still proves only the fixed bridge write and flush.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Tauri Rust crate          | Slice 12 Windows-native mirror: 39/39 Rust library tests passed without warnings, covering transport selection, connection-settings validation/canonicalization, token non-exposure, failure-safe persistence, and managed/external ownership behavior.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
+### Slice 13 release-readiness evidence
+
+- The repository release version is `0.1.0` and is checked deterministically
+  across 15 version-bearing locations. Tag validation additionally requires an
+  exact `v<version>` match before a tagged release can publish.
+- The native Settings surface reports the running Tauri application version
+  rather than a separately hard-coded renderer version.
+- The Windows candidate workflow built an x64 NSIS installer on GitHub Actions.
+  Its PR run passed alongside the normal repository CI gate.
+- That produced installer was installed and exercised on Windows independently
+  of the WSL development checkout. With WSL shut down, the installed
+  application launched, reported version `0.1.0`, configured Managed SSH from
+  the native Connection UI, received live state, and sent an approved outbound
+  action successfully.
+- Candidate acceptance exposed one packaging-specific defect: the managed
+  `ssh.exe` child opened a persistent console window in an installed release
+  build. Windows process creation now applies `CREATE_NO_WINDOW` only to that
+  managed SSH child. A subsequent local release build verified that Managed SSH
+  connected without opening the extra console window, and the native Rust gate
+  passed 40 library tests.
+- The Windows installer remains intentionally unsigned for this alpha. The
+  candidate tested did not display a SmartScreen warning on that machine and
+  download path, but absence of such a warning is not claimed generally.
+- A tag-driven release workflow is implemented with a read-only Windows build
+  job and a separate tag-only publication job. Manual dispatch produces the
+  same NSIS build shape without publishing a GitHub Release.
+- Final release acceptance is still pending on the completed, merged Slice 13
+  tree. No `v0.1.0` release publication is claimed yet.
+
 ### Slice 12 native connection settings evidence
 
 - The Windows-native Settings surface now manages External, Managed, and Direct

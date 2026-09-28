@@ -113,6 +113,100 @@ VPS installation, reverse-proxy/certificate provisioning, server-side
 pairing-token generation/rotation, live transport hot-switching, multi-user
 credentials, and first-run deployment automation remain separate future work.
 
+## Slice 13 - First release readiness
+
+Slug: `first-release-readiness`. In progress.
+
+Slice 13 prepares TinyScry's first intentionally distributable release:
+`v0.1.0`, an alpha release with Windows x64 as the supported desktop binary
+target.
+
+The slice turns the existing development build into a reproducible release
+without changing TinyScry's protocol, transport, action, alert, or MUD
+integration semantics.
+
+### Scope
+
+- Add the repository's declared MIT license as a tracked `LICENSE` file.
+- Add `CHANGELOG.md` and establish the release-history format beginning with
+  `0.1.0`.
+- Establish one release-version contract and deterministic checks that the
+  version-bearing manifests remain aligned.
+- Surface the running native application's version from Tauri rather than from
+  a separately hard-coded renderer string.
+- Add a reproducible Windows x64 native release build producing an NSIS
+  installer.
+- Add a tag-driven GitHub Actions release workflow for `v*` tags.
+- Require the release tag version to match the application version before
+  publishing artifacts.
+- Document installation from the released Windows artifact rather than
+  requiring a source checkout for the desktop application.
+- Document the `v0.1.0` support boundary: alpha quality, Windows x64 release
+  artifact, and unsigned Windows installer.
+- Perform clean-install Windows acceptance using the produced release artifact.
+
+The existing source-development paths remain supported for contributors.
+Linux and macOS may continue to build from source, but Slice 13 does not claim
+release support for platforms without native release acceptance.
+
+### Current state
+
+Release-readiness implementation is substantially complete:
+
+- the MIT license and changelog are tracked;
+- the `0.1.0` version contract and tag/version check are implemented;
+- the native application reports its Tauri-owned version;
+- Windows x64 NSIS candidate builds run on GitHub Actions;
+- end-user Windows installation and connection setup are documented;
+- the first produced installer passed installed-app state/action acceptance;
+- the managed-SSH console-window defect found by that acceptance is fixed and
+  verified in a subsequent local release build; and
+- the tag-driven release workflow can be manually dispatched for an
+  unpublished candidate and publishes only from a matching `v*` tag.
+
+Remaining Slice 13 work is intentionally narrow: pass the final PR gates, merge
+the completed tree to `main`, build that exact tree through the release
+workflow, perform final clean-install/uninstall/reinstall acceptance, then
+create `v0.1.0` and verify the published GitHub prerelease artifact.
+
+### Release contract
+
+The `v0.1.0` tag is created only after the release candidate has passed the
+normal repository checks, the Windows release build, and clean-install
+acceptance.
+
+Clean-install acceptance must begin from the produced installer rather than an
+existing development tree and prove:
+
+1. the installer completes on Windows x64 and TinyScry launches successfully;
+2. the installed application reports version `0.1.0`;
+3. native Connection settings can configure a supported transport without
+   editing application configuration by hand;
+4. after restart, live state reaches the installed HUD;
+5. one operator-approved outbound action traverses the installed application;
+6. uninstall/reinstall does not depend on the WSL/native development mirror;
+   and
+7. the final release artifact is the same build shape produced by the release
+   workflow.
+
+Only after those checks pass is `v0.1.0` published as TinyScry's first release.
+
+### Out of scope
+
+- automatic application updates;
+- Windows code-signing certificate procurement;
+- Linux or macOS release binaries;
+- Microsoft Store or other application-store packaging;
+- automatic VPS, reverse-proxy, or certificate provisioning;
+- automated pairing-token generation or rotation;
+- live transport hot-switching;
+- multi-user credentials;
+- repository visibility changes; and
+- MUD/client generalization work.
+
+Those are independent follow-up decisions and should not expand the first
+release boundary.
+
 ## Candidate work
 
 Unordered, and deliberately without slice numbers.

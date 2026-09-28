@@ -57,6 +57,7 @@
     resizeHudWindow,
   } from '../lib/window.ts';
   import { applyTheme, loadTheme, saveTheme, type ThemePreference } from '../lib/hud/theme.ts';
+  import { loadAppVersion } from '../lib/version.ts';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import X from '@lucide/svelte/icons/x';
 
@@ -73,6 +74,7 @@
   let theme = $state(loadTheme());
   let alertDefinitions = $state<AlertDefinition[]>(loadAlertDefinitions());
   let actions = $state<ActionDefinition[]>(loadActionDefinitions());
+  let appVersion = $state<string | null>(null);
 
   let panel = $state<HTMLElement>();
   let compactRow = $state<HTMLElement>();
@@ -111,6 +113,22 @@
       }
     }),
   );
+
+  onMount(() => {
+    let active = true;
+
+    void loadAppVersion()
+      .then((version) => {
+        if (active) appVersion = version;
+      })
+      .catch(() => {
+        if (active) appVersion = null;
+      });
+
+    return () => {
+      active = false;
+    };
+  });
 
   const freshness = $derived(freshnessOf(model));
   const isFresh = $derived(freshness === 'fresh' && model.hasData);
@@ -617,6 +635,7 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
+              {appVersion}
               {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
@@ -711,6 +730,7 @@
             <SettingsPanel
               mode={displayMode}
               {theme}
+              {appVersion}
               {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}

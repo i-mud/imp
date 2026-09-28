@@ -14,10 +14,15 @@ use std::collections::VecDeque;
 use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -397,6 +402,10 @@ fn ssh_command(ssh_target: &str, local_port: u16) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     command
 }
 

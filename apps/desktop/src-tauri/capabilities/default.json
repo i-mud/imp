@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Allows TinyScry's HUD window to drag, close, set its owned dimensions, and deliver configured desktop notifications.",
+  "description": "Allows TinyScry's HUD window to drag, close, set its owned dimensions, read its application version, and deliver configured desktop notifications.",
   "windows": ["hud"],
   "permissions": [
     "core:window:allow-start-dragging",
     "core:window:allow-close",
     "core:window:allow-set-size",
+    "core:app:allow-version",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify"

@@ -77,7 +77,15 @@ You do **not** need Rust to develop the HUD, run the relay, or run any check.
 `npm run dev` renders the real HUD in a browser against the mock source. See
 [`docs/development.md`](docs/development.md) for the WSL2/Windows split.
 
-## Install
+## Windows release
+
+The first prebuilt release target is Windows x64. See
+[`docs/install-windows.md`](docs/install-windows.md) for installation and
+connection setup from the released NSIS installer.
+
+The `v0.1.0` release is alpha quality and its Windows installer is unsigned.
+
+## Install from source
 
 ```bash
 npm install
