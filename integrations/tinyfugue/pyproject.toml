@@ -3,27 +3,27 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tinyscry-tinyfugue"
+name = "imp-tinyfugue"
 version = "0.1.0"
-description = "TinyScry adapter for TinyFugue GMCP records"
+description = "Imp adapter for TinyFugue GMCP records"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "tinyscry-relay",
+  "imp-relay",
   "websockets",
 ]
 
 [project.scripts]
-tinyscry-bridge = "tinyscry_tf.bridge:main"
-tinyscry-capture = "tinyscry_tf.capture:main"
-tinyscry-feed = "tinyscry_tf.feed:main"
-tinyscry-action-consumer = "tinyscry_tf.action_consumer:main"
+imp-bridge = "imp_tf.bridge:main"
+imp-capture = "imp_tf.capture:main"
+imp-feed = "imp_tf.feed:main"
+imp-action-consumer = "imp_tf.action_consumer:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/tinyscry_tf"]
+packages = ["src/imp_tf"]
 
 [tool.uv.sources]
-tinyscry-relay = { path = "../../services/relay", editable = true }
+imp-relay = { path = "../../services/relay", editable = true }
 
 [dependency-groups]
 dev = [

@@ -136,7 +136,7 @@
   const statusLabel = $derived(statusLabelOf(model));
   const character = $derived(model.state.character);
   const target = $derived(model.state.target);
-  const characterName = $derived(character?.name ?? 'TinyScry');
+  const characterName = $derived(character?.name ?? 'Imp');
   const showMana = $derived(character?.mana?.max !== 0);
   const expandedBase = $derived(target !== null ? EXPANDED_WITH_TARGET_WINDOW_SIZE : EXPANDED_WINDOW_SIZE);
 
@@ -295,7 +295,7 @@
       if (!connectionDialogOpen) return;
 
       if (loaded === null) {
-        connectionLoadError = 'Connection settings are available only in the native TinyScry application.';
+        connectionLoadError = 'Connection settings are available only in the native Imp application.';
         return;
       }
 
@@ -360,7 +360,7 @@
         ? 'Close actions'
         : alertsOpen
           ? 'Close alerts'
-          : 'Close TinyScry',
+          : 'Close Imp',
   );
   const CloseIcon = $derived(settingsOpen || actionsOpen || alertsOpen ? ChevronUp : X);
 
@@ -538,7 +538,7 @@
 <main
   class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen && !connectionDialogOpen}
   class="hud"
-  aria-label="TinyScry companion HUD"
+  aria-label="Imp companion HUD"
   data-tauri-drag-region
 >
   {#if actionDialogOpen}
@@ -630,7 +630,7 @@
             bind:this={compactPanel}
             class="compact-attached-panel"
             role="dialog"
-            aria-label="TinyScry settings"
+            aria-label="Imp settings"
           >
             <SettingsPanel
               mode={displayMode}
@@ -726,7 +726,7 @@
         </header>
 
         {#if settingsOpen}
-          <div class="settings-body" role="dialog" aria-label="TinyScry settings">
+          <div class="settings-body" role="dialog" aria-label="Imp settings">
             <SettingsPanel
               mode={displayMode}
               {theme}

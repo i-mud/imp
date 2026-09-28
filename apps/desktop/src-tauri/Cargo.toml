@@ -1,16 +1,15 @@
 [package]
-name = "tinyscry-desktop"
+name = "imp-desktop"
 version = "0.1.0"
-description = "TinyScry always-on-top companion HUD"
-authors = ["TinyScry"]
+description = "Imp desktop companion for live MUD state, alerts, and trusted actions"
 edition = "2021"
 
 [lib]
-name = "tinyscry_desktop_lib"
+name = "imp_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "tinyscry-desktop"
+name = "imp-desktop"
 path = "src/main.rs"
 
 [build-dependencies]

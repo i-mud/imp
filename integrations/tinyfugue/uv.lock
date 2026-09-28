@@ -330,7 +330,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tinyscry-relay"
+name = "imp-relay"
 version = "0.1.0"
 source = { editable = "../../services/relay" }
 dependencies = [
@@ -348,11 +348,11 @@ dev = [
 ]
 
 [[package]]
-name = "tinyscry-tinyfugue"
+name = "imp-tinyfugue"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "tinyscry-relay" },
+    { name = "imp-relay" },
     { name = "websockets" },
 ]
 
@@ -365,7 +365,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "tinyscry-relay", editable = "../../services/relay" },
+    { name = "imp-relay", editable = "../../services/relay" },
     { name = "websockets" },
 ]
 

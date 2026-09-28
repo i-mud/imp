@@ -54,14 +54,14 @@ describe('native connection settings', () => {
     invoke.mockResolvedValueOnce({
       mode: 'direct',
       sshTarget: '',
-      remoteUrl: 'wss://tinyscry.example/state',
+      remoteUrl: 'wss://imp.example/state',
       hasPairingToken: true,
     });
 
     await expect(loadConnectionSettings()).resolves.toEqual({
       mode: 'direct',
       sshTarget: '',
-      remoteUrl: 'wss://tinyscry.example/state',
+      remoteUrl: 'wss://imp.example/state',
       hasPairingToken: true,
     });
 

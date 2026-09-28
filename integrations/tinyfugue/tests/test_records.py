@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tinyscry_tf.records import parse_record
+from imp_tf.records import parse_record
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 

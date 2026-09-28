@@ -32,13 +32,13 @@ describe('action result presentation', () => {
 
   it('reports uncertain delivery and explicitly rules out automatic retry', () => {
     expect(describeActionResult({ status: 'unknown', detail: 'consumer disconnected' })).toBe(
-      'Delivery uncertain. TinyScry did not retry. Detail: consumer disconnected.',
+      'Delivery uncertain. Imp did not retry. Detail: consumer disconnected.',
     );
   });
 
   it('does not duplicate punctuation from a bounded unknown detail', () => {
     expect(describeActionResult({ status: 'unknown', detail: 'Relay action timed out.' })).toBe(
-      'Delivery uncertain. TinyScry did not retry. Detail: Relay action timed out.',
+      'Delivery uncertain. Imp did not retry. Detail: Relay action timed out.',
     );
   });
 

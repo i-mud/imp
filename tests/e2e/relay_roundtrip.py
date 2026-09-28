@@ -8,8 +8,8 @@ import sys
 
 from websockets.asyncio.client import ClientConnection, connect
 
-from tinyscry_relay.protocol import Character, GameState, StateContext, Vital, encode_publish, encode_select
-from tinyscry_relay.server import RelayServer
+from imp_relay.protocol import Character, GameState, StateContext, Vital, encode_publish, encode_select
+from imp_relay.server import RelayServer
 
 
 async def _receive_snapshot(connection: ClientConnection) -> dict[str, object]:

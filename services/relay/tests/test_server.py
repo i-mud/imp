@@ -9,7 +9,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.typing import Origin
 
-from tinyscry_relay.protocol import (
+from imp_relay.protocol import (
     Character,
     GameState,
     StateContext,
@@ -21,7 +21,7 @@ from tinyscry_relay.protocol import (
     encode_select,
     encode_text,
 )
-from tinyscry_relay.server import POLICY_VIOLATION_CLOSE_CODE, RelayServer
+from imp_relay.server import POLICY_VIOLATION_CLOSE_CODE, RelayServer
 
 CONTEXT = StateContext("session1", 1, 1)
 OTHER_CONTEXT = StateContext("session1", 2, 1)

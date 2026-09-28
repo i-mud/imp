@@ -1,4 +1,4 @@
-"""TinyScry loopback relay."""
+"""Imp loopback relay."""
 
 from .protocol import PROTOCOL_VERSION
 

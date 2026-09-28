@@ -1,4 +1,4 @@
-"""Run the TinyScry authenticated remote gateway."""
+"""Run the Imp authenticated remote gateway."""
 
 from __future__ import annotations
 

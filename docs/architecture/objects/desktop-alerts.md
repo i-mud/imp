@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TinyScry evaluates operator-configured alerts locally in the desktop HUD after
+Imp evaluates operator-configured alerts locally in the desktop HUD after
 state has already crossed the protocol and freshness boundaries. Alerts are a
 presentation-side behavior; they do not publish state, dispatch actions, or
 send commands toward the MUD.
@@ -55,7 +55,7 @@ No alert code publishes state or invokes the desktop `ActionSink`.
 ## Alert definitions
 
 Definitions are ordered operator configuration stored locally under
-`tinyscry.alerts`. At most 64 definitions are retained.
+`imp.alerts`. At most 64 definitions are retained.
 
 A definition has:
 
@@ -85,8 +85,8 @@ are rejected. Text alerts consume only the transient received-text stream; the
 incoming line is not added to persisted alert configuration or retained
 desktop state.
 
-If the generalized store does not yet exist, TinyScry reads the previous
-`tinyscry.alert-settings` low-HP preferences and materializes them in memory as
+If the generalized store does not yet exist, Imp reads the previous
+`imp.alert-settings` low-HP preferences and materializes them in memory as
 the default `low-health` vital definition. Once generalized definitions are
 saved, that store takes precedence, including an intentionally empty list.
 
@@ -105,7 +105,7 @@ A valid current/max pair establishes a percentage as `current / max * 100`.
 The first fresh usable observation establishes a baseline and never alerts,
 even if already at or below the threshold.
 
-After a baseline above the threshold, TinyScry alerts only on a downward
+After a baseline above the threshold, Imp alerts only on a downward
 crossing from `> threshold` to `<= threshold`. Remaining at or below the
 threshold does not repeat. Returning above the threshold re-arms that
 definition.
@@ -191,7 +191,7 @@ The sound remains the bundled local WAV asset and has no network dependency.
 Native notifications use Tauri's notification plugin.
 
 Notification permission is checked lazily. If it has not been granted,
-TinyScry requests it at most once during the current renderer lifetime before
+Imp requests it at most once during the current renderer lifetime before
 silently giving up on that delivery path.
 
 ## Trust and outbound behavior

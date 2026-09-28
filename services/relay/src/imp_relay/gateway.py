@@ -1,4 +1,4 @@
-"""Authenticated remote gateway for TinyScry desktop state and actions."""
+"""Authenticated remote gateway for Imp desktop state and actions."""
 
 from __future__ import annotations
 

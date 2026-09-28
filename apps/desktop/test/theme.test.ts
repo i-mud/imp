@@ -62,9 +62,9 @@ describe('themeFromPersisted', () => {
     expect(themeFromPersisted('system')).toBe('system');
   });
 
-  it('falls back to dark for invalid stored values', () => {
-    expect(themeFromPersisted('solarized')).toBe('dark');
-    expect(themeFromPersisted(null)).toBe('dark');
+  it('falls back to system for invalid stored values', () => {
+    expect(themeFromPersisted('solarized')).toBe('system');
+    expect(themeFromPersisted(null)).toBe('system');
   });
 });
 
@@ -79,7 +79,7 @@ describe('theme persistence', () => {
       },
     });
 
-    expect(loadTheme()).toBe('dark');
+    expect(loadTheme()).toBe('system');
     expect(() => saveTheme('system')).not.toThrow();
   });
 

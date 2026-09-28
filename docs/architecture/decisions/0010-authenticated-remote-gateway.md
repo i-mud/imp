@@ -5,17 +5,17 @@ Date: 2026-09-27
 
 ## Context
 
-ADR 0001 deliberately keeps the TinyScry relay on loopback and uses SSH for
+ADR 0001 deliberately keeps the Imp relay on loopback and uses SSH for
 remote access. That remains a strong transport for an operator who already has
 SSH access, but requiring an SSH forward is a significant installation and
-usability barrier for distributing TinyScry to other TinyFugue users.
+usability barrier for distributing Imp to other TinyFugue users.
 
 Making the existing relay public would collapse an intentional trust boundary.
 The relay accepts local producer and TinyFugue helper connections as well as
 desktop state and action connections. Its lack of per-user authentication is
 safe only because its listener is restricted to loopback.
 
-TinyScry therefore needs a second remote transport without changing the relay
+Imp therefore needs a second remote transport without changing the relay
 into an Internet-facing service.
 
 ## Decision
@@ -24,7 +24,7 @@ The existing relay remains permanently loopback-only, unauthenticated, and
 unchanged in role. It continues to own all protocol-v2 state, context,
 freshness, text-event, and action semantics.
 
-A separate `tinyscry-gateway` process provides the remote boundary.
+A separate `imp-gateway` process provides the remote boundary.
 
 The intended topology is:
 
@@ -35,11 +35,11 @@ The intended topology is:
         |
         v
     127.0.0.1:8787
-    TinyScry relay
+    Imp relay
         |
         v
     127.0.0.1:8788
-    TinyScry authenticated gateway
+    Imp authenticated gateway
         |
         v
     TLS reverse proxy :443
@@ -48,11 +48,11 @@ The intended topology is:
     wss://public-host/...
         |
         v
-    TinyScry desktop
+    Imp desktop
 
 The gateway itself also binds loopback only. TLS termination and the public TCP
 listener belong to an ordinary reverse proxy such as Caddy or nginx. Direct
-TinyScry desktop connections require `wss:`; insecure remote `ws:` is not a
+Imp desktop connections require `wss:`; insecure remote `ws:` is not a
 supported transport.
 
 The gateway exposes only the desktop-facing state and action capabilities. It
@@ -64,7 +64,7 @@ modes continue to connect to the loopback relay exactly as they do today.
 
 ## Authentication
 
-Authentication is a gateway transport prelude, not a TinyScry protocol-v2
+Authentication is a gateway transport prelude, not an Imp protocol-v2
 message and does not require a protocol version change.
 
 Immediately after the WebSocket opens, the direct client sends one text frame
@@ -91,7 +91,7 @@ The gateway is configured with the SHA-256 digest of that textual token, not
 the plaintext token. It validates the presented token's syntax, hashes it, and
 uses a constant-time digest comparison.
 
-There is one active pairing token per TinyScry gateway installation in this
+There is one active pairing token per Imp gateway installation in this
 slice. User accounts, roles, multiple independent credentials, refresh tokens,
 and delegated access are out of scope.
 
@@ -123,7 +123,7 @@ persistent and handshake-level exposure of the credential.
 ## Origin and endpoint policy
 
 The gateway applies browser Origin checks as defense in depth in addition to
-token authentication. No Origin and the TinyScry development/Tauri origins may
+token authentication. No Origin and the Imp development/Tauri origins may
 be accepted; unrelated browser origins are rejected.
 
 Only the remote state and action routes are WebSocket-upgrade targets. Unknown
@@ -136,7 +136,7 @@ other operator data.
 
 ## Relay connection behavior
 
-The gateway connects only to a loopback TinyScry relay.
+The gateway connects only to a loopback Imp relay.
 
 It opens that upstream connection only after successful client authentication.
 This prevents an unauthenticated remote connection from causing retained relay
@@ -173,8 +173,8 @@ configuration. Because the token has 256 bits of random entropy, offline
 guessing of the digest is not practical.
 
 TLS is delegated to a mature reverse proxy rather than reimplemented inside
-TinyScry. The gateway still owns application authentication and authorization;
-TLS alone is not authentication to TinyScry.
+Imp. The gateway still owns application authentication and authorization;
+TLS alone is not authentication to Imp.
 
 ## Consequences
 
@@ -182,10 +182,10 @@ TLS alone is not authentication to TinyScry.
   non-loopback binding and gains no authentication.
 - This ADR adds a second supported remote transport rather than replacing SSH.
 - Possession of the pairing token grants the remote desktop capabilities of one
-  TinyScry installation: state observation and context-bound action requests.
+  Imp installation: state observation and context-bound action requests.
 - Compromise of that token therefore requires rotation.
-- The reverse proxy never needs the TinyScry pairing token; it forwards the
-  WebSocket traffic without interpreting TinyScry authentication.
+- The reverse proxy never needs the Imp pairing token; it forwards the
+  WebSocket traffic without interpreting Imp authentication.
 - Protocol-v2 remains unchanged.
 - Automated reverse-proxy provisioning, token generation/rotation UX, VPS
   installation scripts, and end-user onboarding belong to the following

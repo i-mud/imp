@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from tinyscry_relay.gateway_config import parse_gateway_args
+from imp_relay.gateway_config import parse_gateway_args
 
 TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 TOKEN_DIGEST_HEX = hashlib.sha256(TOKEN.encode("ascii")).hexdigest()
@@ -23,7 +23,7 @@ def test_gateway_config_defaults_to_loopback() -> None:
 def test_gateway_config_reads_digest_from_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TINYSCRY_GATEWAY_TOKEN_SHA256", TOKEN_DIGEST_HEX)
+    monkeypatch.setenv("IMP_GATEWAY_TOKEN_SHA256", TOKEN_DIGEST_HEX)
 
     config = parse_gateway_args([])
 
@@ -33,7 +33,7 @@ def test_gateway_config_reads_digest_from_environment(
 def test_gateway_config_requires_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("TINYSCRY_GATEWAY_TOKEN_SHA256", raising=False)
+    monkeypatch.delenv("IMP_GATEWAY_TOKEN_SHA256", raising=False)
 
     with pytest.raises(SystemExit):
         parse_gateway_args([])
@@ -56,7 +56,7 @@ def test_gateway_config_rejects_unsafe_values(
     monkeypatch: pytest.MonkeyPatch,
     args: list[str],
 ) -> None:
-    monkeypatch.setenv("TINYSCRY_GATEWAY_TOKEN_SHA256", TOKEN_DIGEST_HEX)
+    monkeypatch.setenv("IMP_GATEWAY_TOKEN_SHA256", TOKEN_DIGEST_HEX)
 
     with pytest.raises(SystemExit):
         parse_gateway_args(args)

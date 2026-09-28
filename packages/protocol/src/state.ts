@@ -1,7 +1,7 @@
 /**
- * Normalized TinyScry game state.
+ * Normalized Imp game state.
  *
- * This shape is owned by TinyScry. It is deliberately *not* a mirror of any
+ * This shape is owned by Imp. It is deliberately *not* a mirror of any
  * GMCP package: normalization from MUD-specific packages happens in
  * `integrations/tinyfugue` so that MUD quirks never reach the HUD.
  *

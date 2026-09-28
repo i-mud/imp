@@ -24,7 +24,7 @@ pub fn install(app: &tauri::App) -> tauri::Result<()> {
         .checked(false)
         .build(app)?;
 
-    let quit = MenuItemBuilder::with_id("quit", "Quit TinyScry").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit Imp").build(app)?;
 
     let menu = MenuBuilder::new(app)
         .item(&mute)
@@ -34,10 +34,10 @@ pub fn install(app: &tauri::App) -> tauri::Result<()> {
 
     let mute_for_event = mute.clone();
 
-    let mut tray = TrayIconBuilder::with_id("tinyscry")
+    let mut tray = TrayIconBuilder::with_id("imp")
         .menu(&menu)
         .show_menu_on_left_click(true)
-        .tooltip("TinyScry")
+        .tooltip("Imp")
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "mute-alerts" => {
                 let muted = mute_for_event.is_checked().unwrap_or(false);

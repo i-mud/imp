@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Character } from '@tinyscry/protocol';
+import type { Character } from '@imp/protocol';
 
 import type {
   AlertDefinition,

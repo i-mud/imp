@@ -7,7 +7,7 @@ import { createRuntimeClients } from './lib/config.ts';
 const target = document.getElementById('app');
 
 if (target === null) {
-  throw new Error('TinyScry could not find its application root.');
+  throw new Error('Imp could not find its application root.');
 }
 
 const runtime = await createRuntimeClients();

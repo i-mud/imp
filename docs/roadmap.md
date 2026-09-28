@@ -52,7 +52,7 @@ Implemented behavior follows
 [`0010-authenticated-remote-gateway.md`](architecture/decisions/0010-authenticated-remote-gateway.md):
 
 - the relay remains permanently loopback-only and unauthenticated;
-- a separate loopback `tinyscry-gateway` exposes only state and action;
+- a separate loopback `imp-gateway` exposes only state and action;
 - pairing-token authentication completes before the gateway contacts the relay;
 - Direct desktop mode requires `wss:` while external/manual and managed SSH
   remain supported;
@@ -80,7 +80,7 @@ workflow are candidate distribution work rather than unfinished Slice 11 scope.
 Slug: `native-connection-settings`. Complete.
 
 Slice 12 made External SSH, Managed SSH, and authenticated Direct WSS
-configurable through TinyScry's native Settings UI rather than requiring
+configurable through Imp's native Settings UI rather than requiring
 operators to edit `tunnel.json` by hand.
 
 Implemented behavior includes:
@@ -98,7 +98,7 @@ Implemented behavior includes:
 - browser/mock development remaining independent of native settings commands.
 
 Windows-native acceptance configured Managed -> Direct -> Managed entirely
-through the UI. Each saved mode was activated by restarting TinyScry and
+through the UI. Each saved mode was activated by restarting Imp and
 verified with live state plus an outbound action. Direct mode owned no local
 SSH listener, and returning to Managed removed the persisted Direct URL and
 pairing token.
@@ -117,12 +117,12 @@ credentials, and first-run deployment automation remain separate future work.
 
 Slug: `first-release-readiness`. Complete.
 
-Slice 13 prepares TinyScry's first intentionally distributable release:
+Slice 13 prepares Imp's first intentionally distributable release:
 `v0.1.0`, an alpha release with Windows x64 as the supported desktop binary
 target.
 
 The slice turns the existing development build into a reproducible release
-without changing TinyScry's protocol, transport, action, alert, or MUD
+without changing Imp's protocol, transport, action, alert, or MUD
 integration semantics.
 
 ### Scope
@@ -175,7 +175,7 @@ acceptance.
 Clean-install acceptance must begin from the produced installer rather than an
 existing development tree and prove:
 
-1. the installer completes on Windows x64 and TinyScry launches successfully;
+1. the installer completes on Windows x64 and Imp launches successfully;
 2. the installed application reports version `0.1.0`;
 3. native Connection settings can configure a supported transport without
    editing application configuration by hand;
@@ -186,7 +186,7 @@ existing development tree and prove:
 7. the final release artifact is the same build shape produced by the release
    workflow.
 
-Only after those checks pass is `v0.1.0` published as TinyScry's first release.
+Only after those checks pass is `v0.1.0` published as Imp's first release.
 
 ### Out of scope
 
@@ -210,7 +210,7 @@ Unordered, and deliberately without slice numbers.
 
 ### MUD-agnostic normalization
 
-Still important, no longer next. The objective is to keep TinyScry's own
+Still important, no longer next. The objective is to keep Imp's own
 normalized state while reducing AVATAR-specific assumptions in the integration
 and normalization layer, so that GMCP- and MUD-specific concepts stay upstream
 of the protocol, relay, and HUD boundary - ADR 0002 already requires that
@@ -221,11 +221,11 @@ This is incremental. No single slice promises universal MUD compatibility.
 ### Character identity reacquisition
 
 Rapid AVATAR login and world transitions can produce later GMCP without another
-authoritative `Char.Status.character_name`, leaving TinyScry without character
+authoritative `Char.Status.character_name`, leaving Imp without character
 identity. Tracked as a current deferred defect in [`status.md`](status.md).
 
 Constraints for any fix: identity is never inferred from ambiguous group or
-player data, and TinyScry never invents an identity it was not told.
+player data, and Imp never invents an identity it was not told.
 
 ### Raw/ANSI GMCP robustness
 
@@ -239,9 +239,9 @@ introduced.
 ### TinyFugue runtime crash
 
 An upstream/runtime failure printing `Internal error: socket.c, line 3717`
-followed by `resize freed string`. Tracked separately from TinyScry feature
+followed by `resize freed string`. Tracked separately from Imp feature
 sequencing; it is upstream investigation and possibly upstream PR work, not a
-TinyScry slice.
+Imp slice.
 
 ### Mudlet integration
 

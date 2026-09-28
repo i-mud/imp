@@ -95,9 +95,9 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while running TinyScry")
+        .expect("error while running Imp")
         .run(|app_handle, event| {
-            // TinyScry owns exactly the SSH child its own supervisor spawned.
+            // Imp owns exactly the SSH child its own supervisor spawned.
             // Clean it up when the event loop is actually exiting, rather than
             // when exit is merely requested.
             if let tauri::RunEvent::Exit = event {

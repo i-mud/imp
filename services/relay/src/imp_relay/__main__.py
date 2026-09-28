@@ -1,4 +1,4 @@
-"""Run the TinyScry relay."""
+"""Run the Imp relay."""
 
 from __future__ import annotations
 

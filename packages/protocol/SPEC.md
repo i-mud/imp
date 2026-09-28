@@ -1,16 +1,16 @@
-# TinyScry protocol, version 2
+# Imp protocol, version 2
 
-Canonical reference for the TinyScry wire format. This document is authoritative
+Canonical reference for the Imp wire format. This document is authoritative
 for the _shape and rules_; the implementations are authoritative for behaviour:
 
-| Role                      | Implementation                                        |
-| ------------------------- | ----------------------------------------------------- |
-| TypeScript decoder (HUD)  | `src/decode.ts`                                       |
-| Python decoder (relay/TF) | `../../services/relay/src/tinyscry_relay/protocol.py` |
-| Conformance corpus        | `fixtures/`                                           |
+| Role                      | Implementation                                   |
+| ------------------------- | ------------------------------------------------ |
+| TypeScript decoder (HUD)  | `src/decode.ts`                                  |
+| Python decoder (relay/TF) | `../../services/relay/src/imp_relay/protocol.py` |
+| Conformance corpus        | `fixtures/`                                      |
 
-The format is owned by TinyScry and is deliberately independent of the MUD and
-of TinyFugue - see `docs/architecture/decisions/0002-tinyscry-owned-protocol.md`.
+The format is owned by Imp and is deliberately independent of the MUD and
+of TinyFugue - see `docs/architecture/decisions/0002-imp-owned-protocol.md`.
 Version 2 is a clean break from version 1: every state update and outbound action
 is bound to an explicit TinyFugue foreground connection.
 
@@ -31,7 +31,7 @@ invalid message is a policy violation and closes the connection.
 `http://localhost:1420` or `http://tauri.localhost`. `/ingest` and
 `/action-consumer` reject every request carrying an `Origin` header. This is
 browser defense-in-depth against cross-site requests, not authentication.
-Loopback prevents remote access but does not enforce UID ownership; TinyScry
+Loopback prevents remote access but does not enforce UID ownership; Imp
 provides no per-user endpoint authentication. Both VPS and workstation must be
 single-user or trust every host-local process.
 
@@ -123,7 +123,7 @@ in flight globally. It has no queue, retry, fan-out, or replay:
 - mismatched context, no matching helper, duplicate helper, or a busy broker is
   rejected;
 - a helper reports `forwarded` only after it writes and flushes the fixed
-  `/tinyscry_send <session> <foreground> <connection> <world-token>
+  `/imp_send <session> <foreground> <connection> <world-token>
 <encoded-data>` line into TinyFugue's fixed action bridge;
 - disconnect or timeout after dispatch is `unknown`, because the relay cannot
   prove whether that bridge write completed;

@@ -3,7 +3,7 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
-from tinyscry_tf.diagnostics import DiagnosticCapture
+from imp_tf.diagnostics import DiagnosticCapture
 
 
 def test_open_creates_a_private_directory_and_file(tmp_path: Path) -> None:

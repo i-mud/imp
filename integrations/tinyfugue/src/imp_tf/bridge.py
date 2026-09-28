@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from tinyscry_relay.protocol import GameState, StateContext
+from imp_relay.protocol import GameState, StateContext
 
-from tinyscry_tf.normalize import Normalizer
-from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher
-from tinyscry_tf.records import parse_record
+from imp_tf.normalize import Normalizer
+from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher
+from imp_tf.records import parse_record
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ async def _run(stream: TextIO, publisher: RelayPublisher) -> BridgeStats:
 
 
 def _arguments() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Publish TinyFugue GMCP adapter records to TinyScry relay")
+    parser = argparse.ArgumentParser(description="Publish TinyFugue GMCP adapter records to Imp relay")
     parser.add_argument(
         "--fifo",
         type=Path,

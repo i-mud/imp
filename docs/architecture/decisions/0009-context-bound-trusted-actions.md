@@ -5,7 +5,7 @@ Date: 2026-09-19
 
 ## Context
 
-TinyScry needs a narrow path for future desktop controls to send an operator
+Imp needs a narrow path for future desktop controls to send an operator
 command to the foreground MUD connection. The existing pipeline was deliberately
 state-only. Adding a generic remote-execution path, passing MUD data through a
 shell, or guessing which TinyFugue world should receive a command would violate
@@ -32,7 +32,7 @@ an automatic resend.
 
 The helper receives action text as protocol data, checks a private context marker
 immediately before delivery, text-encodes the command, and writes one fixed
-`/tinyscry_send <session> <foreground> <connection> <world-token> <encoded-data>`
+`/imp_send <session> <foreground> <connection> <world-token> <encoded-data>`
 line to TinyFugue. Each registration accepts at most one dispatch, and the
 helper exits after writing and flushing that line so TinyFugue never waits for
 more output from an open shell-quote pipe. While idle, it writes no liveness
@@ -54,7 +54,7 @@ process in the same host/network namespace can reach the listener on either the
 VPS or workstation. Browser-facing endpoints allow only no `Origin`, the
 development origin, or the Tauri origin, while producer/helper endpoints reject
 every browser `Origin`. These checks are browser defense-in-depth, not
-authentication. TinyScry provides no per-user endpoint authentication and
+authentication. Imp provides no per-user endpoint authentication and
 supports only single-user hosts or hosts whose local users/processes are all
 mutually trusted; untrusted multi-user hosts are out of scope.
 

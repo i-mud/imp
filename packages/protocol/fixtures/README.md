@@ -1,6 +1,6 @@
 # Protocol fixture corpus
 
-Cross-language conformance suite for the TinyScry protocol. Both decoders run
+Cross-language conformance suite for the Imp protocol. Both decoders run
 this same corpus, which is what keeps the TypeScript and Python implementations
 from drifting apart - see
 `docs/architecture/decisions/0004-hand-written-validators-shared-fixtures.md`.

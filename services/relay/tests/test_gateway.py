@@ -12,15 +12,15 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.typing import Origin
 
-import tinyscry_relay.gateway as gateway_module
-from tinyscry_relay.gateway import (
+import imp_relay.gateway as gateway_module
+from imp_relay.gateway import (
     AUTH_POLICY_CLOSE_CODE,
     GatewayServer,
     token_digest,
     valid_pairing_token,
     validate_relay_url,
 )
-from tinyscry_relay.protocol import (
+from imp_relay.protocol import (
     Character,
     GameState,
     StateContext,
@@ -30,7 +30,7 @@ from tinyscry_relay.protocol import (
     encode_consumer_result,
     encode_text,
 )
-from tinyscry_relay.server import RelayServer
+from imp_relay.server import RelayServer
 
 TOKEN = base64.urlsafe_b64encode(bytes(range(32))).rstrip(b"=").decode("ascii")
 TOKEN_DIGEST = hashlib.sha256(TOKEN.encode("ascii")).digest()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from tinyscry_relay.protocol import GameState, StateContext
-from tinyscry_relay.state import RelayState
+from imp_relay.protocol import GameState, StateContext
+from imp_relay.state import RelayState
 
 EMPTY = GameState(character=None, target=None)
 CONTEXT = StateContext("session1", 1, 1)

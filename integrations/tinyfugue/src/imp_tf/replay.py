@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from tinyscry_relay.protocol import GameState, decode_game_state
+from imp_relay.protocol import GameState, decode_game_state
 
-from tinyscry_tf.normalize import Normalizer
-from tinyscry_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
-from tinyscry_tf.records import parse_record
+from imp_tf.normalize import Normalizer
+from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
+from imp_tf.records import parse_record
 
 
 class StatePublisher(Protocol):

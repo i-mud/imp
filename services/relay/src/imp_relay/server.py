@@ -51,7 +51,7 @@ class RelayServer:
         host: str = "127.0.0.1",
         port: int = 8787,
         stale_after: float = 10.0,
-        relay_name: str = "TinyScry relay",
+        relay_name: str = "Imp relay",
         relay_version: str = "0.1.0",
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -285,7 +285,7 @@ async def start_relay(
     host: str = "127.0.0.1",
     port: int = 8787,
     stale_after: float = 10.0,
-    relay_name: str = "TinyScry relay",
+    relay_name: str = "Imp relay",
     relay_version: str = "0.1.0",
     clock: Callable[[], float] = time.time,
 ) -> RelayServer:

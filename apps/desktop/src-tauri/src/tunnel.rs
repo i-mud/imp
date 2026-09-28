@@ -1,4 +1,4 @@
-//! Supervises TinyScry's own SSH local-forward child.
+//! Supervises Imp's own SSH local-forward child.
 //!
 //! Uses the platform's system OpenSSH client as a direct-argv subprocess, so
 //! the user's existing `~/.ssh/config`, `known_hosts` and agent keep working
@@ -51,7 +51,7 @@ const STDERR_TAIL_BYTES: usize = 4096;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelDiagnostic {
-    /// Managed mode is off; TinyScry does not own a tunnel.
+    /// Managed mode is off; Imp does not own a tunnel.
     External,
     /// Direct WSS mode; no local SSH child or forwarded port is owned.
     Direct,
@@ -60,7 +60,7 @@ pub enum TunnelDiagnostic {
     /// and it is monitored so the forward can be taken over when it goes.
     ExternalPortInUse,
     /// The local port is occupied by something that does not look like a
-    /// usable relay endpoint. TinyScry waits rather than kill the owner.
+    /// usable relay endpoint. Imp waits rather than kill the owner.
     LocalPortUnavailable,
     /// A managed SSH child could not establish or keep the forward.
     SshUnavailable,
@@ -86,9 +86,9 @@ pub struct TunnelSupervisor {
 }
 
 impl TunnelSupervisor {
-    /// External/manual mode: TinyScry owns no process. Kept for compatibility
+    /// External/manual mode: Imp owns no process. Kept for compatibility
     pub fn external() -> Arc<Self> {
-        eprintln!("tinyscry: external tunnel mode; no SSH child");
+        eprintln!("imp: external tunnel mode; no SSH child");
         Arc::new(Self {
             status: Mutex::new(TunnelStatus {
                 diagnostic: TunnelDiagnostic::External,
@@ -99,9 +99,9 @@ impl TunnelSupervisor {
         })
     }
 
-    /// Direct WSS mode: TinyScry owns no SSH process or local forward.
+    /// Direct WSS mode: Imp owns no SSH process or local forward.
     pub fn direct() -> Arc<Self> {
-        eprintln!("tinyscry: direct WSS mode; no SSH child");
+        eprintln!("imp: direct WSS mode; no SSH child");
         Arc::new(Self {
             status: Mutex::new(TunnelStatus {
                 diagnostic: TunnelDiagnostic::Direct,
@@ -112,7 +112,7 @@ impl TunnelSupervisor {
         })
     }
 
-    /// Managed mode: spawn and supervise `ssh` in the background. TinyScry
+    /// Managed mode: spawn and supervise `ssh` in the background. Imp
     /// never kills whatever already owns the local port. An existing usable
     /// relay endpoint is adopted - reported, monitored, and left alone - and
     /// the worker takes the forward over only once that endpoint is gone and
@@ -130,7 +130,7 @@ impl TunnelSupervisor {
         let ssh_target = ssh_target.trim().to_owned();
         if ssh_target.is_empty() {
             supervisor.set_diagnostic(TunnelDiagnostic::SshUnavailable);
-            eprintln!("tinyscry: managed tunnel requires a non-empty sshTarget");
+            eprintln!("imp: managed tunnel requires a non-empty sshTarget");
             return supervisor;
         }
 
@@ -140,7 +140,7 @@ impl TunnelSupervisor {
             supervisor.set_diagnostic(TunnelDiagnostic::ExternalPortInUse);
         } else if probe_open(local_port) {
             supervisor.set_diagnostic(TunnelDiagnostic::LocalPortUnavailable);
-            eprintln!("tinyscry: local port 127.0.0.1:{local_port} is unavailable");
+            eprintln!("imp: local port 127.0.0.1:{local_port} is unavailable");
             return supervisor;
         }
 
@@ -184,12 +184,12 @@ impl TunnelSupervisor {
                 return;
             }
             self.set_diagnostic(TunnelDiagnostic::Reconnecting);
-            eprintln!("tinyscry: SSH tunnel starting ({ssh_target} -> 127.0.0.1:{local_port})");
+            eprintln!("imp: SSH tunnel starting ({ssh_target} -> 127.0.0.1:{local_port})");
 
             match spawn_ssh(&ssh_target, local_port) {
                 Ok(mut child) => {
                     if wait_for_ready(&mut child, local_port, &stop) {
-                        eprintln!("tinyscry: SSH tunnel established");
+                        eprintln!("imp: SSH tunnel established");
                         backoff = INITIAL_BACKOFF;
                         self.set_diagnostic(TunnelDiagnostic::Live);
                         *self.child.lock() = Some(child);
@@ -197,7 +197,7 @@ impl TunnelSupervisor {
                         if stop.load(Ordering::SeqCst) {
                             return;
                         }
-                        eprintln!("tinyscry: SSH tunnel exited");
+                        eprintln!("imp: SSH tunnel exited");
                     } else {
                         let _ = child.kill();
                         let _ = child.wait();
@@ -205,7 +205,7 @@ impl TunnelSupervisor {
                     }
                 }
                 Err(error) => {
-                    eprintln!("tinyscry: SSH tunnel failed to start: {error}");
+                    eprintln!("imp: SSH tunnel failed to start: {error}");
                     self.set_diagnostic(TunnelDiagnostic::SshUnavailable);
                 }
             }
@@ -213,7 +213,7 @@ impl TunnelSupervisor {
             if stop.load(Ordering::SeqCst) {
                 return;
             }
-            eprintln!("tinyscry: reconnecting SSH tunnel in {backoff:?}");
+            eprintln!("imp: reconnecting SSH tunnel in {backoff:?}");
             sleep_unless_stopped(backoff, &stop);
             backoff = (backoff * 2).min(MAX_BACKOFF);
         }
@@ -240,20 +240,20 @@ impl TunnelSupervisor {
                 LocalPortState::RelayEndpoint => {
                     if changed {
                         eprintln!(
-                            "tinyscry: using existing TinyScry relay on 127.0.0.1:{local_port}"
+                            "imp: using existing Imp relay on 127.0.0.1:{local_port}"
                         );
                     }
                     self.set_diagnostic(TunnelDiagnostic::ExternalPortInUse);
                 }
                 LocalPortState::Foreign => {
                     if changed {
-                        eprintln!("tinyscry: local port 127.0.0.1:{local_port} is unavailable");
+                        eprintln!("imp: local port 127.0.0.1:{local_port} is unavailable");
                     }
                     self.set_diagnostic(TunnelDiagnostic::LocalPortUnavailable);
                 }
                 LocalPortState::Free => {
                     if previous.is_some() {
-                        eprintln!("tinyscry: 127.0.0.1:{local_port} is free again");
+                        eprintln!("imp: 127.0.0.1:{local_port} is free again");
                     }
                     return;
                 }
@@ -299,7 +299,7 @@ fn local_addr(local_port: u16) -> SocketAddr {
 /// publishes an intermediate answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LocalPortState {
-    /// Held by something that answers like a usable TinyScry relay.
+    /// Held by something that answers like a usable Imp relay.
     RelayEndpoint,
     /// Held by something else; not ours to bind over or kill.
     Foreign,
@@ -322,7 +322,7 @@ fn probe_open(local_port: u16) -> bool {
     TcpStream::connect_timeout(&local_addr(local_port), CONNECT_PROBE_TIMEOUT).is_ok()
 }
 
-/// Best-effort check that an already-open local port looks like a TinyScry
+/// Best-effort check that an already-open local port looks like an Imp
 /// relay rather than an unrelated service. A bare TCP connect only proves
 /// *something* is listening; this reads relay's `/healthz` framing shape
 /// without depending on the WebSocket/JSON protocol layer.
@@ -439,7 +439,7 @@ fn drain_stderr(mut stderr: std::process::ChildStderr) {
 
     let bytes = tail.into_iter().collect::<Vec<_>>();
     for line in String::from_utf8_lossy(&bytes).lines() {
-        eprintln!("tinyscry: ssh: {line}");
+        eprintln!("imp: ssh: {line}");
     }
 }
 
@@ -571,7 +571,7 @@ mod tests {
         Stall,
     }
 
-    /// A loopback listener standing in for a process TinyScry does not own.
+    /// A loopback listener standing in for a process Imp does not own.
     /// It answers every request with the current reply, so a test can change
     /// how an adopted endpoint behaves without releasing the port: the port
     /// stays occupied throughout, leaving no window in which a takeover could

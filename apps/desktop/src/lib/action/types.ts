@@ -1,4 +1,4 @@
-import type { ActionStatus, StateContext } from '@tinyscry/protocol';
+import type { ActionStatus, StateContext } from '@imp/protocol';
 
 export interface ActionResult {
   readonly status: ActionStatus;

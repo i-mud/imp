@@ -1,6 +1,6 @@
-# TinyScry - agent guide
+# Imp - agent guide
 
-TinyScry is a small always-on-top companion HUD for MUDs. It reads character
+Imp is a small always-on-top companion HUD for MUDs. It reads character
 vitals from a TinyFugue session on a remote VPS and renders them in a compact
 frameless desktop window.
 
@@ -33,7 +33,7 @@ changing, then the source it cites.
   the relay's ingest path, read
   `docs/architecture/boundaries/trust-boundary.md`.
 - Never interpolate a server-provided value into a shell command.
-- Never commit secrets, private keys, or persisted passwords. TinyScry stores no
+- Never commit secrets, private keys, or persisted passwords. Imp stores no
   SSH password or private key. Direct WSS deliberately persists one pairing
   token in native application configuration; follow
   `docs/architecture/boundaries/trust-boundary.md` for that credential boundary.

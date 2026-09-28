@@ -4,9 +4,9 @@ import asyncio
 import json
 from pathlib import Path
 
-from tinyscry_relay.protocol import GameState, StateContext, decode_game_state
+from imp_relay.protocol import GameState, StateContext, decode_game_state
 
-from tinyscry_tf.replay import replay_lines
+from imp_tf.replay import replay_lines
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 

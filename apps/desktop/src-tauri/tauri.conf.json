@@ -1,8 +1,8 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "TinyScry",
+  "productName": "Imp",
   "version": "0.1.0",
-  "identifier": "dev.tinyscry.hud",
+  "identifier": "dev.imud.imp",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "hud",
-        "title": "TinyScry",
+        "title": "Imp",
         "width": 320,
         "height": 210,
         "alwaysOnTop": true,

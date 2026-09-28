@@ -3,7 +3,7 @@
 Runs `services/relay`, the authenticated remote gateway, and
 `integrations/tinyfugue`'s live feed as `systemd --user` services, so the
 pipeline survives a VPS reboot and an administrator's SSH session ending
-without root-owned TinyScry services.
+without root-owned Imp services.
 
 The relay, feed-facing endpoints, and gateway all remain loopback-only. SSH may
 still expose the relay to one workstation as before. Direct WSS instead uses a
@@ -14,13 +14,13 @@ Everything below runs **on the VPS** unless labelled otherwise.
 
 Loopback prevents remote network access but is not same-user isolation. Any
 local OS user or process in the VPS network namespace can reach the relay, and
-TinyScry provides no per-user endpoint authentication. Deploy only on a
+Imp provides no per-user endpoint authentication. Deploy only on a
 single-user VPS or where every host-local user/process is mutually trusted;
 untrusted multi-user hosts are unsupported.
 
 ## 1. Sync the repository (in WSL/repo)
 
-The `tinyscry-tinyfugue` package depends on `tinyscry-relay` by relative path
+The `imp-tinyfugue` package depends on `imp-relay` by relative path
 (see its `pyproject.toml` `[tool.uv.sources]`), so sync the whole repository
 rather than individual subdirectories.
 
@@ -30,15 +30,15 @@ The repository includes the canonical sync command:
 npm run vps:sync
 ```
 
-It copies `~/src/tinyscry/` to the SSH host alias `avatar` at `~/tinyscry/`
+It copies `~/src/imp/` to the SSH host alias `avatar` at `~/imp/`
 while excluding Git metadata, dependency/build directories, caches,
 environment files, and common key material.
 
 For another host or destination, override the defaults:
 
 ```bash
-TINYSCRY_VPS_HOST=<host-alias> \
-TINYSCRY_VPS_DEST='~/tinyscry/' \
+IMP_VPS_HOST=<host-alias> \
+IMP_VPS_DEST='~/imp/' \
 npm run vps:sync
 ```
 
@@ -48,32 +48,32 @@ checkout stays authoritative.
 ## 2. Install the Python environments (on VPS)
 
 ```bash
-cd ~/tinyscry
+cd ~/imp
 uv sync --project services/relay
 uv sync --project integrations/tinyfugue
 mkdir -p ~/.local/bin
 ln -sfn \
-  "$HOME/tinyscry/integrations/tinyfugue/.venv/bin/tinyscry-action-consumer" \
-  "$HOME/.local/bin/tinyscry-action-consumer"
+  "$HOME/imp/integrations/tinyfugue/.venv/bin/imp-action-consumer" \
+  "$HOME/.local/bin/imp-action-consumer"
 ```
 
 The project-local environments back the systemd units. The fixed
-`~/.local/bin/tinyscry-action-consumer` link is the only helper path invoked by
+`~/.local/bin/imp-action-consumer` link is the only helper path invoked by
 the TinyFugue hook; action text is pipe data and never argv.
 
 ## 3. Install the systemd user units (on VPS)
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ~/tinyscry/deploy/systemd/tinyscry-relay.service ~/.config/systemd/user/
-cp ~/tinyscry/deploy/systemd/tinyscry-feed.service ~/.config/systemd/user/
-cp ~/tinyscry/deploy/systemd/tinyscry-gateway.service ~/.config/systemd/user/
+cp ~/imp/deploy/systemd/imp-relay.service ~/.config/systemd/user/
+cp ~/imp/deploy/systemd/imp-feed.service ~/.config/systemd/user/
+cp ~/imp/deploy/systemd/imp-gateway.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 ```
 
 ## 4. Configure the authenticated gateway (on VPS)
 
-Direct WSS access uses one 256-bit pairing token. TinyScry's gateway stores only
+Direct WSS access uses one 256-bit pairing token. Imp's gateway stores only
 the SHA-256 digest of the token. The plaintext token is entered once in the
 desktop Connection settings later; do not put it in a URL, shell history,
 service unit, repository file, or reverse-proxy configuration.
@@ -82,8 +82,8 @@ Until pairing/rotation UX is automated, generate a token and its digest
 manually:
 
 ```bash
-mkdir -p ~/.config/tinyscry
-chmod 700 ~/.config/tinyscry
+mkdir -p ~/.config/imp
+chmod 700 ~/.config/imp
 
 read -r token digest <<EOF
 $(python3 - <<'PY2'
@@ -98,8 +98,8 @@ PY2
 )
 EOF
 
-printf 'TINYSCRY_GATEWAY_TOKEN_SHA256=%s\n' "$digest" > ~/.config/tinyscry/gateway.env
-chmod 600 ~/.config/tinyscry/gateway.env
+printf 'IMP_GATEWAY_TOKEN_SHA256=%s\n' "$digest" > ~/.config/imp/gateway.env
+chmod 600 ~/.config/imp/gateway.env
 
 printf 'Pairing token: %s\n' "$token"
 ```
@@ -121,7 +121,7 @@ The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
 ### Public TLS/WSS edge for Direct mode
 
 Direct WSS requires a publicly trusted TLS endpoint. TLS termination belongs to
-a normal reverse proxy such as Caddy or nginx, not to TinyScry's Python
+a normal reverse proxy such as Caddy or nginx, not to Imp's Python
 gateway.
 
 The public proxy must expose only `/state`, `/action`, and optionally
@@ -131,7 +131,7 @@ rejected.
 A minimal Caddy route shape is:
 
 ```text
-https://tinyscry.example {
+https://imp.example {
     @gateway path /state /action /healthz
 
     handle @gateway {
@@ -155,19 +155,19 @@ reverse-proxy/certificate provisioning remains future distribution work.
 
 ### Direct desktop configuration
 
-On the workstation, open TinyScry and use **Settings -> Connection -> Direct**.
+On the workstation, open Imp and use **Settings -> Connection -> Direct**.
 
 Enter:
 
 - the public `wss:` state endpoint, for example
-  `wss://tinyscry.example/state`; and
+  `wss://imp.example/state`; and
 - the exact 43-character plaintext pairing token whose SHA-256 digest is stored
   in `gateway.env`.
 
-Save the connection and restart TinyScry. The URL must use `wss:`, contain no
+Save the connection and restart Imp. The URL must use `wss:`, contain no
 credentials, query, or fragment, and end in `/state`.
 
-The pairing token is persisted by the native application. TinyScry's
+The pairing token is persisted by the native application. Imp's
 settings-read path does not return the stored plaintext token merely to populate
 the form; an existing Direct token can therefore remain unchanged when editing
 other Direct settings.
@@ -177,9 +177,9 @@ environment value, or WebView `localStorage`.
 
 For troubleshooting only, the native configuration is persisted at:
 
-- Linux: `~/.config/dev.tinyscry.hud/tunnel.json`
-- Windows: `%APPDATA%\dev.tinyscry.hud\tunnel.json`
-- macOS: `~/Library/Application Support/dev.tinyscry.hud/tunnel.json`
+- Linux: `~/.config/dev.imp.hud/tunnel.json`
+- Windows: `%APPDATA%\dev.imp.hud\tunnel.json`
+- macOS: `~/Library/Application Support/dev.imp.hud/tunnel.json`
 
 Normal setup should use the Connection UI rather than editing this file by
 hand.
@@ -199,34 +199,34 @@ loginctl show-user "$USER" -p Linger   # expect: Linger=yes
 
 ```bash
 systemctl --user enable --now \
-  tinyscry-relay.service \
-  tinyscry-feed.service \
-  tinyscry-gateway.service
+  imp-relay.service \
+  imp-feed.service \
+  imp-gateway.service
 
 systemctl --user status \
-  tinyscry-relay.service \
-  tinyscry-feed.service \
-  tinyscry-gateway.service
+  imp-relay.service \
+  imp-feed.service \
+  imp-gateway.service
 ```
 
-`tinyscry-feed.service` `Wants=` (not `Requires=`) the relay: if the relay is
+`imp-feed.service` `Wants=` (not `Requires=`) the relay: if the relay is
 briefly down, the feed keeps running and reconnects with the publisher's
 existing bounded backoff rather than failing.
 
 ## 7. Install the TinyFugue hook (on VPS)
 
-Copy the unchanged hook to TinyScry's config directory:
+Copy the unchanged hook to Imp's config directory:
 
 ```bash
-mkdir -p ~/.config/tinyscry
-cp ~/tinyscry/integrations/tinyfugue/tinyscry.tf ~/.config/tinyscry/capture.tf
+mkdir -p ~/.config/imp
+cp ~/imp/integrations/tinyfugue/imp.tf ~/.config/imp/capture.tf
 ```
 
 Then add this line to the startup file used by the operator's actual
 TinyFugue invocation:
 
 ```text
-/load ~/.config/tinyscry/capture.tf
+/load ~/.config/imp/capture.tf
 ```
 
 Do not have the installer create or overwrite an operator startup file.
@@ -239,26 +239,26 @@ Load the hook before anything in that startup path can connect or log in to
 the MUD. AVATAR sends the full identity-bearing `Char.Status` only once, during
 initial character login, and provides no supported way to request another full
 snapshot; later `Char.Status` messages are deltas that may omit
-`character_name`. Loading is additive: TinyScry does not own or replace the
+`character_name`. Loading is additive: Imp does not own or replace the
 operator's GMCP negotiation or connection macros. Repeated loads replace the
-named TinyScry definitions rather than duplicating them.
-The TinyScry `GMCP`, `CONNECT`, and `WORLD` hooks are defined at priority 2
+named Imp definitions rather than duplicating them.
+The Imp `GMCP`, `CONNECT`, and `WORLD` hooks are defined at priority 2
 with fall-through (`-Fp2`) so they observe without consuming operator events.
 `GMCP_LOGIN` remains an operator login-script prerequisite but is not a
-TinyScry capture hook.
-TinyScry runs ahead of default priority-1 handlers such as `received-gmcp`; the
+Imp capture hook.
+Imp runs ahead of default priority-1 handlers such as `received-gmcp`; the
 `-F` flag lets those handlers run afterward. Two same-priority
 non-fall-through GMCP hooks previously lost whole events intermittently. Do
 not drop `-F` and do not change the operator's own hooks. A higher-priority
-non-fall-through hook can still prevent TinyScry from running, so re-verify
+non-fall-through hook can still prevent Imp from running, so re-verify
 coexistence when operator priorities differ.
 
 Confirm the GMCP definitions inside TinyFugue: the operator's handler should
-remain at its existing priority and `tinyscry_capture_gmcp` must appear as
+remain at its existing priority and `imp_capture_gmcp` must appear as
 `-Fp2`.
 
-The hook writes to the fixed path `~/.local/state/tinyscry/spool`.
-`tinyscry-feed` owns that path as a symlink into its private runtime
+The hook writes to the fixed path `~/.local/state/imp/spool`.
+`imp-feed` owns that path as a symlink into its private runtime
 directory and replaces it on every (re)start; nothing about the hook file
 changes when the feed restarts. See
 [`integrations/tinyfugue/README.md`](../integrations/tinyfugue/README.md) for
@@ -271,7 +271,7 @@ TinyFugue performing GMCP login sequencing at the right negotiation point. The
 invariant is a **build whose GMCP support includes the `GMCP_LOGIN` hook**,
 driving operator login scripts that use it to run their GMCP capability
 negotiation and send `Char.Login`. Without `GMCP_LOGIN` the operator login path
-cannot be relied on to sequence this correctly, and TinyScry then keeps
+cannot be relied on to sequence this correctly, and Imp then keeps
 consuming `Char.Vitals` and `Char.Status` deltas without ever observing
 `character_name`, so the HUD stays down.
 
@@ -280,7 +280,7 @@ TinyFugue `5.2.2-3-g4f0ff34`; an upstream or distribution version number does
 not by itself prove `GMCP_LOGIN` is compiled into the binary in use, so confirm
 the capability. The conclusive signal is on the first login after installing
 the hook: login produces a full `Char.Status` carrying `character_name`, and
-TinyScry obtains a snapshot and writes its checkpoint - visible as
+Imp obtains a snapshot and writes its checkpoint - visible as
 `has_snapshot: true` with a non-null `seq` on `/healthz`. In the verified run,
 `Char.StatusVars` was observed immediately followed by that full identity-bearing
 `Char.Status`; AVATAR does not document that ordering as a guarantee, so treat
@@ -288,7 +288,7 @@ it as an observation rather than a requirement. When the signal is missing,
 [bounded diagnostic capture](#diagnostic-raw-capture-opt-in-vps) shows which
 packages did arrive.
 
-The build, the upgrade and the login scripts are operator-owned; TinyScry
+The build, the upgrade and the login scripts are operator-owned; Imp
 never modifies them and sends no GMCP itself.
 
 ## Verifying the deployment
@@ -299,11 +299,11 @@ ss -ltnp | grep -E ':(8787|8788)[[:space:]]'
 # expect 127.0.0.1:8787 and 127.0.0.1:8788,
 # with no 0.0.0.0 listener for either service
 
-# TinyScry user services are active
+# Imp user services are active
 systemctl --user is-active \
-  tinyscry-relay.service \
-  tinyscry-feed.service \
-  tinyscry-gateway.service
+  imp-relay.service \
+  imp-feed.service \
+  imp-gateway.service
 
 # Gateway health contains process health only
 curl -s http://127.0.0.1:8788/healthz
@@ -315,28 +315,28 @@ curl -s http://127.0.0.1:8788/healthz
 # the second command must report 404
 
 # The feed created the runtime spool, hook symlink, and private context marker
-ls -l ~/.local/state/tinyscry/spool
-stat -c '%a %n' ~/.local/state/tinyscry/context   # 600 after a world selection
+ls -l ~/.local/state/imp/spool
+stat -c '%a %n' ~/.local/state/imp/context   # 600 after a world selection
 
 # Recent lifecycle logs, never raw GMCP or action text
 journalctl --user \
-  -u tinyscry-relay.service \
-  -u tinyscry-feed.service \
-  -u tinyscry-gateway.service \
+  -u imp-relay.service \
+  -u imp-feed.service \
+  -u imp-gateway.service \
   -n 50
 ```
 
 ## Common failure diagnostics
 
-| Symptom                                                                  | Check                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tinyscry-feed` exits immediately with "another TinyScry feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status tinyscry-feed.service`, then stop the extra process.                                                    |
-| Relay reachable but no HUD data                                          | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `tinyscry-feed.service`.      |
-| Direct WSS repeatedly reconnects                                         | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging. |
-| TinyFugue shows an `fwrite` error line                                   | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                              |
-| Services do not survive a reboot                                         | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                           |
-| Relay bound to more than loopback                                        | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                  |
-| Feed consuming GMCP but relay reports `has_snapshot: false`              | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again.    |
+| Symptom                                                        | Check                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                         |
+| Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.           |
+| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging. |
+| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                              |
+| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                           |
+| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                  |
+| Feed consuming GMCP but relay reports `has_snapshot: false`    | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again.    |
 
 ## Diagnostic raw capture (opt-in, VPS)
 
@@ -345,7 +345,7 @@ under `$XDG_RUNTIME_DIR`; it retains no raw diagnostic history. To capture a
 bounded, private diagnostic trail temporarily:
 
 ```bash
-systemctl --user edit tinyscry-feed.service
+systemctl --user edit imp-feed.service
 ```
 
 Add an override:
@@ -353,11 +353,11 @@ Add an override:
 ```ini
 [Service]
 ExecStart=
-ExecStart=%h/tinyscry/integrations/tinyfugue/.venv/bin/tinyscry-feed --diagnostic-capture
+ExecStart=%h/imp/integrations/tinyfugue/.venv/bin/imp-feed --diagnostic-capture
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user restart
-tinyscry-feed.service`. Files land privately under
-`~/.local/state/tinyscry/diagnostics/`, rotate at 1 MiB, and keep at most 5
-files. Remove the override (`systemctl --user revert tinyscry-feed.service`)
+imp-feed.service`. Files land privately under
+`~/.local/state/imp/diagnostics/`, rotate at 1 MiB, and keep at most 5
+files. Remove the override (`systemctl --user revert imp-feed.service`)
 when done; this is a debugging aid, not a default.

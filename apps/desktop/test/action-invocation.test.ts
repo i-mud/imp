@@ -72,7 +72,7 @@ describe('action invocation state', () => {
 
     expect(send).toHaveBeenCalledOnce();
     expect(state.pendingActionId).toBeNull();
-    expect(state.feedback).toBe('Delivery uncertain. TinyScry did not retry. Detail: Action request failed.');
+    expect(state.feedback).toBe('Delivery uncertain. Imp did not retry. Detail: Action request failed.');
   });
 
   it('contains a synchronous sink failure as unknown feedback without retrying', async () => {
@@ -85,6 +85,6 @@ describe('action invocation state', () => {
 
     expect(send).toHaveBeenCalledOnce();
     expect(state.pendingActionId).toBeNull();
-    expect(state.feedback).toBe('Delivery uncertain. TinyScry did not retry. Detail: Action request failed.');
+    expect(state.feedback).toBe('Delivery uncertain. Imp did not retry. Detail: Action request failed.');
   });
 });

@@ -44,8 +44,8 @@ describe('displayModeFromPersisted', () => {
     expect(displayModeFromPersisted('expanded')).toBe('expanded');
   });
 
-  it('falls back to expanded mode for invalid stored values', () => {
-    expect(displayModeFromPersisted('minimal')).toBe('expanded');
-    expect(displayModeFromPersisted(null)).toBe('expanded');
+  it('falls back to compact mode for invalid stored values', () => {
+    expect(displayModeFromPersisted('minimal')).toBe('compact');
+    expect(displayModeFromPersisted(null)).toBe('compact');
   });
 });

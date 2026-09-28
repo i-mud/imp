@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { vitalFraction, type Vital } from '@tinyscry/protocol';
+  import { vitalFraction, type Vital } from '@imp/protocol';
 
   let { label, vital, color }: { label: string; vital: Vital | null; color: string } = $props();
 </script>

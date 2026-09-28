@@ -1,4 +1,4 @@
-# TinyScry System Map
+# Imp System Map
 
 Durable architectural navigation. Source code, tests and runtime are the
 authority on what currently executes; this map exists so an agent can find the
@@ -7,14 +7,14 @@ right code quickly and know what a change is likely to break.
 If this map contradicts the source, the source wins and the map is drifted -
 fix the map, do not "fix" the code to match it.
 
-## What TinyScry is
+## What Imp is
 
 A small always-on-top companion HUD for MUDs. It reads character vitals out of
 a running TinyFugue session on a remote VPS and renders them in a compact
 frameless window on the operator's desktop.
 
 ```
-MUD <-> GMCP <-> TinyFugue <-> TinyScry TF adapter <-> relay (loopback)
+MUD <-> GMCP <-> TinyFugue <-> Imp TF adapter <-> relay (loopback)
                                                         |         |
                                                         | SSH     | gateway (loopback)
                                                         |         | -> TLS/WSS
@@ -73,25 +73,25 @@ Read the card for the concept you are changing, then the source it cites.
 `decisions/` holds the reasoning behind the architecture. Read one when you are
 about to contradict it.
 
-| ADR                                                               | Decision                                            |
-| ----------------------------------------------------------------- | --------------------------------------------------- |
-| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay loopback boundary and SSH transport           |
-| [0002](decisions/0002-tinyscry-owned-protocol.md)                 | TinyScry owns its protocol; GMCP stops at normalize |
-| [0003](decisions/0003-snapshot-only-state-transfer.md)            | whole snapshots, never partial updates              |
-| [0004](decisions/0004-hand-written-validators-shared-fixtures.md) | hand-written decoders, shared fixture corpus        |
-| [0005](decisions/0005-python-relay-with-websockets.md)            | small Python relay on `websockets`                  |
-| [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework          |
-| [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                          |
-| [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds           |
-| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context        |
-| [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway    |
+| ADR                                                               | Decision                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------ |
+| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay loopback boundary and SSH transport        |
+| [0002](decisions/0002-imp-owned-protocol.md)                      | Imp owns its protocol; GMCP stops at normalize   |
+| [0003](decisions/0003-snapshot-only-state-transfer.md)            | whole snapshots, never partial updates           |
+| [0004](decisions/0004-hand-written-validators-shared-fixtures.md) | hand-written decoders, shared fixture corpus     |
+| [0005](decisions/0005-python-relay-with-websockets.md)            | small Python relay on `websockets`               |
+| [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework       |
+| [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                       |
+| [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds        |
+| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context     |
+| [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway |
 
 ## Invariants worth knowing before you edit
 
 1. The HUD never imports a concrete state source. Only
    `apps/desktop/src/lib/config.ts` names them.
 2. No GMCP concept exists downstream of
-   `integrations/tinyfugue/src/tinyscry_tf/normalize.py`.
+   `integrations/tinyfugue/src/imp_tf/normalize.py`.
 3. The relay binds loopback only, cannot be opted into a public bind, and has
    no authentication by design.
 4. A rejected protocol frame never mutates state, in any component.

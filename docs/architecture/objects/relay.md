@@ -8,14 +8,14 @@ HUD subscribers, and brokers one context-bound outbound action at a time.
 
 ## Source
 
-- `services/relay/src/tinyscry_relay/state.py` - `RelayState`: snapshot,
+- `services/relay/src/imp_relay/state.py` - `RelayState`: snapshot,
   sequence counter, feed status, health payload. No transport knowledge.
-- `services/relay/src/tinyscry_relay/server.py` - WebSocket endpoints,
+- `services/relay/src/imp_relay/server.py` - WebSocket endpoints,
   broadcast, health endpoint.
-- `services/relay/src/tinyscry_relay/action.py` - one eligible TinyFugue
+- `services/relay/src/imp_relay/action.py` - one eligible TinyFugue
   consumer and one in-flight action.
-- `services/relay/src/tinyscry_relay/protocol.py` - canonical Python decoder.
-- `services/relay/src/tinyscry_relay/config.py` - bind host/port, stale window.
+- `services/relay/src/imp_relay/protocol.py` - canonical Python decoder.
+- `services/relay/src/imp_relay/config.py` - bind host/port, stale window.
 
 ## Endpoints
 
@@ -36,13 +36,13 @@ there is no second listener and no HTTP framework.
 
 Fed by:
 
-- `integrations/tinyfugue/src/tinyscry_tf/publisher.py`
+- `integrations/tinyfugue/src/imp_tf/publisher.py`
 
 Read by:
 
 - `apps/desktop/src/lib/source/relay.ts`, across a local/SSH-forwarded relay
   connection in external or managed mode
-- `tinyscry-gateway`, as the authenticated Direct-WSS transport's loopback
+- `imp-gateway`, as the authenticated Direct-WSS transport's loopback
   upstream
 
 Depends on:
@@ -82,7 +82,7 @@ Reused by:
 - Binds loopback only. A non-loopback host is rejected and has no override.
 - Public Direct WSS terminates at the separate authenticated gateway. The
   relay itself never accepts Internet-facing authentication or a public bind.
-- Loopback prevents remote access but does not isolate OS users. TinyScry has
+- Loopback prevents remote access but does not isolate OS users. Imp has
   no per-user authentication, so the VPS and workstation must be single-user
   or trust every host-local process.
 - Browser-facing endpoints permit only no `Origin`, the Vite development

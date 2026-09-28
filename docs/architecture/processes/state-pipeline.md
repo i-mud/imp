@@ -3,8 +3,8 @@
 ## Entry points
 
 - MUD GMCP traffic arriving in TinyFugue on the VPS
-- `integrations/tinyfugue/src/tinyscry_tf/feed.py` (live state)
-- `integrations/tinyfugue/src/tinyscry_tf/replay.py` (fixture replay)
+- `integrations/tinyfugue/src/imp_tf/feed.py` (live state)
+- `integrations/tinyfugue/src/imp_tf/replay.py` (fixture replay)
 - `apps/desktop/src/lib/source/mock.ts` (no VPS involved at all)
 
 ## Flow
@@ -12,10 +12,10 @@
 ```text
 MUD
  |  GMCP packages
-TinyFugue  ---- integrations/tinyfugue/tinyscry.tf
- |  TS2 events: session + world + foreground/connection generations
+TinyFugue  ---- integrations/tinyfugue/imp.tf
+ |  IMP2 events: session + world + foreground/connection generations
 private drained spool
- |  tinyscry-feed: strict event parsing and per-world normalization
+ |  imp-feed: strict event parsing and per-world normalization
 normalize.py
  |  GameState              <-- last point where GMCP concepts exist
 publisher.py
@@ -43,7 +43,7 @@ desktop ActionSink
   -> SSH-forwarded relay /action
      OR authenticated gateway /action -> relay /action
   -> one matching /action-consumer
-  -> private context check -> one fixed /tinyscry_send <encoded-data> TF line
+  -> private context check -> one fixed /imp_send <encoded-data> TF line
   -> helper exit -> synchronous TF context/world fence -> textdecode() -> send()
   -> guarded replacement helper
   -> idle reader loss -> silent helper exit, with no reconnect

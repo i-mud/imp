@@ -1,15 +1,17 @@
-# TinyScry
+# Imp
 
-A small always-on-top companion HUD for MUDs.
+**Interactive MUD Peripheral**
 
-TinyScry reads character vitals out of a running [TinyFugue](https://github.com/ingwarsw/tinyfugue)
+A cross-platform MUD companion for live state, alerts, and trusted actions.
+
+Imp reads character vitals out of a running [TinyFugue](https://github.com/ingwarsw/tinyfugue)
 session on a remote VPS and renders them in a compact, frameless, themeable
 window that supports Dark, Light, and System themes. It sits over your MUD
 client: HP, mana, movement, the current target's health, configurable alerts,
 and operator-defined outbound actions.
 
 The MUD never talks to the HUD directly. TinyFugue-side Python normalizes state
-into a protocol TinyScry owns. The desktop reaches that state either through an
+into a protocol Imp owns. The desktop reaches that state either through an
 SSH-forwarded loopback relay or through an authenticated Direct WSS gateway.
 
 - Architecture and change impact: [`docs/architecture/CONTEXT.md`](docs/architecture/CONTEXT.md)
@@ -22,12 +24,12 @@ SSH-forwarded loopback relay or through an authenticated Direct WSS gateway.
 
 ```text
 MUD <-> GMCP <-> TinyFugue             (VPS)
-                  <-> TinyScry TF adapter
-                  <-> TinyScry relay, 127.0.0.1:8787
+                  <-> Imp TF adapter
+                  <-> Imp relay, 127.0.0.1:8787
                        |            |
                        | SSH        | authenticated gateway, 127.0.0.1:8788
                        | forward    | -> TLS reverse proxy -> WSS
-                       +------------+------------------------------> TinyScry desktop
+                       +------------+------------------------------> Imp desktop
 ```
 
 The relay is **never** exposed publicly. SSH mode forwards that loopback relay
@@ -44,7 +46,7 @@ and
 ## Repository structure
 
 ```
-tinyscry/
+imp/
   apps/desktop/           Tauri 2 + Svelte 5 HUD window
   services/relay/         Python loopback relay + authenticated remote gateway
   integrations/tinyfugue/ GMCP capture, normalization, publisher
@@ -155,21 +157,21 @@ npm run tf:replay -- fixtures/real-session.jsonl --dry-run
 ### 5. Point the HUD at the relay
 
 ```bash
-VITE_TINYSCRY_SOURCE=relay VITE_TINYSCRY_RELAY_URL=ws://127.0.0.1:8787/state npm run dev
+VITE_IMP_SOURCE=relay VITE_IMP_RELAY_URL=ws://127.0.0.1:8787/state npm run dev
 ```
 
 ## Desktop transport
 
-TinyScry supports three native desktop transport modes: external SSH, managed
+Imp supports three native desktop transport modes: external SSH, managed
 SSH, and authenticated Direct WSS.
 
 Configure the native transport from **Settings -> Connection**. Saved changes
-apply on the next application start, so restart TinyScry after changing modes
+apply on the next application start, so restart Imp after changing modes
 or connection details.
 
-TinyScry does not implement SSH itself. External and managed SSH modes use the
+Imp does not implement SSH itself. External and managed SSH modes use the
 platform's system OpenSSH client, your `~/.ssh/config`, `known_hosts`, and
-agent. TinyScry stores no SSH password and handles no private key.
+agent. Imp stores no SSH password and handles no private key.
 
 ### External mode (default)
 
@@ -181,15 +183,15 @@ ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
 
 The native HUD then uses the local relay at
 `ws://127.0.0.1:8787/state`. This mode remains useful for development or an
-unusual SSH setup whose lifecycle should stay outside TinyScry.
+unusual SSH setup whose lifecycle should stay outside Imp.
 
 ### Managed mode
 
 Choose **Managed** in **Settings -> Connection** and enter an existing OpenSSH
 `Host` alias - the same alias for which `ssh <alias>` already connects
-non-interactively. Save the setting and restart TinyScry.
+non-interactively. Save the setting and restart Imp.
 
-On launch, TinyScry's Rust backend spawns and supervises exactly one child
+On launch, Imp's Rust backend spawns and supervises exactly one child
 equivalent to:
 
 ```text
@@ -206,22 +208,22 @@ without the key loaded, a passphrase-only key) fails fast instead of hanging;
 confirm `ssh <alias>` already connects non-interactively before switching to
 managed mode.
 
-If the child exits or the connection drops, TinyScry reconnects with bounded
-backoff. If local port `8787` is already occupied, TinyScry never kills the
-owning process: it verifies whether that port already answers with TinyScry's
+If the child exits or the connection drops, Imp reconnects with bounded
+backoff. If local port `8787` is already occupied, Imp never kills the
+owning process: it verifies whether that port already answers with Imp's
 relay health shape and, if so, uses it; otherwise it reports the conflict and
-does not start a child. Closing TinyScry terminates only the child it spawned.
+does not start a child. Closing Imp terminates only the child it spawned.
 
 `ws://127.0.0.1:8787/state` remains the HUD's relay URL in both SSH modes.
 
 ### Direct WSS mode
 
 Direct mode owns no SSH process and requires a trusted `wss:` endpoint backed
-by TinyScry's authenticated gateway.
+by Imp's authenticated gateway.
 
 Choose **Direct** in **Settings -> Connection**, enter the gateway's public
 `wss:` state URL and the 43-character pairing token, save, and restart
-TinyScry. The URL must end in `/state` and contain no credentials, query, or
+Imp. The URL must end in `/state` and contain no credentials, query, or
 fragment.
 
 When editing an already configured Direct connection, leaving the pairing-token
@@ -238,9 +240,9 @@ Native connection settings are persisted in the application's `tunnel.json`,
 but normal configuration should use the UI rather than editing that file by
 hand. Its location is:
 
-- Linux: `~/.config/dev.tinyscry.hud/tunnel.json`
-- Windows: `%APPDATA%\dev.tinyscry.hud\tunnel.json`
-- macOS: `~/Library/Application Support/dev.tinyscry.hud/tunnel.json`
+- Linux: `~/.config/dev.imp.hud/tunnel.json`
+- Windows: `%APPDATA%\dev.imp.hud\tunnel.json`
+- macOS: `~/Library/Application Support/dev.imp.hud/tunnel.json`
 
 See [`deploy/README.md`](deploy/README.md) for the current manual gateway and
 reverse-proxy deployment procedure.
@@ -248,11 +250,11 @@ reverse-proxy deployment procedure.
 ## How TinyFugue feeds it
 
 On the VPS, TinyFugue's hook writes versioned session/world/context events to a
-private spool. `tinyscry-feed` drains them, keeps each world's normalized state
+private spool. `imp-feed` drains them, keeps each world's normalized state
 separate, and publishes only the selected exact context:
 
 ```bash
-uv run --directory integrations/tinyfugue tinyscry-feed
+uv run --directory integrations/tinyfugue imp-feed
 ```
 
 The same fixed hook starts a context-bound action helper for the foreground

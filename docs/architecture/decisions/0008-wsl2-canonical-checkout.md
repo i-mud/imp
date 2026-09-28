@@ -6,7 +6,7 @@ Date: 2026-09-15
 ## Context
 
 The primary development machine is Windows 11 with WSL2, and the canonical
-checkout lives at `~/src/tinyscry` inside WSL2. Tauri has no supported
+checkout lives at `~/src/imp` inside WSL2. Tauri has no supported
 Linux-to-Windows cross-compilation path: a Windows binary needs the MSVC
 toolchain and WebView2 on Windows, and a Linux binary needs `webkit2gtk` on
 Linux.
@@ -42,7 +42,7 @@ in WSL2 gets most of the iteration speed without any of that.
   this WSL2 environment as provisioned.
 - To build natively on Windows: install Rust (MSVC host) and Microsoft C++
   Build Tools, then run the Tauri commands from the disposable Windows-native
-  mirror at `C:\src\tinyscry-native`. Refresh it from the canonical WSL2 tree
+  mirror at `C:\src\imp-native`. Refresh it from the canonical WSL2 tree
   with `npm run native:sync` or `npm run native:watch`; building across
   `\\wsl$` is slow.
 - To build on Linux: `webkit2gtk-4.1`, `libgtk-3`, `librsvg2` and

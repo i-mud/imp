@@ -1,4 +1,4 @@
-"""Canonical codec for TinyScry protocol version 2."""
+"""Canonical codec for Imp protocol version 2."""
 
 from __future__ import annotations
 

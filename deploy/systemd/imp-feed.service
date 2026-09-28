@@ -1,0 +1,15 @@
+[Unit]
+Description=Imp live GMCP feed (spool drain, normalize, publish)
+After=network.target imp-relay.service
+Wants=imp-relay.service
+
+[Service]
+Type=simple
+ExecStart=%h/imp/integrations/tinyfugue/.venv/bin/imp-feed
+ExecStopPost=/usr/bin/rm -f %h/.local/state/imp/spool
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

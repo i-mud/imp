@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import TextIO, cast
 
 import pytest
-from tinyscry_relay.action import ConsumerRegistration
-from tinyscry_relay.protocol import (
+from imp_relay.action import ConsumerRegistration
+from imp_relay.protocol import (
     GameState,
     StateContext,
     encode_action,
@@ -24,15 +24,15 @@ from tinyscry_relay.protocol import (
     encode_dispatch,
     encode_select,
 )
-from tinyscry_relay.server import RelayServer
+from imp_relay.server import RelayServer
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-import tinyscry_tf.action_consumer as action_consumer
-from tinyscry_tf.action_consumer import encode_tf_dispatch, encode_tf_token, run_action_consumer
-from tinyscry_tf.context import read_context_marker, write_context_marker
-from tinyscry_tf.publisher import RelayPublisher
+import imp_tf.action_consumer as action_consumer
+from imp_tf.action_consumer import encode_tf_dispatch, encode_tf_token, run_action_consumer
+from imp_tf.context import read_context_marker, write_context_marker
+from imp_tf.publisher import RelayPublisher
 
 CONTEXT = StateContext("session1", 2, 3)
 OTHER_CONTEXT = StateContext("session1", 3, 3)
@@ -119,9 +119,9 @@ def test_context_marker_is_private_and_rejects_partial_or_extra_content(tmp_path
     assert stat.S_IMODE(marker.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(marker.stat().st_mode) == 0o600
 
-    marker.write_bytes(b"TSCTX 2 session1 2 3")
+    marker.write_bytes(b"IMPCTX 2 session1 2 3")
     assert read_context_marker(marker) is None
-    marker.write_bytes(b"TSCTX 2 session1 2 3\nextra")
+    marker.write_bytes(b"IMPCTX 2 session1 2 3\nextra")
     assert read_context_marker(marker) is None
     write_context_marker(marker, None)
     assert not marker.exists()
@@ -216,7 +216,7 @@ def test_completed_real_pipe_delivery_remains_forwarded(tmp_path: Path) -> None:
                     cast(TextIO, output),
                 )
 
-            assert os.read(read_fd, 4096) == b"/tinyscry_send session1 2 3 Alpha east\n"
+            assert os.read(read_fd, 4096) == b"/imp_send session1 2 3 Alpha east\n"
             assert result is not None
             assert result["status"] == "forwarded"
             assert len(output.writes) == 1
@@ -251,10 +251,10 @@ def test_shell_and_idle_helper_exit_when_parent_closes_pipe(tmp_path: Path) -> N
                         "/bin/sh",
                         "-c",
                         '{ "$@"; }',
-                        "tinyscry-action-shell",
+                        "imp-action-shell",
                         sys.executable,
                         "-m",
-                        "tinyscry_tf.action_consumer",
+                        "imp_tf.action_consumer",
                         "--relay-url",
                         f"ws://127.0.0.1:{port}/action-consumer",
                         "--session",
@@ -325,7 +325,7 @@ def test_helper_forwards_one_fixed_macro_line_then_exits(tmp_path: Path) -> None
             "id": "dispatch1",
             "status": "forwarded",
         }
-        assert output.getvalue() == ("/tinyscry_send session1 2 3 Alpha say_32_hello_59__32__47_quit\n")
+        assert output.getvalue() == ("/imp_send session1 2 3 Alpha say_32_hello_59__32__47_quit\n")
 
     asyncio.run(scenario())
 
@@ -419,8 +419,8 @@ def test_replacement_consumer_recovers_from_registration_overlap(
                     await asyncio.gather(helper, return_exceptions=True)
 
         assert output.getvalue().splitlines() == [
-            "/tinyscry_send session1 2 3 Alpha west",
-            "/tinyscry_send session1 2 3 Alpha east",
+            "/imp_send session1 2 3 Alpha west",
+            "/imp_send session1 2 3 Alpha east",
         ]
 
     asyncio.run(scenario())
@@ -452,60 +452,60 @@ def test_helper_rechecks_context_immediately_before_delivery(tmp_path: Path) -> 
 
 def test_tf_dispatch_contains_fixed_context_and_encoded_data() -> None:
     assert encode_tf_dispatch(CONTEXT, "Alpha_32_World", "say hi; /quit") == (
-        "/tinyscry_send session1 2 3 Alpha_32_World say_32_hi_59__32__47_quit\n"
+        "/imp_send session1 2 3 Alpha_32_World say_32_hi_59__32__47_quit\n"
     )
 
 
 def test_session_initialization_evaluates_shell_safe_token_once() -> None:
-    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
     initialization = (
-        '/if (!isvar("tinyscry_session")) \\\n'
-        '    /test tinyscry_session := textencode(strcat(getpid(), ".", time()))%; \\\n'
+        '/if (!isvar("imp_session")) \\\n'
+        '    /test imp_session := textencode(strcat(getpid(), ".", time()))%; \\\n'
         "/endif"
     )
 
     assert initialization in source
 
 
-def test_tinyscry_send_fence_keeps_dynamic_lookup_inside_eval_scope() -> None:
+def test_imp_send_fence_keeps_dynamic_lookup_inside_eval_scope() -> None:
     """TinyFugue destroys /eval locals, so the dynamic lookup must remain in its guard."""
-    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
-    macro = source.split("/def -i tinyscry_send = \\\n", 1)[1].split("\n\n/def", 1)[0]
+    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
+    macro = source.split("/def -i imp_send = \\\n", 1)[1].split("\n\n/def", 1)[0]
     guard = (
         "/eval \\\n"
-        "        /if (_expected_session =~ tinyscry_session & \\\n"
-        "            _expected_foreground = tinyscry_foreground & \\\n"
-        "            _expected_connection =~ %%{tinyscry_connection_%{_pinned_world}} & \\\n"
-        "            _expected_world =~ tinyscry_selected_world & \\\n"
+        "        /if (_expected_session =~ imp_session & \\\n"
+        "            _expected_foreground = imp_foreground & \\\n"
+        "            _expected_connection =~ %%{imp_connection_%{_pinned_world}} & \\\n"
+        "            _expected_world =~ imp_selected_world & \\\n"
         "            _expected_world =~ _pinned_world) \\"
     )
 
     assert guard in macro
     assert "_current_connection" not in macro
     send = macro.index("/test send(textdecode({5}))%%;")
-    replacement = macro.index("/tinyscry_start_consumer %{_expected_connection} %{_expected_world}%%;")
+    replacement = macro.index("/imp_start_consumer %{_expected_connection} %{_expected_world}%%;")
     endif = macro.index("/endif", macro.index(guard))
     assert macro.index(guard) < send < replacement < endif
-    assert macro.count("/tinyscry_start_consumer") == 1
+    assert macro.count("/imp_start_consumer") == 1
 
 
 def test_tf_eval_locals_never_escape_single_command_eval() -> None:
-    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
 
     assert "/eval /let " not in source
-    assert "/eval /set tinyscry_connection_%{_world}=%{tinyscry_connection_serial}%;" in source
+    assert "/eval /set imp_connection_%{_world}=%{imp_connection_serial}%;" in source
     assert "/set _connection" not in source
-    assert source.count("tinyscry_connection_serial :=") == 1
+    assert source.count("imp_connection_serial :=") == 1
 
 
 def test_select_world_deselects_until_known_generation_is_connected() -> None:
-    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
-    macro = source.split("/def -i tinyscry_select_world = \\\n", 1)[1].split("\n\n/def", 1)[0]
-    lookup = "/let _connection=%%{tinyscry_connection_%{_world}}%%;"
+    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
+    macro = source.split("/def -i imp_select_world = \\\n", 1)[1].split("\n\n/def", 1)[0]
+    lookup = "/let _connection=%%{imp_connection_%{_world}}%%;"
 
-    changed = macro.index("/if (_world !~ tinyscry_selected_world)")
-    increment = macro.index("tinyscry_foreground := tinyscry_foreground + 1", changed)
-    selected = macro.index("/set tinyscry_selected_world=%{_world}", increment)
+    changed = macro.index("/if (_world !~ imp_selected_world)")
+    increment = macro.index("imp_foreground := imp_foreground + 1", changed)
+    selected = macro.index("/set imp_selected_world=%{_world}", increment)
     changed_end = macro.index("/endif%;", selected)
 
     scope = macro.index("/eval \\", changed_end)
@@ -515,47 +515,47 @@ def test_select_world_deselects_until_known_generation_is_connected() -> None:
         first_lookup,
     )
     deselect = macro.index(
-        'strcat("TS2 S ", tinyscry_session, " ", tinyscry_foreground, " 0 - ", time()))%%;',
+        'strcat("IMP2 S ", imp_session, " ", imp_foreground, " 0 - ", time()))%%;',
         unavailable,
     )
     alternative = macro.index("/else", deselect)
-    event = macro.index('strcat("TS2 S "', alternative)
-    consumer = macro.index("/tinyscry_start_consumer %%{_connection} %{_world}%%;", event)
+    event = macro.index('strcat("IMP2 S "', alternative)
+    consumer = macro.index("/imp_start_consumer %%{_connection} %{_world}%%;", event)
     missing_end = macro.index("/endif", consumer)
 
     assert changed < increment < selected < changed_end < scope
     assert scope < first_lookup < unavailable < deselect < alternative
     assert alternative < event < consumer < missing_end
     assert macro.count(lookup) == 1
-    assert "/tinyscry_reset_world" not in macro
-    assert macro.count("/tinyscry_start_consumer") == 1
+    assert "/imp_reset_world" not in macro
+    assert macro.count("/imp_start_consumer") == 1
     assert "/let _world=$[textencode({1})]" in macro
     assert '_connection, " ", _world' in macro[event:consumer]
 
 
 def test_connect_owns_connection_generation_not_gmcp_login() -> None:
-    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
 
-    assert '/def -Fp2 -ag -h"CONNECT" tinyscry_capture_connect = /tinyscry_reset_world %{1}' in source
-    assert '/def -Fp2 -ag -h"GMCP_LOGIN" tinyscry_capture_gmcp_login' not in source
+    assert '/def -Fp2 -ag -h"CONNECT" imp_capture_connect = /imp_reset_world %{1}' in source
+    assert '/def -Fp2 -ag -h"GMCP_LOGIN" imp_capture_gmcp_login' not in source
 
 
 def test_gmcp_preserves_known_generation_and_initializes_only_missing() -> None:
-    source = (Path(__file__).parents[1] / "tinyscry.tf").read_text(encoding="utf-8")
-    macro = source.split('/def -Fp2 -ag -h"GMCP" tinyscry_capture_gmcp = \\\n', 1)[1]
-    lookup = "/let _connection=%%{tinyscry_connection_%{_world}}%%;"
+    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
+    macro = source.split('/def -Fp2 -ag -h"GMCP" imp_capture_gmcp = \\\n', 1)[1]
+    lookup = "/let _connection=%%{imp_connection_%{_world}}%%;"
 
     scope = macro.index("/eval \\")
     first_lookup = macro.index(lookup, scope)
     missing = macro.index("/if (!strlen(_connection))", first_lookup)
-    reset = macro.index("/tinyscry_reset_world %{_world_name}%%;", missing)
+    reset = macro.index("/imp_reset_world %{_world_name}%%;", missing)
     second_lookup = macro.index(lookup, first_lookup + len(lookup))
     missing_end = macro.index("/endif%%;", second_lookup)
-    event = macro.index('strcat("TS2 G "', missing_end)
+    event = macro.index('strcat("IMP2 G "', missing_end)
 
     assert scope < first_lookup < missing < reset < second_lookup < missing_end < event
     assert macro.count(lookup) == 2
-    assert macro.count("/tinyscry_reset_world") == 1
+    assert macro.count("/imp_reset_world") == 1
     assert "/let _world=$[textencode(_world_name)]" in macro
     assert '_connection, " ", _world' in macro[event:]
 
@@ -669,7 +669,7 @@ def test_real_pipe_loss_during_dispatch_reports_unknown_without_retry(
                 "detail": "consumer disconnected after dispatch",
             }
             await asyncio.wait_for(helper, timeout=0.5)
-            assert output.writes == ["/tinyscry_send session1 2 3 Alpha north\n"]
+            assert output.writes == ["/imp_send session1 2 3 Alpha north\n"]
         finally:
             if read_fd >= 0:
                 os.close(read_fd)
@@ -751,7 +751,7 @@ def test_idle_context_change_terminates_old_helper_without_replay(tmp_path: Path
             assert (await send_when_ready(OTHER_CONTEXT, "east"))["status"] == "forwarded"
             await asyncio.wait_for(helper_b, timeout=1)
             assert output_a.getvalue() == ""
-            assert output_b.getvalue() == "/tinyscry_send session1 3 3 Beta east\n"
+            assert output_b.getvalue() == "/imp_send session1 3 3 Beta east\n"
         finally:
             write_context_marker(marker, None)
             await publisher.close()
@@ -873,8 +873,8 @@ def test_real_pipe_consumer_recovers_after_relay_restart_then_stops_on_reader_lo
             assert output.writes == []
             assert (await send_when_ready("east"))["status"] == "forwarded"
             await asyncio.wait_for(consumer, timeout=1)
-            assert os.read(read_fd, 4096) == b"/tinyscry_send session1 2 3 Alpha east\n"
-            assert output.writes == ["/tinyscry_send session1 2 3 Alpha east\n"]
+            assert os.read(read_fd, 4096) == b"/imp_send session1 2 3 Alpha east\n"
+            assert output.writes == ["/imp_send session1 2 3 Alpha east\n"]
 
             replacement = asyncio.create_task(
                 run_action_consumer(
@@ -889,7 +889,7 @@ def test_real_pipe_consumer_recovers_after_relay_restart_then_stops_on_reader_lo
             os.close(read_fd)
             read_fd = -1
             await asyncio.wait_for(replacement, timeout=0.75)
-            assert output.writes == ["/tinyscry_send session1 2 3 Alpha east\n"]
+            assert output.writes == ["/imp_send session1 2 3 Alpha east\n"]
         finally:
             write_context_marker(marker, None)
             if read_fd >= 0:
