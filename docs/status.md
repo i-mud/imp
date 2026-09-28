@@ -124,8 +124,16 @@ infrastructure and remain separate from CI:
 - A tag-driven release workflow is implemented with a read-only Windows build
   job and a separate tag-only publication job. Manual dispatch produces the
   same NSIS build shape without publishing a GitHub Release.
-- Final release acceptance is still pending on the completed, merged Slice 13
-  tree. No `v0.1.0` release publication is claimed yet.
+- Final release acceptance passed on merged commit
+  `de435f05b5dc92b29f1fee53c68616c6cb2b842f`. The corrected Windows candidate
+  passed clean install, version reporting, Managed SSH, live state, an approved
+  action, managed-child cleanup, uninstall, and reinstall with WSL shut down.
+- Annotated tag `v0.1.0` points to that exact accepted commit. Release workflow
+  run `36410287527` passed version and tag verification, native tests, the
+  Windows x64 NSIS build, and tag-only publication.
+- GitHub published `TinyScry v0.1.0` as a prerelease with
+  `TinyScry_0.1.0_x64-setup.exe`. The published asset reports SHA-256 digest
+  `05ed219a57951f96e8e8de584fd1a3256840af2d1863766e0200c7e104268b79`.
 
 ### Slice 12 native connection settings evidence
 

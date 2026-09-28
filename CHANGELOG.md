@@ -8,9 +8,9 @@ public release versions.
 
 ## [Unreleased]
 
-Release-readiness work for the first distributable TinyScry build.
+No unreleased changes recorded yet.
 
-## [0.1.0] - Pending
+## [0.1.0] - 2026-09-28
 
 First alpha release.
 
