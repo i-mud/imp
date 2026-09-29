@@ -51,6 +51,36 @@ Important references include:
 Source code and tests are authoritative if documentation and implementation
 ever disagree.
 
+## Commit messages
+
+Imp uses Conventional Commits because release versions are derived from commit
+history.
+
+Use a release-relevant type when behavior changes:
+
+- `feat:` for a new backwards-compatible capability; this produces a minor
+  release;
+- `fix:` for a backwards-compatible bug fix; this produces a patch release; and
+- a `!` after the type/scope or a `BREAKING CHANGE:` footer for an incompatible
+  change; this produces a major release.
+
+Types such as `docs:`, `test:`, `chore:`, `ci:`, and `build:` do not normally
+produce a release by themselves.
+
+Examples:
+
+```text
+feat: add Mudlet state adapter
+fix: reject stale action context
+docs: explain direct WSS setup
+feat(protocol)!: change normalized target schema
+```
+
+Pull-request CI validates both the pull-request title and the commits introduced
+by the pull request. The pull-request title must also use Conventional Commit
+syntax and should reflect the highest release impact of the change. This keeps
+release calculation correct even when a pull request is squash-merged.
+
 ## Testing
 
 The main platform-independent validation gate is:

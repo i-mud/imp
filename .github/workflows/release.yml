@@ -169,7 +169,7 @@ jobs:
           output.write_text(match.group("notes").strip() + "\n")
           PY
 
-      - name: Publish GitHub prerelease
+      - name: Publish GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -201,7 +201,5 @@ jobs:
             "${server_archives[0]}" \
             "${server_checksums[0]}" \
             --verify-tag \
-            --prerelease \
-            --latest=false \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             --title "Imp $GITHUB_REF_NAME"

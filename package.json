@@ -32,16 +32,25 @@
     "tf:lint": "uv run --directory integrations/tinyfugue ruff check . && uv run --directory integrations/tinyfugue ruff format --check . && uv run --directory integrations/tinyfugue mypy src tests",
     "test:e2e": "uv run --project services/relay python tests/e2e/relay_roundtrip.py",
     "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build",
-    "release:check-version": "node scripts/check-version.mjs"
+    "release:check-version": "node scripts/check-version.mjs",
+    "release:next": "semantic-release --dry-run --no-ci",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:tag": "node scripts/tag-release.mjs",
+    "commitlint": "commitlint --verbose"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.2.3",
+    "@commitlint/config-conventional": "21.2.3",
     "@eslint/js": "^10.0.1",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/release-notes-generator": "14.1.1",
     "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-svelte": "^3.23.0",
     "globals": "^17.12.0",
     "prettier": "^3.9.6",
     "prettier-plugin-svelte": "^3.4.0",
+    "semantic-release": "25.0.9",
     "svelte": "^5.57.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.0"
