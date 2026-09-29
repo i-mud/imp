@@ -1,0 +1,86 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Imp.
+title: '[Bug]: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include passwords, private keys,
+        pairing tokens, or other secrets.
+
+        For security vulnerabilities, use the private reporting instructions in SECURITY.md instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: Imp version
+      description: Release version or commit SHA.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Desktop platform
+      placeholder: Windows 11 x64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Connection mode
+      options:
+        - Managed SSH
+        - External SSH
+        - Direct WSS
+        - Not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: integration
+    attributes:
+      label: MUD client / MUD
+      description: Include TinyFugue build and MUD when relevant.
+      placeholder: TinyFugue 5.2.x / AVATAR
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest reliable sequence that triggers the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or diagnostics
+      description: Remove credentials, pairing tokens, private keys, and unrelated personal information.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed secrets and credentials from the report.
+          required: true

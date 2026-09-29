@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose an improvement or new capability for Imp.
+title: '[Feature]: '
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem or limitation are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the behavior you would like Imp to provide.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional alternatives, workarounds, or related approaches.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include relevant MUD client, transport, platform, or workflow details.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
