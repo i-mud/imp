@@ -48,9 +48,10 @@ changing, then the source it cites.
   `feat:` is a minor increment, and an explicit breaking change is a major
   increment. While Imp is `0.x`, a normal `feat:` advances the minor version
   (for example `0.1.0` -> `0.2.0`); it does not imply `1.0.0`.
-- Never invent or manually choose a release version. Use
-  `npm run release:next`, and follow `docs/releases.md` for preparation and
-  tagging. Final `vX.Y.Z` tags must be SSH-signed annotated tags.
+- Never invent or manually choose a release version. Release publication is
+  automatic after an eligible change reaches `main`; `npm run release:next` is
+  only an optional preview. Follow `docs/releases.md` for release behavior and
+  recovery. Do not create release tags manually.
 
 ## Memory vs. documentation
 
