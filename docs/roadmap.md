@@ -1,6 +1,7 @@
 # Roadmap
 
-Tracks the active implementation slice and work queued behind it.
+Tracks completed implementation slices, the current selection point, and
+provisional work queued behind it.
 
 - What exists today, and the evidence behind it, lives in
   [`status.md`](status.md). If a claim appears in both files, `status.md` wins.
@@ -11,7 +12,266 @@ Tracks the active implementation slice and work queued behind it.
 No dates. Planned work describes intent rather than behavior; implemented
 claims belong in `status.md` and the relevant architecture documents.
 
-## Slice 10 - Configurable notification triggers
+## Progress
+
+| Work                                                  | Status      | Historical marker                     |
+| ----------------------------------------------------- | ----------- | ------------------------------------- |
+| Slice 1 - Bootstrap baseline                          | ✅ Complete | `bootstrap-baseline`                  |
+| Slice 2 - Real GMCP end to end                        | ✅ Complete | `real-gmcp-e2e`                       |
+| Post-Slice 2 - Managed runtime implementation         | ✅ Complete | `managed-runtime`                     |
+| Slice 3 - CI baseline                                 | ✅ Complete | `ci-baseline`                         |
+| Slice 4 - Managed runtime verification                | ✅ Complete | `managed-runtime-e2e`                 |
+| Slice 5 - HUD UI refinement                           | ✅ Complete | `hud-ui-refinement`                   |
+| Slice 6 - Alerts and window polish                    | ✅ Complete | `alerts-window-polish`                |
+| Slice 7 - Trusted outbound actions                    | ✅ Complete | `trusted-outbound-actions`            |
+| Slice 8 - Configurable action UI                      | ✅ Complete | `configurable-action-ui`              |
+| Slice 9 - Managed tunnel takeover                     | ✅ Complete | `managed-tunnel-takeover`             |
+| Post-Slice 9 - Desktop polish and runtime hardening   | ✅ Complete | `desktop-polish`; later work untagged |
+| Slice 10 - Configurable notification triggers         | ✅ Complete | `configurable-notification-triggers`  |
+| Slice 11 - Authenticated WSS transport                | ✅ Complete | `authenticated-wss-transport`         |
+| Slice 12 - Native connection settings                 | ✅ Complete | `native-connection-settings`          |
+| Slice 13 - First release readiness                    | ✅ Complete | `first-release-readiness`             |
+| Slice 14 - Imp rename                                 | ✅ Complete | `imp-rename`                          |
+| Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`            |
+| Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
+
+Slice numbers and milestone tags are development-history markers. They have no
+relationship to release versions. Release versions are derived independently
+from Conventional Commits as documented in [`releases.md`](releases.md).
+
+## ✅ Slice 1 - Bootstrap baseline
+
+Milestone tag: `bootstrap-baseline`. Complete.
+
+Slice 1 established the first complete Imp architecture, then still named
+TinyScry, around a deliberately narrow protocol and loopback-only relay.
+
+Delivered:
+
+- protocol version 1 with bounded types, fail-closed decoding, and a shared
+  fixture corpus;
+- the loopback relay with `/state`, `/ingest`, `/healthz`, retained state, and
+  producer freshness tracking;
+- the first Svelte HUD with mock and relay state sources;
+- the TinyFugue-side adapter, normalizer, publisher, bridge, replay tooling, and
+  deterministic fixtures;
+- stale/down/reconnecting presentation so retained values were never presented
+  as live; and
+- the first fixture-driven producer -> relay -> HUD end-to-end path.
+
+The native Tauri shell existed and compiled, but real GMCP capture and native
+runtime behavior were intentionally still unverified. Those became the next
+slice rather than being guessed from fixtures.
+
+## ✅ Slice 2 - Real GMCP end to end
+
+Milestone tag: `real-gmcp-e2e`. Complete.
+
+Slice 2 replaced fixture assumptions with observed MUD behavior and proved the
+desktop path on native Windows.
+
+Delivered and verified:
+
+- real TinyFugue GMCP capture from the target MUD;
+- checked conversion into a redacted reproducible fixture;
+- observed-only normalization for the GMCP packages actually seen in live play;
+- safe rejection of malformed inventory material rather than speculative
+  parsing;
+- live identity, vitals, target acquisition, target damage, and target clearing;
+- the manual SSH-forward path from the VPS relay to the Windows desktop; and
+- native Tauri launch, always-on-top behavior, dragging, resizing,
+  transparency, WebView updates, and transport lifecycle presentation.
+
+This slice also fixed the bridge event-loop starvation defect that prevented a
+producer from recovering after relay restart.
+
+## ✅ Post-Slice 2 - Managed runtime implementation
+
+Milestone tag: `managed-runtime`. Complete.
+
+After Slice 2 proved the real GMCP path, Imp gained the production-shaped
+runtime needed to stop relying on a manually maintained SSH forward.
+
+This unnumbered implementation milestone added:
+
+- managed SSH mode in the Tauri backend using the system OpenSSH executable
+  directly by argv;
+- explicit child ownership, supervision, bounded retry, and clean shutdown;
+- External SSH remaining available as a supported mode;
+- the private TinyFugue spool and feed runtime;
+- per-user systemd units for the VPS relay and feed; and
+- deployment and runtime documentation for the new process boundaries.
+
+The implementation deliberately stopped short of claiming production runtime
+acceptance. Live managed-child recovery, user-systemd behavior, reboot safety,
+and post-reboot identity bootstrap were left for Slice 4.
+
+## ✅ Slice 3 - CI baseline
+
+Milestone tag: `ci-baseline`. Complete.
+
+Slice 3 established the deterministic GitHub Actions baseline around the
+repository's canonical `npm run check` gate.
+
+CI verifies the protocol, frontend, relay, TinyFugue integration, fixtures, and
+loopback end-to-end behavior without pretending to replace evidence that needs
+a native platform, real VPS processes, interactive TinyFugue, or a real MUD
+session.
+
+Native Rust checks and operator-controlled live verification therefore remained
+separate responsibilities. The next numbered slice returned to the managed
+runtime and verified that production-shaped path end to end.
+
+## ✅ Slice 4 - Managed runtime verification
+
+Milestone tag: `managed-runtime-e2e`. Complete.
+
+Slice 4 turned the managed runtime from an implemented design into a
+production-shaped, live-verified path and fixed the defects that acceptance
+exposed.
+
+The work included:
+
+- making native Tauri builds default to the real relay source rather than the
+  browser mock source;
+- live managed-SSH supervision and recovery on Windows;
+- VPS user-systemd lifecycle and reboot verification;
+- private runtime spool/checkpoint behavior without stale-state replay;
+- TinyFugue startup integration and verified GMCP identity bootstrap;
+- requiring the operator TinyFugue build to provide the `GMCP_LOGIN`
+  capability used by the login flow;
+- hardening target lifecycle across combat transitions and feed restarts; and
+- changing the observational TinyFugue GMCP capture hook to priority 2 with
+  fall-through so it runs ahead of ordinary priority-1 handlers without
+  consuming their event.
+
+The live work also exposed two issues that remain explicitly deferred today:
+very-fast character/world transitions can still lose authoritative identity,
+and some raw ANSI/control-byte GMCP material is still rejected rather than
+silently sanitized.
+
+## ✅ Slice 5 - HUD UI refinement
+
+Milestone tag: `hud-ui-refinement`. Complete.
+
+Slice 5 turned the initial functional HUD into the compact/expanded native
+desktop surface used by later features. It refined layout, sizing, interaction,
+and native-window behavior while keeping freshness and retained-state semantics
+owned by the existing state model rather than presentation code.
+
+The resulting HUD was exercised in browser/mock development and on the native
+Windows Tauri runtime before alerts and outbound controls were layered onto it.
+
+## ✅ Slice 6 - Alerts and window polish
+
+Milestone tag: `alerts-window-polish`. Complete.
+
+Slice 6 added the first desktop-local alert behavior and closed several native
+window rough edges.
+
+Delivered:
+
+- low-health alert evaluation;
+- independently configurable bundled sound and native-notification effects;
+- validated persisted alert preferences and Settings presentation;
+- native sizing refinements; and
+- a non-maximizable HUD so an accidental maximize could no longer create a
+  transparent full-screen input surface.
+
+These alerts remained presentation-only behavior. They did not cross the
+outbound command boundary.
+
+## ✅ Slice 7 - Trusted outbound actions
+
+Milestone tag: `trusted-outbound-actions`. Complete.
+
+Slice 7 introduced outbound commands as a protocol-level capability rather than
+letting UI code write arbitrary material toward TinyFugue.
+
+It was a protocol-v2 cutover adding:
+
+- exact `(session, foreground, connection)` context on selected state;
+- per-world normalization and session-aware ephemeral checkpoints;
+- endpoint-specific relay Origin policy;
+- a one-consumer, one-in-flight action broker with no retry or replay;
+- a strict private context marker and fixed TinyFugue macro boundary; and
+- a separate desktop `ActionSink` abstraction with a network-free mock.
+
+The connectionless acceptance procedure verified generation fences, helper
+replacement, context pinning, reader loss, relay recovery, and no replay.
+`forwarded` deliberately means only that the fixed TinyFugue bridge accepted
+and flushed the command; it does not claim MUD execution.
+
+## ✅ Slice 8 - Configurable action UI
+
+Milestone tag: `configurable-action-ui`. Complete.
+
+Slice 8 put the trusted action path behind user-defined desktop controls.
+
+Delivered:
+
+- validated, ordered persisted action definitions;
+- create/edit/delete management in the desktop UI;
+- compact and expanded action surfaces;
+- bounded definition counts and preserved command text;
+- exact-context `ActionSink` invocation; and
+- result wording that does not overstate `forwarded`.
+
+Live acceptance sent an approved `look` through the real desktop -> relay ->
+TinyFugue -> MUD path exactly once. Removing the matching consumer rejected the
+action without execution, restoring it replayed nothing, and a new action then
+executed once.
+
+## ✅ Slice 9 - Managed tunnel takeover
+
+Milestone tag: `managed-tunnel-takeover`. Complete.
+
+Slice 9 made managed SSH coexist correctly with an already-running relay
+forward.
+
+Managed mode now:
+
+- recognizes and adopts an existing healthy Imp relay endpoint;
+- monitors that endpoint without owning or signalling it;
+- waits when the port belongs to something else;
+- takes over by spawning its own supervised SSH child once an adopted endpoint
+  disappears and the port becomes free; and
+- preserves the established shutdown and ownership rules.
+
+Windows-native acceptance started with a manual SSH forward, observed Imp adopt
+it without conflict, terminated that forward, and verified that the same
+running desktop took over the tunnel without an application restart.
+
+## ✅ Post-Slice 9 - Desktop polish and runtime hardening
+
+The `desktop-polish` milestone tag marks the initial polish pass. Later
+lifecycle and tray hardening in this unnumbered interval was not separately
+tagged.
+
+A set of focused unnumbered improvements followed Slice 9 before notification
+work began.
+
+The initial polish pass added Dark, Light, and System themes; Lucide icon
+controls; improved compact and expanded presentation; runtime action-strip
+measurement; tighter Settings sizing; and keyboard, focus, and accessibility
+cleanup.
+
+Follow-up live work then hardened behavior outside that visual milestone:
+
+- TinyFugue connection generations became `CONNECT`-owned rather than being
+  reset again by `GMCP_LOGIN`;
+- character/world switching stopped starting duplicate action consumers or
+  temporarily selecting stale connection generations;
+- the native HUD reinforced its always-on-top lifecycle and disabled
+  inapplicable Windows minimize/system-menu behavior;
+- a tray icon added temporary alert muting and clean quit; and
+- the desktop began restoring its previous screen position while preserving
+  frontend-owned dynamic sizing.
+
+Freshness remained represented by the status model rather than by fading or
+otherwise making retained HUD data ambiguous.
+
+## ✅ Slice 10 - Configurable notification triggers
 
 Slug: `configurable-notification-triggers`. Complete.
 
@@ -41,7 +301,7 @@ Implemented behavior and final verification evidence live in
 [`status.md`](status.md) and
 [`architecture/objects/desktop-alerts.md`](architecture/objects/desktop-alerts.md).
 
-## Slice 11 - Authenticated WSS transport
+## ✅ Slice 11 - Authenticated WSS transport
 
 Slug: `authenticated-wss-transport`. Complete.
 
@@ -75,7 +335,7 @@ itself: automated VPS installation, reverse-proxy/certificate setup,
 pairing-token generation/rotation UX, and general TinyFugue installation
 workflow are candidate distribution work rather than unfinished Slice 11 scope.
 
-## Slice 12 - Native connection settings
+## ✅ Slice 12 - Native connection settings
 
 Slug: `native-connection-settings`. Complete.
 
@@ -113,106 +373,35 @@ VPS installation, reverse-proxy/certificate provisioning, server-side
 pairing-token generation/rotation, live transport hot-switching, multi-user
 credentials, and first-run deployment automation remain separate future work.
 
-## Slice 13 - First release readiness
+## ✅ Slice 13 - First release readiness
 
 Slug: `first-release-readiness`. Complete.
 
-Slice 13 prepares Imp's first intentionally distributable release:
-`v0.1.0`, an alpha release with Windows x64 as the supported desktop binary
-target.
+Slice 13 established the release-engineering boundary needed for Imp's first
+distributable Windows build, before the subsequent product rename.
 
-The slice turns the existing development build into a reproducible release
-without changing Imp's protocol, transport, action, alert, or MUD
-integration semantics.
+Delivered:
 
-### Scope
+- the repository's MIT license and changelog;
+- a single checked release-version contract across version-bearing manifests;
+- native application version reporting owned by Tauri;
+- reproducible Windows x64 NSIS packaging;
+- the initial tag-driven GitHub release workflow;
+- installation documentation for released Windows artifacts; and
+- clean-install Windows acceptance covering live state, an approved outbound
+  action, uninstall, reinstall, and managed-SSH lifecycle behavior.
 
-- Add the repository's declared MIT license as a tracked `LICENSE` file.
-- Add `CHANGELOG.md` and establish the release-history format beginning with
-  `0.1.0`.
-- Establish one release-version contract and deterministic checks that the
-  version-bearing manifests remain aligned.
-- Surface the running native application's version from Tauri rather than from
-  a separately hard-coded renderer string.
-- Add a reproducible Windows x64 native release build producing an NSIS
-  installer.
-- Add a tag-driven GitHub Actions release workflow for `v*` tags.
-- Require the release tag version to match the application version before
-  publishing artifacts.
-- Document installation from the released Windows artifact rather than
-  requiring a source checkout for the desktop application.
-- Document the `v0.1.0` support boundary: alpha quality, Windows x64 release
-  artifact, and unsigned Windows installer.
-- Perform clean-install Windows acceptance using the produced release artifact.
+Release acceptance also exposed Windows-specific managed-SSH console and
+orphaned-child defects, which were fixed and reverified.
 
-The existing source-development paths remain supported for contributors.
-Linux and macOS may continue to build from source, but Slice 13 does not claim
-release support for platforms without native release acceptance.
+The original TinyScry `v0.1.0` tag and prerelease created during this work were
+later withdrawn during Slice 14. The final Imp `v0.1.0` release was published
+only after the rename and the packaged server work in Slice 15.
 
-### Current state
+The current release/versioning contract is no longer owned by this historical
+slice; it lives in [`releases.md`](releases.md).
 
-Slice 13 is complete:
-
-- the MIT license and changelog are tracked;
-- the `0.1.0` version contract and tag/version check are implemented;
-- the native application reports its Tauri-owned version;
-- Windows x64 NSIS builds run through the release workflow;
-- end-user Windows installation and connection setup are documented;
-- release acceptance passed clean install, live state, an approved outbound
-  action, managed-SSH cleanup, uninstall, and reinstall independently of the
-  WSL/native development mirror;
-- the managed-SSH console-window and orphaned-child defects found during
-  release acceptance were fixed and reverified before tagging; and
-- the original `v0.1.0` tag and prerelease were subsequently withdrawn during
-  the Imp rename so the final first Imp release can include the renamed product
-  identity and the packaged server installation added in Slice 15.
-
-### Release contract
-
-The final `v0.1.0` tag is created only after the release candidate has passed
-the normal repository checks, Windows release acceptance, and the packaged
-server-install acceptance added in Slice 15.
-
-Clean-install acceptance must begin from the produced installer rather than an
-existing development tree and prove:
-
-1. the installer completes on Windows x64 and Imp launches successfully;
-2. the installed application reports version `0.1.0`;
-3. native Connection settings can configure a supported transport without
-   editing application configuration by hand;
-4. after restart, live state reaches the installed HUD;
-5. one operator-approved outbound action traverses the installed application;
-6. uninstall/reinstall does not depend on the WSL/native development mirror;
-   and
-7. the final release artifact is the same build shape produced by the release
-   workflow.
-
-Slice 15 adds a second release artifact to that contract. The Linux x86_64
-server archive must install without a repository checkout or development
-toolchain, survive an idempotent reinstall, reject tampered bundle contents,
-roll back a failed activation, run relay/feed from stable installed paths, and
-work with the released desktop through Managed SSH.
-
-Only after both desktop and server acceptance pass is the final `v0.1.0` tag
-published as Imp's first release.
-
-### Out of scope
-
-- automatic application updates;
-- Windows code-signing certificate procurement;
-- Linux or macOS release binaries;
-- Microsoft Store or other application-store packaging;
-- automatic VPS, reverse-proxy, or certificate provisioning;
-- automated pairing-token generation or rotation;
-- live transport hot-switching;
-- multi-user credentials;
-- repository visibility changes; and
-- MUD/client generalization work.
-
-Those are independent follow-up decisions and should not expand the first
-release boundary.
-
-## Slice 14 - Imp rename
+## ✅ Slice 14 - Imp rename
 
 Slug: `imp-rename`. Complete.
 
@@ -227,9 +416,9 @@ and the native application identifier is `dev.imud.imp`.
 
 The historical TinyScry `v0.1.0` prerelease/tag was removed rather than
 retained as Imp's first release. The descriptive `imp-rename` milestone tag
-records Slice 14 independently of the eventual semantic release.
+records Slice 14 independently of the final Imp `v0.1.0` release.
 
-## Slice 15 - Server installation / bootstrap
+## ✅ Slice 15 - Server installation / bootstrap
 
 Slug: `server-install-bootstrap`. Complete.
 
@@ -273,56 +462,183 @@ Direct WSS gateway provisioning, TLS/certificate automation, pairing-token
 generation/rotation UX, TinyFugue installation itself, and MUD/client
 generalization remain outside this slice.
 
+## ✅ Post-Slice 15 - Public release and release automation
+
+No numbered slice was assigned to the release/publication work that followed
+Slice 15. The `v0.1.0` tag marks the first public Imp release; the subsequent
+public-repository and release-automation work was untagged development history.
+
+Completed work includes:
+
+- publication of Imp `v0.1.0` as the first public alpha release;
+- Windows x64 NSIS and Linux x86_64 server release artifacts;
+- public-repository contribution and release documentation;
+- Conventional Commit validation for release semantics;
+- automatic semantic-release execution after successful CI on `main`;
+- CI-generated SSH-signed release metadata commits and annotated version tags;
+  and
+- reusable tag-based artifact verification and GitHub Release publication.
+
+The current release contract and recovery procedure live in
+[`releases.md`](releases.md).
+
+## Active work
+
+There is currently no active numbered slice. Slice 16 has not been selected.
+
 ## Candidate work
 
-Unordered, and deliberately without slice numbers.
+Unordered, deliberately without slice numbers, and provisional. Live evidence
+that exposes a more urgent defect can reorder this work.
 
-### MUD-agnostic normalization
+### Extensibility
 
-Still important, no longer next. The objective is to keep Imp's own
-normalized state while reducing AVATAR-specific assumptions in the integration
-and normalization layer, so that GMCP- and MUD-specific concepts stay upstream
-of the protocol, relay, and HUD boundary - ADR 0002 already requires that
-direction.
+#### Plugin / consumer interface
 
-This is incremental. No single slice promises universal MUD compatibility.
+Define a stable extension boundary so optional consumers can subscribe to Imp's
+normalized data without becoming part of the TinyFugue, relay, or HUD
+implementation.
 
-### Character identity reacquisition
+A database logger is the first concrete motivating consumer, but the boundary
+should be generic enough for history, analytics, and other integrations.
+
+The first design should prefer an isolated consumer interface over arbitrary
+code injection into the Tauri application. It should also determine whether the
+existing normalized protocol/relay boundary can be reused or extended rather
+than inventing a second competing event model.
+
+Design questions include:
+
+- what is exposed: snapshots, deltas, transient text, action results, or some
+  explicitly versioned combination;
+- whether consumers are subprocesses, localhost subscribers, library users, or
+  another isolated form;
+- ordering, reconnect, discovery, backpressure, and failure isolation;
+- configuration and lifecycle ownership;
+- versioning and compatibility; and
+- capability and trust boundaries.
+
+Consumers should be read-only by default. Any consumer capability that can
+issue outbound actions must be designed explicitly around the existing
+exact-context, operator-trust, no-retry, and no-replay guarantees rather than
+inheriting write access accidentally.
+
+### Reliability
+
+#### Character identity reacquisition
 
 Rapid AVATAR login and world transitions can produce later GMCP without another
 authoritative `Char.Status.character_name`, leaving Imp without character
-identity. Tracked as a current deferred defect in [`status.md`](status.md).
+identity. This remains a deferred defect in [`status.md`](status.md).
 
-Constraints for any fix: identity is never inferred from ambiguous group or
-player data, and Imp never invents an identity it was not told.
+Any fix must preserve the current invariant: identity is never inferred from
+ambiguous group/player data, and Imp never invents an identity it was not told.
 
-### Raw/ANSI GMCP robustness
+#### Raw/ANSI GMCP robustness
 
 Captured GMCP material containing raw ANSI or control bytes has produced
-`invalid_raw_json` rejections. The work is to find the correct
-capture/parsing/normalization boundary for that material. Sanitization
-semantics are deliberately unchosen: fail-closed rejection is the current
-behavior, and replacing it requires evidence about where the bytes are
-introduced.
+`invalid_raw_json` rejections.
 
-### TinyFugue runtime crash
+The work is to identify the correct capture/parsing/normalization boundary for
+that material before changing today's fail-closed behavior. Sanitization
+semantics should not be guessed.
 
-An upstream/runtime failure printing `Internal error: socket.c, line 3717`
-followed by `resize freed string`. Tracked separately from Imp feature
-sequencing; it is upstream investigation and possibly upstream PR work, not a
-Imp slice.
+#### TinyFugue runtime crash
 
-### Mudlet integration
+An upstream/runtime failure has printed:
 
-Adapter work for a second client, sensible only after the normalization
-boundary is generalized. The core HUD must not gain a direct Mudlet
-dependency; whatever appears is another producer upstream of the protocol.
+```text
+Internal error: socket.c, line 3717
+resize freed string
+```
 
-### Mobile feasibility
+This has been investigated separately and has an upstream fix/PR effort. It
+remains outside Imp feature sequencing rather than being presented as an Imp
+feature slice.
 
-Later platform work, and exploratory. The current desktop application is still
-a Tauri/native-WebView design, but Direct WSS removes the desktop's previous
-hard dependency on an OpenSSH-owned local forward. Mobile feasibility should
-therefore evaluate the remaining UI/native-runtime constraints and whether the
-authenticated gateway can serve as the transport boundary, rather than assuming
-the desktop SSH topology must be reproduced unchanged.
+### Interoperability
+
+#### MUD-agnostic normalization
+
+Reduce AVATAR-specific assumptions incrementally while keeping Imp's normalized
+protocol, relay, and HUD independent of MUD-specific concepts. This follows the
+boundary established by
+[ADR 0002](architecture/decisions/0002-imp-owned-protocol.md): GMCP-specific
+concepts stop at normalization.
+
+This is not a promise of universal MUD compatibility in one slice. New mappings
+should continue to be driven by observed protocol behavior rather than guessed
+schemas.
+
+#### Mudlet integration
+
+Add a second MUD-client adapter only after or together with enough
+normalization-boundary generalization.
+
+Mudlet should remain another producer upstream of Imp's owned protocol. The
+core HUD should not acquire a direct Mudlet dependency.
+
+### Distribution and onboarding
+
+#### Direct WSS provisioning and onboarding
+
+Reduce the operator-owned setup around the authenticated Direct WSS transport.
+
+Today the released server installer deliberately does not enable Direct WSS,
+pairing-token generation and rotation are manual, and the public TLS reverse
+proxy and certificate lifecycle remain operator-owned.
+
+A future design can evaluate how much of gateway enablement, token lifecycle,
+reverse-proxy/TLS setup, and first-run guidance Imp should automate while
+preserving the existing boundaries:
+
+- the relay remains loopback-only;
+- the gateway exposes only the intended remote capabilities;
+- Imp authentication remains separate from TLS; and
+- plaintext pairing tokens do not leak into URLs, logs, or server-side stored
+  configuration.
+
+#### Live connection reconfiguration
+
+Native Connection settings currently configure the next application start.
+Saving settings does not replace the running state source, action sink, or SSH
+supervisor.
+
+A future slice could design safe live switching between External SSH, Managed
+SSH, and Direct WSS without weakening the existing ownership, credential, and
+no-replay guarantees.
+
+#### Desktop distribution hardening
+
+The first public release intentionally leaves two normal-user distribution
+limitations in place:
+
+- the Windows installer is unsigned; and
+- automatic application updates are not implemented.
+
+Code signing and update delivery are independent distribution problems and
+can be sequenced separately rather than being bundled into an unrelated
+feature slice.
+
+#### Additional desktop release targets
+
+The Linux x86_64 artifact published today is the server bundle, not a Linux
+desktop release.
+
+Linux and macOS desktop artifacts remain potential future work and should only
+be called supported releases after their native packaging and acceptance paths
+are established.
+
+### Platforms
+
+#### Mobile feasibility
+
+Still exploratory.
+
+Direct WSS substantially changes the feasibility boundary because a mobile
+client would no longer have to reproduce the desktop's OpenSSH local-forward
+topology.
+
+Any mobile work should first evaluate Tauri/native-runtime constraints, HUD
+interaction design, secure credential storage, notifications, and whether the
+authenticated gateway remains the appropriate transport boundary.
