@@ -1,9 +1,10 @@
 # VPS deployment
 
-Runs `services/relay`, the authenticated remote gateway, and
-`integrations/tinyfugue`'s live feed as `systemd --user` services, so the
-pipeline survives a VPS reboot and an administrator's SSH session ending
-without root-owned Imp services.
+Installs Imp's relay and TinyFugue live feed as `systemd --user`
+services so the pipeline survives a VPS reboot and an administrator's SSH
+session ending without root-owned Imp services. The authenticated Direct WSS
+gateway is included in the server bundle but remains disabled unless the
+operator deliberately configures Direct mode.
 
 The relay, feed-facing endpoints, and gateway all remain loopback-only. SSH may
 still expose the relay to one workstation as before. Direct WSS instead uses a
@@ -18,60 +19,132 @@ Imp provides no per-user endpoint authentication. Deploy only on a
 single-user VPS or where every host-local user/process is mutually trusted;
 untrusted multi-user hosts are unsupported.
 
-## 1. Sync the repository (in WSL/repo)
+## Install from a release bundle
 
-The `imp-tinyfugue` package depends on `imp-relay` by relative path
-(see its `pyproject.toml` `[tool.uv.sources]`), so sync the whole repository
-rather than individual subdirectories.
+The normal server installation does **not** require an Imp source checkout,
+Node.js, npm, Rust, or `uv` on the VPS.
 
-The repository includes the canonical sync command:
+The `v0.1.0` server bundle supports:
 
-```bash
-npm run vps:sync
+- Linux x86_64;
+- CPython 3.12;
+- `systemd --user`;
+- the TinyFugue client adapter.
+
+Python 3.12 must include `venv` support. TinyFugue itself remains
+operator-owned and must already be installed with the GMCP capabilities
+described below.
+
+Download both server assets from the matching Imp GitHub release:
+
+```text
+imp-server-<version>-linux-x86_64.tar.gz
+imp-server-<version>-linux-x86_64.tar.gz.sha256
 ```
 
-It copies `~/src/imp/` to the SSH host alias `avatar` at `~/imp/`
-while excluding Git metadata, dependency/build directories, caches,
-environment files, and common key material.
-
-For another host or destination, override the defaults:
+Verify the downloaded archive **before executing anything from it**:
 
 ```bash
-IMP_VPS_HOST=<host-alias> \
-IMP_VPS_DEST='~/imp/' \
-npm run vps:sync
+sha256sum -c imp-server-<version>-linux-x86_64.tar.gz.sha256
 ```
 
-Re-run the sync after every source change that needs to reach the VPS; the WSL2
-checkout stays authoritative.
-
-## 2. Install the Python environments (on VPS)
+Then extract it:
 
 ```bash
-cd ~/imp
-uv sync --project services/relay
-uv sync --project integrations/tinyfugue
-mkdir -p ~/.local/bin
-ln -sfn \
-  "$HOME/imp/integrations/tinyfugue/.venv/bin/imp-action-consumer" \
-  "$HOME/.local/bin/imp-action-consumer"
+tar -xzf imp-server-<version>-linux-x86_64.tar.gz
+cd imp-server-<version>
 ```
 
-The project-local environments back the systemd units. The fixed
-`~/.local/bin/imp-action-consumer` link is the only helper path invoked by
-the TinyFugue hook; action text is pipe data and never argv.
-
-## 3. Install the systemd user units (on VPS)
+For a normal TinyFugue installation with the documented personal startup file,
+run:
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp ~/imp/deploy/systemd/imp-relay.service ~/.config/systemd/user/
-cp ~/imp/deploy/systemd/imp-feed.service ~/.config/systemd/user/
-cp ~/imp/deploy/systemd/imp-gateway.service ~/.config/systemd/user/
-systemctl --user daemon-reload
+./install.sh
 ```
 
-## 4. Configure the authenticated gateway (on VPS)
+The installer uses the existing `~/.tfrc` by default. Imp backs it up before
+adding:
+
+```text
+/load ~/.config/imp/capture.tf
+```
+
+If `~/.tfrc` does not exist, the installer stops rather than creating it.
+TinyFugue can fall back to startup files relative to its working directory, so
+creating a new `~/.tfrc` could otherwise change which configuration TinyFugue
+loads.
+
+If TinyFugue uses a different startup file, provide that existing file
+explicitly:
+
+```bash
+./install.sh --tf-startup /path/to/active/tinyfugue/startup-file
+```
+
+This also covers custom layouts and TinyFugue launches that use `-f FILE`.
+
+The installer:
+
+- verifies the bundle's internal checksums;
+- creates a private Python 3.12 virtual environment entirely from the bundled
+  wheelhouse, without resolving packages from the network;
+- installs releases under
+  `~/.local/share/imp/releases/<version>/`;
+- creates each Python environment directly at its final release path so Python
+  console scripts never depend on a temporary installation directory;
+- treats an installed version as immutable: reinstalling the exact same bundle
+  reuses it, while a different bundle claiming the same version is rejected;
+- atomically selects the installed runtime through
+  `~/.local/share/imp/current`;
+- installs the fixed `~/.local/bin/imp-action-consumer` helper link;
+- installs `~/.config/imp/capture.tf`;
+- installs the relay, feed, and optional gateway user units;
+- enables and starts only `imp-relay.service` and `imp-feed.service`;
+- preserves and rolls back the previous installation if activation fails; and
+- does not change Direct WSS gateway enablement and restarts it only when it was
+  already active.
+
+If TinyFugue is already connected when the installer restarts `imp-feed`, the
+feed deliberately starts without retaining the previous selected-action
+context. Generate a fresh TinyFugue world-selection event after installation,
+for example by switching away from and back to the active world, or reconnect
+the character. Outbound actions remain fail-closed until the new selected
+context is established. A reconnect may also be necessary for MUDs that send
+complete character identity only during login.
+
+Configuration and state directories are kept private to the user.
+
+### User lingering
+
+For the user services to survive logout and start without an interactive SSH
+session, systemd user lingering must be enabled:
+
+```bash
+loginctl show-user "$USER" -p Linger
+```
+
+The expected result is:
+
+```text
+Linger=yes
+```
+
+If it is disabled, enable it:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+If policy prevents the user from doing that, an administrator can run:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+The installer reports a warning when lingering is not enabled; it does not
+silently perform privileged system configuration.
+
+## Direct WSS gateway (advanced/manual)
 
 Direct WSS access uses one 256-bit pairing token. Imp's gateway stores only
 the SHA-256 digest of the token. The plaintext token is entered once in the
@@ -113,6 +186,14 @@ unset token digest
 
 `gateway.env` contains only the digest, not the plaintext pairing token. The
 gateway refuses to start without a valid 64-hex-character digest.
+
+The release installer does not enable Direct WSS. After deliberately
+configuring `gateway.env`, enable the gateway separately:
+
+```bash
+systemctl --user enable --now imp-gateway.service
+systemctl --user status imp-gateway.service
+```
 
 The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
 `ws://127.0.0.1:8787`. Never proxy port 8787 or the relay's `/ingest` or
@@ -177,63 +258,28 @@ environment value, or WebView `localStorage`.
 
 For troubleshooting only, the native configuration is persisted at:
 
-- Linux: `~/.config/dev.imp.hud/tunnel.json`
-- Windows: `%APPDATA%\dev.imp.hud\tunnel.json`
-- macOS: `~/Library/Application Support/dev.imp.hud/tunnel.json`
+- Linux: `~/.config/dev.imud.imp/tunnel.json`
+- Windows: `%APPDATA%\dev.imud.imp\tunnel.json`
+- macOS: `~/Library/Application Support/dev.imud.imp/tunnel.json`
 
 Normal setup should use the Connection UI rather than editing this file by
 hand.
 
-## 5. Enable lingering (on VPS, once)
+## TinyFugue integration details
 
-Without lingering, `systemd --user` (and everything it manages) stops the
-moment your last session logs out, and `$XDG_RUNTIME_DIR` may not exist at
-boot for a user with no active login:
-
-```bash
-loginctl enable-linger "$USER"
-loginctl show-user "$USER" -p Linger   # expect: Linger=yes
-```
-
-## 6. Enable and start the services (on VPS)
-
-```bash
-systemctl --user enable --now \
-  imp-relay.service \
-  imp-feed.service \
-  imp-gateway.service
-
-systemctl --user status \
-  imp-relay.service \
-  imp-feed.service \
-  imp-gateway.service
-```
-
-`imp-feed.service` `Wants=` (not `Requires=`) the relay: if the relay is
-briefly down, the feed keeps running and reconnects with the publisher's
-existing bounded backoff rather than failing.
-
-## 7. Install the TinyFugue hook (on VPS)
-
-Copy the unchanged hook to Imp's config directory:
-
-```bash
-mkdir -p ~/.config/imp
-cp ~/imp/integrations/tinyfugue/imp.tf ~/.config/imp/capture.tf
-```
-
-Then add this line to the startup file used by the operator's actual
-TinyFugue invocation:
+The installer copies the shipped hook to:
 
 ```text
-/load ~/.config/imp/capture.tf
+~/.config/imp/capture.tf
 ```
 
-Do not have the installer create or overwrite an operator startup file.
-TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
-config, so `~/.tfrc` is not necessarily active. For example, when starting
-from `~/avatar/tf` with `tf -f./.tfrc -n`, add the line to
-`~/avatar/tf/.tfrc`.
+By default the installer adds the Imp `/load` line idempotently to an existing
+`~/.tfrc`. With `--tf-startup FILE`, it instead backs up and updates the
+explicitly selected existing startup file.
+
+TinyFugue's documented personal configuration is `$HOME/.tfrc`, but TinyFugue
+also supports alternate startup files. Operators using a different startup
+file should pass that same file to `--tf-startup`.
 
 Load the hook before anything in that startup path can connect or log in to
 the MUD. AVATAR sends the full identity-bearing `Char.Status` only once, during
@@ -264,7 +310,7 @@ changes when the feed restarts. See
 [`integrations/tinyfugue/README.md`](../integrations/tinyfugue/README.md) for
 why this is a plain drained file rather than a FIFO.
 
-## 8. Confirm the TinyFugue GMCP login prerequisite (on VPS)
+## TinyFugue GMCP login prerequisite
 
 Because that identity message is sent once, capture depends on the operator's
 TinyFugue performing GMCP login sequencing at the right negotiation point. The
@@ -293,50 +339,71 @@ never modifies them and sends no GMCP itself.
 
 ## Verifying the deployment
 
-```bash
-# Relay and gateway listen on loopback only
-ss -ltnp | grep -E ':(8787|8788)[[:space:]]'
-# expect 127.0.0.1:8787 and 127.0.0.1:8788,
-# with no 0.0.0.0 listener for either service
+For the normal Managed/External SSH installation:
 
-# Imp user services are active
+```bash
+# Required services are active.
 systemctl --user is-active \
   imp-relay.service \
-  imp-feed.service \
-  imp-gateway.service
+  imp-feed.service
 
-# Gateway health contains process health only
-curl -s http://127.0.0.1:8788/healthz
-# expect: {"status":"ok"}
+# Required services are enabled for future user-systemd starts.
+systemctl --user is-enabled \
+  imp-relay.service \
+  imp-feed.service
 
-# When Direct WSS is configured, verify the public TLS edge separately:
-# curl -s https://<public-host>/healthz
-# curl -s -o /dev/null -w '%{http_code}\n' https://<public-host>/ingest
-# the second command must report 404
+# The unauthenticated relay remains loopback-only.
+ss -ltnp | grep -E ':8787[[:space:]]'
+# expect 127.0.0.1:8787, never 0.0.0.0:8787
 
-# The feed created the runtime spool, hook symlink, and private context marker
+# The selected runtime is the versioned release installation.
+readlink ~/.local/share/imp/current
+
+# TinyFugue actions use the stable helper path.
+readlink ~/.local/bin/imp-action-consumer
+
+# Relay process/state health.
+curl -s http://127.0.0.1:8787/healthz
+
+# The feed created the runtime spool and private context marker.
 ls -l ~/.local/state/imp/spool
-stat -c '%a %n' ~/.local/state/imp/context   # 600 after a world selection
+stat -c '%a %n' ~/.local/state/imp/context  # 600 after a world selection
 
-# Recent lifecycle logs, never raw GMCP or action text
+# Recent lifecycle logs; raw GMCP and action text are not logged.
 journalctl --user \
   -u imp-relay.service \
   -u imp-feed.service \
-  -u imp-gateway.service \
   -n 50
+```
+
+When Direct WSS is deliberately configured, additionally verify:
+
+```bash
+systemctl --user is-active imp-gateway.service
+
+ss -ltnp | grep -E ':8788[[:space:]]'
+# expect 127.0.0.1:8788, never a public bind
+
+curl -s http://127.0.0.1:8788/healthz
+# expect: {"status":"ok"}
+
+# Verify the public TLS edge independently:
+# curl -s https://<public-host>/healthz
+# curl -s -o /dev/null -w '%{http_code}\n' https://<public-host>/ingest
+# the second command must report 404
 ```
 
 ## Common failure diagnostics
 
-| Symptom                                                        | Check                                                                                                                                                                                                                                           |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                         |
-| Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.           |
-| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging. |
-| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                              |
-| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                           |
-| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                  |
-| Feed consuming GMCP but relay reports `has_snapshot: false`    | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (step 7); then log the character in again.    |
+| Symptom                                                        | Check                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                                                 |
+| Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.                                   |
+| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging.                         |
+| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                                                      |
+| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                                                   |
+| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                                          |
+| Feed consuming GMCP but relay reports `has_snapshot: false`    | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (the TinyFugue integration section); then log the character in again. |
 
 ## Diagnostic raw capture (opt-in, VPS)
 
@@ -353,7 +420,7 @@ Add an override:
 ```ini
 [Service]
 ExecStart=
-ExecStart=%h/imp/integrations/tinyfugue/.venv/bin/imp-feed --diagnostic-capture
+ExecStart=%h/.local/share/imp/current/.venv/bin/imp-feed --diagnostic-capture
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user restart
@@ -361,3 +428,22 @@ imp-feed.service`. Files land privately under
 `~/.local/state/imp/diagnostics/`, rotate at 1 MiB, and keep at most 5
 files. Remove the override (`systemctl --user revert imp-feed.service`)
 when done; this is a debugging aid, not a default.
+
+## Development checkout deployment
+
+The source-tree VPS workflow remains available for contributors and local
+development, but it is not the release installation path.
+
+From the canonical development checkout:
+
+```bash
+npm run vps:sync
+```
+
+By default this synchronizes the repository to the configured development VPS
+checkout. Developers may then use the project-local `uv` environments for
+iteration and testing.
+
+Released installations should use the versioned server archive and
+`install.sh` instead. Normal Imp users do not need a VPS Git checkout, Node.js,
+npm, Rust, or `uv`.

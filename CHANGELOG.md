@@ -8,9 +8,9 @@ public release versions.
 
 ## [Unreleased]
 
-No unreleased changes recorded yet.
+No changes beyond the `0.1.0` release candidate.
 
-## [0.1.0] - 2026-09-28
+## [0.1.0]
 
 First alpha release of Imp — Interactive MUD Peripheral.
 
@@ -33,6 +33,11 @@ First alpha release of Imp — Interactive MUD Peripheral.
 - Context-bound outbound delivery tied to the active TinyFugue session, world,
   and connection generation.
 - VPS user services for the relay, TinyFugue feed, and authenticated gateway.
+- Versioned Linux x86_64 server bundle with an offline wheelhouse, internal and
+  external checksum verification, idempotent per-user installation, stable
+  runtime paths, and failed-activation rollback.
+- Tag-driven release publishing of the server archive and checksum alongside
+  the Windows desktop installer.
 - Transient selected-world received-text delivery for alert evaluation.
 - Deterministic protocol validation and shared cross-language fixtures.
 
@@ -61,12 +66,15 @@ First alpha release of Imp — Interactive MUD Peripheral.
 - The supported prebuilt desktop release target is Windows x64.
 - The Windows alpha installer is unsigned and may trigger Windows SmartScreen
   warnings.
-- Linux and macOS remain source-build targets without release acceptance for
-  `v0.1.0`.
-- TinyFugue is the supported MUD client integration for this release.
+- Linux and macOS remain source-build desktop targets without native desktop
+  release acceptance for `v0.1.0`.
+- The prebuilt server bundle target is Linux x86_64 with CPython 3.12 and
+  `systemd --user`.
+- TinyFugue is the supported MUD client integration and remains
+  operator-installed.
 - The currently verified normalization mappings are based on AVATAR GMCP;
   broader MUD normalization remains future work.
-- VPS setup, TLS reverse-proxy configuration, certificate management, and
+- Direct WSS TLS reverse-proxy configuration, certificate management, and
   server-side pairing-token provisioning remain operator-managed.
 - Application auto-update and pairing-token rotation UX are not included.
 

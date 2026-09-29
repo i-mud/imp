@@ -163,14 +163,15 @@ Slice 13 is complete:
   WSL/native development mirror;
 - the managed-SSH console-window and orphaned-child defects found during
   release acceptance were fixed and reverified before tagging; and
-- `v0.1.0` was created from the exact accepted commit and published as a GitHub
-  prerelease with the Windows x64 NSIS installer.
+- the original `v0.1.0` tag and prerelease were subsequently withdrawn during
+  the Imp rename so the final first Imp release can include the renamed product
+  identity and the packaged server installation added in Slice 15.
 
 ### Release contract
 
-The `v0.1.0` tag is created only after the release candidate has passed the
-normal repository checks, the Windows release build, and clean-install
-acceptance.
+The final `v0.1.0` tag is created only after the release candidate has passed
+the normal repository checks, Windows release acceptance, and the packaged
+server-install acceptance added in Slice 15.
 
 Clean-install acceptance must begin from the produced installer rather than an
 existing development tree and prove:
@@ -186,7 +187,14 @@ existing development tree and prove:
 7. the final release artifact is the same build shape produced by the release
    workflow.
 
-Only after those checks pass is `v0.1.0` published as Imp's first release.
+Slice 15 adds a second release artifact to that contract. The Linux x86_64
+server archive must install without a repository checkout or development
+toolchain, survive an idempotent reinstall, reject tampered bundle contents,
+roll back a failed activation, run relay/feed from stable installed paths, and
+work with the released desktop through Managed SSH.
+
+Only after both desktop and server acceptance pass is the final `v0.1.0` tag
+published as Imp's first release.
 
 ### Out of scope
 
@@ -203,6 +211,70 @@ Only after those checks pass is `v0.1.0` published as Imp's first release.
 
 Those are independent follow-up decisions and should not expand the first
 release boundary.
+
+## Slice 14 - Imp rename
+
+Slug: `imp-rename`. Complete.
+
+Slice 14 renamed TinyScry to **Imp — Interactive MUD Peripheral** across the
+desktop, packages, Python commands, configuration/state paths, systemd units,
+protocol identity, documentation, repository, and release-facing artifact
+names.
+
+The rename preserved the existing architecture and trust boundaries. The
+canonical wire protocol is `IMP2`, the private context marker is `IMPCTX 2`,
+and the native application identifier is `dev.imud.imp`.
+
+The historical TinyScry `v0.1.0` prerelease/tag was removed rather than
+retained as Imp's first release. The descriptive `imp-rename` milestone tag
+records Slice 14 independently of the eventual semantic release.
+
+## Slice 15 - Server installation / bootstrap
+
+Slug: `server-install-bootstrap`. In progress.
+
+Slice 15 removes the VPS source-checkout/development-toolchain requirement from
+the normal release installation path.
+
+Implemented so far:
+
+- versioned `imp-server-<version>-linux-x86_64.tar.gz` release bundles;
+- an adjacent archive SHA-256 file plus an internal checksum manifest;
+- wheels for `imp-relay`, `imp-tinyfugue`, and the exact locked CPython 3.12
+  `websockets` dependency;
+- a per-user installer using
+  `~/.local/share/imp/releases/<version>/` and an atomic `current` link;
+- stable relay, feed, gateway, and TinyFugue action-helper paths independent of
+  a repository checkout;
+- optional idempotent TinyFugue startup-file integration with backup;
+- relay/feed activation by default while Direct WSS remains opt-in;
+- installation-wide rollback if activation fails;
+- bundle acceptance covering clean install, reinstall idempotency, package
+  versions, permissions, tamper rejection, and failed-activation rollback;
+- Linux bundle build/acceptance in CI; and
+- tag-driven publication of the server archive and checksum alongside the
+  Windows NSIS artifact.
+
+The reusable bundle acceptance passed on the target VPS environment. The
+production VPS was then cut from the development checkout runtime to the exact
+accepted packaged `0.1.0` server bundle. Relay, feed, gateway, TinyFugue state
+capture, Managed SSH desktop state delivery, and an approved outbound `look`
+action all passed from the versioned installed runtime.
+
+The live cutover also exercised an already-running TinyFugue session. Restarting
+the feed intentionally cleared its selected-context marker; a fresh TinyFugue
+world-selection event re-established the private context and packaged action
+consumer before outbound actions resumed.
+
+Remaining before Slice 15 closes:
+
+1. run the final repository/pre-release checks;
+2. merge and tag the slice milestone; and
+3. create the final `v0.1.0` tag only from the fully accepted release commit.
+
+Direct WSS gateway provisioning, TLS/certificate automation, pairing-token
+generation/rotation UX, TinyFugue installation itself, and MUD/client
+generalization remain outside this slice.
 
 ## Candidate work
 

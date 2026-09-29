@@ -95,7 +95,7 @@ infrastructure and remain separate from CI:
 ### Slice 14 Imp rename evidence
 
 Slice 14 establishes Imp as a clean product and runtime identity break before
-the canonical `v0.1.0` release is republished.
+the final canonical `v0.1.0` release is published.
 
 - `git diff --check` and the complete `npm run check` gate passed, including 62
   protocol tests, 146 desktop tests, 120 relay tests, 89 TinyFugue integration
@@ -480,5 +480,62 @@ separately observed after enabling it.
 
 Certificate renewal infrastructure was configured for the live endpoint, but
 an actual renewal has not yet occurred and is not claimed as verified.
+
+Slice 12, `native-connection-settings`, is complete. External SSH, Managed
+SSH, and authenticated Direct WSS can be configured through native Settings.
+Direct pairing-token reads remain write-only from the renderer's perspective:
+an existing plaintext token is not returned merely to populate the form.
+Windows-native acceptance exercised Managed -> Direct -> Managed using the UI,
+with live state and an approved outbound action after each restart.
+
+Slice 13, `first-release-readiness`, is complete as release-engineering work.
+It established the MIT license, changelog/version contract, Windows x64 NSIS
+build, tag-driven GitHub release workflow, native version display, installation
+documentation, and clean Windows artifact acceptance. The original `v0.1.0`
+tag/prerelease produced during that work was later intentionally withdrawn
+during the product rename; it is not the current final release tag.
+
+Slice 14, `imp-rename`, is complete. TinyScry was renamed to Imp — Interactive
+MUD Peripheral — across product identity, repository/package names, Python
+commands, protocol/context markers, native identifier, configuration/state
+paths, services, documentation, and release artifact naming. The live VPS and
+Windows desktop were smoke-tested under the renamed identity.
+
+Slice 15, `server-install-bootstrap`, is in progress. The repository now builds
+a versioned Linux x86_64 server archive containing the relay and TinyFugue
+wheels, exact locked `websockets` wheel, TinyFugue hook, user-systemd units,
+installer, and internal checksum manifest. An adjacent SHA-256 file protects
+the complete archive.
+
+The installer creates a private CPython 3.12 virtual environment from the
+bundle without network dependency resolution, uses versioned releases behind
+`~/.local/share/imp/current`, installs the stable action-consumer helper and
+TinyFugue hook, enables relay/feed only, and leaves Direct WSS opt-in. Failed
+activation restores the previous runtime, integration files, helper link,
+TinyFugue startup file, service enablement, and prior running-service state.
+
+The reusable bundle acceptance passed on the target VPS environment for outer
+and internal integrity, clean install, idempotent reinstall, package versions,
+permissions, TinyFugue startup insertion, tamper rejection, final-path console
+script interpreters, and complete failed-activation rollback. CI and the
+release workflow now build and test that server artifact, and a tagged release
+will publish its archive and checksum alongside the Windows installer.
+
+Production live acceptance also passed using the exact accepted server archive.
+`~/.local/share/imp/current` selected the versioned `0.1.0` runtime; relay,
+feed, and the already-configured gateway ran from that runtime; the stable
+action-helper link resolved into it; and fresh TinyFugue GMCP reached the
+packaged feed and relay. The private selected-context marker was mode `0600`,
+the packaged action consumer registered for the current TinyFugue context, the
+Windows desktop recovered current HUD state over Managed SSH, and an approved
+`look` action reached the MUD.
+
+The cutover also verified fail-closed behavior across a feed restart while
+TinyFugue remained connected. The restarted feed did not retain the previous
+selected-action context. A fresh TinyFugue world-selection event re-established
+the context marker and action consumer before actions were accepted again.
+
+The final `v0.1.0` tag remains absent until the final repository checks, Slice
+15 merge, and milestone tag are complete.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).

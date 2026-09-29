@@ -59,9 +59,14 @@ imp/
 Unit tests live beside the code they test; `tests/` holds only checks that span
 components.
 
-## Prerequisites
+## Development prerequisites
 
-Required for everything:
+Released installations do not require Node.js, Rust, `uv`, or an Imp source
+checkout on the target machine. The Linux x86_64 server bundle requires
+CPython 3.12 with `venv` support and `systemd --user`; see
+[`deploy/README.md`](deploy/README.md).
+
+For source development:
 
 - **Node.js >= 24** and npm
 - **[uv](https://docs.astral.sh/uv/)** (manages the Python environments; Python
@@ -81,13 +86,21 @@ builds use Rust separately. `npm run dev` renders the real HUD in a browser
 against the mock source. See [`docs/development.md`](docs/development.md) for
 the WSL2/Windows split.
 
-## Windows release
+## Release artifacts
 
-The first prebuilt release target is Windows x64. See
-[`docs/install-windows.md`](docs/install-windows.md) for installation and
-connection setup from the released NSIS installer.
+Imp's first release target is `v0.1.0`. The tag-driven release workflow
+produces:
 
-The `v0.1.0` release is alpha quality and its Windows installer is unsigned.
+- an unsigned Windows x64 NSIS desktop installer; and
+- a Linux x86_64 server bundle plus SHA-256 checksum for the relay, TinyFugue
+  integration, and optional Direct WSS gateway.
+
+See [`docs/install-windows.md`](docs/install-windows.md) for desktop
+installation and [`deploy/README.md`](deploy/README.md) for server
+installation.
+
+`v0.1.0` is an alpha-quality release. Linux and macOS desktop applications
+remain source-build targets.
 
 ## Install from source
 
