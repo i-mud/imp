@@ -16,6 +16,7 @@ Source, tests and runtime are the authority on what exists and what executes.
 | what is built and verified             | `docs/status.md`                   |
 | planned and deferred work              | `docs/roadmap.md`                  |
 | platform/build constraints             | `docs/development.md`              |
+| release/versioning rules and procedure | `docs/releases.md`                 |
 | what still needs a real MUD session    | `integrations/tinyfugue/README.md` |
 
 Start at `docs/architecture/CONTEXT.md` for anything structural. It is a
@@ -43,6 +44,13 @@ changing, then the source it cites.
 - `npm run check` is the platform-independent gate: lint/docs/version checks,
   TypeScript typechecks and tests, relay and TinyFugue lint/tests, the
   cross-component end-to-end check, and the frontend production build.
+- Conventional Commits are release inputs, not just style. `fix:` is a patch,
+  `feat:` is a minor increment, and an explicit breaking change is a major
+  increment. While Imp is `0.x`, a normal `feat:` advances the minor version
+  (for example `0.1.0` -> `0.2.0`); it does not imply `1.0.0`.
+- Never invent or manually choose a release version. Use
+  `npm run release:next`, and follow `docs/releases.md` for preparation and
+  tagging. Final `vX.Y.Z` tags must be SSH-signed annotated tags.
 
 ## Memory vs. documentation
 
