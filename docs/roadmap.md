@@ -231,12 +231,12 @@ records Slice 14 independently of the eventual semantic release.
 
 ## Slice 15 - Server installation / bootstrap
 
-Slug: `server-install-bootstrap`. In progress.
+Slug: `server-install-bootstrap`. Complete.
 
 Slice 15 removes the VPS source-checkout/development-toolchain requirement from
 the normal release installation path.
 
-Implemented so far:
+Delivered:
 
 - versioned `imp-server-<version>-linux-x86_64.tar.gz` release bundles;
 - an adjacent archive SHA-256 file plus an internal checksum manifest;
@@ -266,11 +266,8 @@ the feed intentionally cleared its selected-context marker; a fresh TinyFugue
 world-selection event re-established the private context and packaged action
 consumer before outbound actions resumed.
 
-Remaining before Slice 15 closes:
-
-1. run the final repository/pre-release checks;
-2. merge and tag the slice milestone; and
-3. create the final `v0.1.0` tag only from the fully accepted release commit.
+Slice 15 is complete. The descriptive `server-install-bootstrap` milestone
+tag records this work independently of the semantic `v0.1.0` release.
 
 Direct WSS gateway provisioning, TLS/certificate automation, pairing-token
 generation/rotation UX, TinyFugue installation itself, and MUD/client

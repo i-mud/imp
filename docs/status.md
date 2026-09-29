@@ -501,7 +501,7 @@ commands, protocol/context markers, native identifier, configuration/state
 paths, services, documentation, and release artifact naming. The live VPS and
 Windows desktop were smoke-tested under the renamed identity.
 
-Slice 15, `server-install-bootstrap`, is in progress. The repository now builds
+Slice 15, `server-install-bootstrap`, is complete. The repository now builds
 a versioned Linux x86_64 server archive containing the relay and TinyFugue
 wheels, exact locked `websockets` wheel, TinyFugue hook, user-systemd units,
 installer, and internal checksum manifest. An adjacent SHA-256 file protects
@@ -535,7 +535,7 @@ TinyFugue remained connected. The restarted feed did not retain the previous
 selected-action context. A fresh TinyFugue world-selection event re-established
 the context marker and action consumer before actions were accepted again.
 
-The final `v0.1.0` tag remains absent until the final repository checks, Slice
-15 merge, and milestone tag are complete.
+The descriptive `server-install-bootstrap` milestone tag records the completed
+slice independently of the canonical `v0.1.0` release.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).

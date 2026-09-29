@@ -8,9 +8,9 @@ public release versions.
 
 ## [Unreleased]
 
-No changes beyond the `0.1.0` release candidate.
+No changes yet.
 
-## [0.1.0]
+## [0.1.0] - 2026-09-29
 
 First alpha release of Imp — Interactive MUD Peripheral.
 
