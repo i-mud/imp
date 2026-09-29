@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/imp/services/relay/.venv/bin/imp-relay --host 127.0.0.1 --port 8787
+ExecStart=%h/.local/share/imp/current/.venv/bin/imp-relay --host 127.0.0.1 --port 8787
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

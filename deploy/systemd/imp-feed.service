@@ -5,7 +5,7 @@ Wants=imp-relay.service
 
 [Service]
 Type=simple
-ExecStart=%h/imp/integrations/tinyfugue/.venv/bin/imp-feed
+ExecStart=%h/.local/share/imp/current/.venv/bin/imp-feed
 ExecStopPost=/usr/bin/rm -f %h/.local/state/imp/spool
 Restart=on-failure
 RestartSec=2

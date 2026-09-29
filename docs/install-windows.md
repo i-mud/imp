@@ -1,11 +1,12 @@
 # Windows installation
 
-Imp `v0.1.0` is an alpha release. The supported prebuilt desktop target is
-Windows x64.
+For `v0.1.0`, the supported prebuilt desktop target is Windows x64. The
+release is alpha quality.
 
 The Windows desktop application does not require Node.js, Rust, Python, WSL, or
-an Imp source checkout. The Imp VPS services and TinyFugue integration
-must already be deployed separately; see [`../deploy/README.md`](../deploy/README.md).
+an Imp source checkout. The Imp VPS runtime is installed separately from the
+Linux x86_64 server bundle; TinyFugue itself remains operator-installed. See
+[`../deploy/README.md`](../deploy/README.md).
 
 ## Install Imp
 
@@ -101,8 +102,10 @@ For `v0.1.0`:
 - The installer is unsigned.
 - TinyFugue is the supported MUD client integration.
 - AVATAR is the currently live-verified GMCP mapping.
-- Linux and macOS remain source-build targets rather than accepted release
-  binaries.
-- VPS deployment, TLS termination, and pairing-token provisioning remain
+- Linux and macOS remain source-build desktop targets rather than accepted
+  native desktop release binaries.
+- Linux x86_64 has a prebuilt server bundle for the Imp runtime; TinyFugue
+  itself remains operator-installed.
+- Direct WSS TLS termination and pairing-token provisioning remain
   operator-managed.
 - Automatic application updates are not included.
