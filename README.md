@@ -343,6 +343,15 @@ For the complete trust model, see
 - [Roadmap](docs/roadmap.md)
 - [Development](docs/development.md)
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+development workflow, testing, and pull request guidance.
+
+Please follow the [code of conduct](CODE_OF_CONDUCT.md). Security
+vulnerabilities should be reported privately according to
+[SECURITY.md](SECURITY.md), not through public issues.
+
 ## License
 
 MIT
