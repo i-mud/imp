@@ -81,9 +81,9 @@ by the pull request. The pull-request title must also use Conventional Commit
 syntax and should reflect the highest release impact of the change. This keeps
 release calculation correct even when a pull request is squash-merged.
 
-Maintainers preparing a release should follow
-[`docs/releases.md`](docs/releases.md); release versions should not be chosen
-manually.
+Release publication is automatic after eligible changes reach `main`. See
+[`docs/releases.md`](docs/releases.md) for the release behavior and recovery
+procedure; release versions should not be chosen manually.
 
 ## Testing
 

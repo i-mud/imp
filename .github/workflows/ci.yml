@@ -68,3 +68,84 @@ jobs:
           fi
 
           ./scripts/test-server-bundle.sh "${archives[0]}"
+
+  release:
+    name: semantic-release
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: imp-semantic-release-main
+      cancel-in-progress: false
+    outputs:
+      released: ${{ steps.semantic.outputs.released }}
+      version: ${{ steps.semantic.outputs.version }}
+      tag: ${{ steps.semantic.outputs.tag }}
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure release signing
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$RELEASE_SIGNING_KEY" ]]; then
+            echo "RELEASE_SIGNING_KEY is not configured" >&2
+            exit 1
+          fi
+
+          key="$RUNNER_TEMP/imp-release-signing-key"
+          umask 077
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+
+          # Fail before semantic-release if the configured secret is not a
+          # usable OpenSSH private key.
+          ssh-keygen -y -f "$key" >/dev/null
+
+          git config user.name "Imp Release Automation"
+          git config user.email "133054450+twilightsaurus@users.noreply.github.com"
+          git config gpg.format ssh
+          git config user.signingkey "$key"
+          git config commit.gpgsign true
+          git config tag.gpgsign true
+
+      - name: Run semantic-release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: Imp Release Automation
+          GIT_AUTHOR_EMAIL: 133054450+twilightsaurus@users.noreply.github.com
+          GIT_COMMITTER_NAME: Imp Release Automation
+          GIT_COMMITTER_EMAIL: 133054450+twilightsaurus@users.noreply.github.com
+          GIT_EDITOR: bash scripts/release-tag-editor.sh
+        run: npm run release:ci
+
+  publish-release:
+    name: Build and publish release
+    if: needs.release.outputs.released == 'true'
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}

@@ -34,9 +34,8 @@
     "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build",
     "release:check-version": "node scripts/check-version.mjs",
     "release:next": "semantic-release --dry-run --no-ci",
-    "release:prepare": "node scripts/prepare-release.mjs",
-    "release:tag": "node scripts/tag-release.mjs",
-    "commitlint": "commitlint --verbose"
+    "commitlint": "commitlint --verbose",
+    "release:ci": "node scripts/run-semantic-release.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.3",
