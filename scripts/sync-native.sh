@@ -10,6 +10,7 @@ rsync -a --delete \
   --exclude='node_modules/' \
   --exclude='dist/' \
   --exclude='target/' \
+  --exclude='apps/desktop/src-tauri/binaries/' \
   --exclude='.venv/' \
   --exclude='venv/' \
   --exclude='__pycache__/' \

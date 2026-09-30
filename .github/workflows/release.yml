@@ -106,8 +106,26 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: '**/uv.lock'
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Install node build dependencies
+        run: uv sync --locked --project services/relay
+
+      - name: Build desktop node sidecar
+        run: python scripts/build-desktop-node.py
 
       - name: Verify release version
         env:
