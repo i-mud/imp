@@ -47,3 +47,6 @@ records*.jsonl
 .idea/
 .DS_Store
 Thumbs.db
+
+# Regenerable Tauri sidecar binaries
+apps/desktop/src-tauri/binaries/
