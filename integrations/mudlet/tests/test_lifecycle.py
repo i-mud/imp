@@ -86,3 +86,21 @@ def test_observed_gmcp_is_itself_readiness_evidence() -> None:
     )
 
     assert lifecycle.gmcp_enabled
+
+
+def test_late_gmcp_after_disconnect_does_not_restore_readiness() -> None:
+    lifecycle = MudletLifecycle(SESSION)
+    lifecycle.apply(InitMessage("AVATAR", True, True))
+    lifecycle.apply(DisconnectedMessage())
+
+    lifecycle.apply(
+        GmcpMessage(
+            Record(
+                at=1234,
+                package="Char.Status",
+                payload={"character_name": "Late"},
+            )
+        )
+    )
+
+    assert not lifecycle.gmcp_enabled

@@ -19,5 +19,9 @@ Lifecycle inputs are:
 Receiving a GMCP message also establishes GMCP readiness, allowing a package
 installed or reloaded after protocol negotiation to recover.
 
-The helper currently verifies only lifecycle/RPC semantics. Relay publishing and
-trusted outbound actions are added in subsequent Slice 16 checkpoints.
+Only the foreground profile owns an Imp `/ingest` producer. Losing focus closes
+that producer without sending a deselection; gaining focus selects the profile's
+latest locally normalized state. This makes profile switching safe regardless
+of the order in which the old and new profiles receive their focus events.
+
+Trusted outbound actions are added in a subsequent Slice 16 checkpoint.

@@ -79,7 +79,9 @@ class MudletLifecycle:
             # Receiving a GMCP frame itself proves that GMCP is usable. This
             # also makes installing/reloading the package mid-session recover
             # even if sysProtocolEnabled happened before the package loaded.
-            self.gmcp_enabled = True
+            # A late frame after disconnect must not resurrect readiness.
+            if self.connected:
+                self.gmcp_enabled = True
             return
 
         raise TypeError(f"unsupported Mudlet message: {type(message)!r}")
