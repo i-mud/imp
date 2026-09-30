@@ -14,7 +14,7 @@ to render.
 `packages/protocol` defines a versioned, Imp-owned wire format. Nothing
 downstream of normalization ever sees a GMCP package name, a GMCP key, or a
 GMCP value type. MUD-specific mapping lives only in
-`integrations/tinyfugue/src/imp_tf/normalize.py`.
+`integrations/common/src/imp_adapter/normalize.py`.
 
 ## Rationale
 

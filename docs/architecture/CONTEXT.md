@@ -92,7 +92,7 @@ about to contradict it.
 1. The HUD never imports a concrete state source. Only
    `apps/desktop/src/lib/config.ts` names them.
 2. No GMCP concept exists downstream of
-   `integrations/tinyfugue/src/imp_tf/normalize.py`.
+   `integrations/common/src/imp_adapter/normalize.py`.
 3. The relay binds loopback only, cannot be opted into a public bind, and has
    no authentication by design.
 4. A rejected protocol frame never mutates state, in any component.

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TextIO, cast
 
 import pytest
+from imp_adapter.publisher import RelayPublisher
 from imp_relay.action import ConsumerRegistration
 from imp_relay.protocol import (
     GameState,
@@ -32,7 +33,6 @@ from websockets.exceptions import ConnectionClosed
 import imp_tf.action_consumer as action_consumer
 from imp_tf.action_consumer import encode_tf_dispatch, encode_tf_token, run_action_consumer
 from imp_tf.context import read_context_marker, write_context_marker
-from imp_tf.publisher import RelayPublisher
 
 CONTEXT = StateContext("session1", 2, 3)
 OTHER_CONTEXT = StateContext("session1", 3, 3)

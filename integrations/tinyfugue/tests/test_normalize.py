@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from imp_adapter.normalize import Normalizer
+from imp_adapter.records import JsonValue, Record
 from imp_relay.protocol import Character, Target, Vital
-
-from imp_tf.normalize import Normalizer
-from imp_tf.records import JsonValue, Record
 
 
 def _record(package: str, payload: JsonValue) -> Record:

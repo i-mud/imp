@@ -24,7 +24,7 @@ impact.
 
 Produced by:
 
-- `integrations/tinyfugue/src/imp_tf/normalize.py` (from GMCP records)
+- `integrations/common/src/imp_adapter/normalize.py` (from GMCP records)
 - `apps/desktop/src/lib/source/mock.ts` (development source)
 
 Validated by:
@@ -48,9 +48,9 @@ Known first-order impacts of adding or changing a field:
    decoder and the encoders; must move in lockstep or the corpus test fails
 3. `packages/protocol/fixtures/` - at least one accept case; a rejection case
    if new bounds were added
-4. `integrations/tinyfugue/src/imp_tf/normalize.py` - the mapping table,
+4. `integrations/common/src/imp_adapter/normalize.py` - the mapping table,
    and its own name/value bounds if the change is a bound
-5. `integrations/tinyfugue/src/imp_tf/publisher.py` - `state_to_wire()`
+5. `integrations/common/src/imp_adapter/publisher.py` - `state_to_wire()`
    and its per-field helpers spell the JSON by hand, so a new field is silently
    dropped on publish if this is missed
 6. `apps/desktop/src/lib/source/mock.ts` - the mock must keep producing valid

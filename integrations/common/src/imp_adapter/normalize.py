@@ -8,7 +8,7 @@ from typing import Final
 
 from imp_relay.protocol import Character, GameState, Target, Vital
 
-from imp_tf.records import JsonValue, Record
+from imp_adapter.records import JsonValue, Record
 
 MAX_VITAL: Final = 1_000_000_000
 MAX_NAME_CHARS: Final = 64
