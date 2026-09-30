@@ -484,7 +484,53 @@ The current release contract and recovery procedure live in
 
 ## Active work
 
-There is currently no active numbered slice. Slice 16 has not been selected.
+### Slice 16 - Mudlet and local client integration
+
+Slug: `mudlet-local-integration`. Active.
+
+Slice 16 makes MUD-client choice independent from where the Imp UI runs.
+
+The architectural rule is that a MUD-client adapter talks only to an Imp node
+on the same host. Remote access belongs to Imp's state/action transport rather
+than to the adapter.
+
+The target topologies are:
+
+1. **Mudlet local:** Mudlet -> local Imp node -> local Imp desktop.
+2. **Mudlet remote:** Mudlet -> Imp node on machine A -> authenticated Imp
+   transport -> Imp desktop on machine B.
+3. **TinyFugue local:** TinyFugue -> local Imp node -> local Imp desktop.
+4. **TinyFugue remote:** the existing VPS TinyFugue -> Imp node -> SSH or
+   authenticated WSS -> desktop path remains supported.
+
+This slice must preserve the existing separation between normalized state,
+trusted actions, and transport. Mudlet-specific concepts must stop at its
+adapter boundary, just as TinyFugue-specific concepts do today.
+
+Required outcomes:
+
+- define a client-neutral local Imp-node boundary;
+- provide a local-node runtime suitable for a normal desktop installation,
+  without requiring a source checkout;
+- support the existing TinyFugue producer/action integration against a local
+  node;
+- add a Mudlet integration that observes GMCP and received text locally and
+  publishes normalized Imp state through that node;
+- map Mudlet lifecycle into the existing exact-current context guarantees
+  without exposing Mudlet-specific identifiers downstream;
+- deliver trusted outbound actions through Mudlet with the existing
+  no-queue, no-retry, and no-replay guarantees;
+- preserve the existing remote SSH and authenticated-WSS paths so a node beside
+  Mudlet can be consumed by Imp on another machine; and
+- live-verify local Mudlet, remote Mudlet, local TinyFugue, and the existing
+  remote TinyFugue topology.
+
+The slice does **not** implement Imp-to-Imp chaining. A future desktop or mobile
+Imp may consume one node and expose that state to another Imp peer, so this
+slice must avoid a design that prevents that later topology.
+
+General MUD normalization also remains separate. Initial Mudlet acceptance may
+use the same AVATAR GMCP mapping already established through TinyFugue.
 
 ## Candidate work
 
@@ -569,14 +615,6 @@ concepts stop at normalization.
 This is not a promise of universal MUD compatibility in one slice. New mappings
 should continue to be driven by observed protocol behavior rather than guessed
 schemas.
-
-#### Mudlet integration
-
-Add a second MUD-client adapter only after or together with enough
-normalization-boundary generalization.
-
-Mudlet should remain another producer upstream of Imp's owned protocol. The
-core HUD should not acquire a direct Mudlet dependency.
 
 ### Distribution and onboarding
 
