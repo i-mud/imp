@@ -165,3 +165,265 @@ def test_late_unfocus_cannot_clobber_new_foreground_profile() -> None:
             await relay.close()
 
     asyncio.run(scenario())
+
+
+def test_runtime_routes_action_result_back_to_exact_consumer() -> None:
+    from imp_relay.protocol import (
+        ActionResultMessage as RelayActionResultMessage,
+    )
+    from imp_relay.protocol import (
+        DispatchMessage,
+        decode_server_message,
+        encode_action,
+    )
+    from websockets.asyncio.client import connect
+
+    from imp_mudlet.protocol import ActionResultMessage
+
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+
+        context = StateContext(
+            "mudlet_action",
+            1,
+            1,
+        )
+        emitted: list[DispatchMessage] = []
+
+        runtime = MudletRuntime(
+            MudletLifecycle("mudlet_action"),
+            lambda: RelayPublisher(url=(f"ws://127.0.0.1:{relay.port}/ingest")),
+            emit_action=emitted.append,
+            action_url=(f"ws://127.0.0.1:{relay.port}/action-consumer"),
+        )
+
+        try:
+            await runtime.handle(
+                InitMessage(
+                    "Action",
+                    True,
+                    True,
+                )
+            )
+            await asyncio.wait_for(
+                runtime.drain(),
+                timeout=1,
+            )
+
+            await _wait_until(
+                lambda: _context_is(
+                    relay,
+                    context,
+                )
+            )
+            await _wait_until(lambda: runtime.action_ready)
+
+            connection = await connect(
+                f"ws://127.0.0.1:{relay.port}/action",
+                proxy=None,
+            )
+            try:
+                await connection.send(
+                    encode_action(
+                        context,
+                        "look",
+                    )
+                )
+
+                await _wait_until(lambda: len(emitted) == 1)
+                dispatch = emitted[0]
+
+                await runtime.handle(
+                    ActionResultMessage(
+                        dispatch.id,
+                        "forwarded",
+                    )
+                )
+
+                raw = await asyncio.wait_for(
+                    connection.recv(),
+                    timeout=1,
+                )
+                assert isinstance(raw, str)
+
+                decoded = decode_server_message(raw)
+                assert decoded.ok
+                assert isinstance(
+                    decoded.value,
+                    RelayActionResultMessage,
+                )
+                assert decoded.value.status == "forwarded"
+            finally:
+                await connection.close()
+        finally:
+            await runtime.close()
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_focus_change_cancels_pending_action_and_isolates_new_context() -> None:
+    from imp_relay.protocol import (
+        ActionResultMessage as RelayActionResultMessage,
+    )
+    from imp_relay.protocol import (
+        DispatchMessage,
+        decode_server_message,
+        encode_action,
+    )
+    from websockets.asyncio.client import connect
+
+    from imp_mudlet.protocol import ActionResultMessage
+
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+
+        old_context = StateContext(
+            "mudlet_switch",
+            1,
+            1,
+        )
+        new_context = StateContext(
+            "mudlet_switch",
+            2,
+            1,
+        )
+        emitted: list[DispatchMessage] = []
+
+        runtime = MudletRuntime(
+            MudletLifecycle("mudlet_switch"),
+            lambda: RelayPublisher(url=f"ws://127.0.0.1:{relay.port}/ingest"),
+            emit_action=emitted.append,
+            action_url=(f"ws://127.0.0.1:{relay.port}/action-consumer"),
+        )
+
+        try:
+            await runtime.handle(InitMessage("Switch", True, True))
+            await asyncio.wait_for(
+                runtime.drain(),
+                timeout=1,
+            )
+            await _wait_until(
+                lambda: _context_is(
+                    relay,
+                    old_context,
+                )
+            )
+            await _wait_until(lambda: runtime.action_ready)
+
+            old_connection = await connect(
+                f"ws://127.0.0.1:{relay.port}/action",
+                proxy=None,
+            )
+            try:
+                await old_connection.send(
+                    encode_action(
+                        old_context,
+                        "north",
+                    )
+                )
+
+                await _wait_until(lambda: len(emitted) == 1)
+                old_dispatch = emitted[0]
+                assert old_dispatch.context == old_context
+                assert old_dispatch.command == "north"
+
+                # Lose focus before Lua acknowledges the final send() hop.
+                # Retiring the old consumer makes this action ambiguous rather
+                # than forwarding, replaying, or carrying it into the next
+                # foreground generation.
+                await runtime.handle(FocusMessage(False))
+
+                raw = await asyncio.wait_for(
+                    old_connection.recv(),
+                    timeout=1,
+                )
+                assert isinstance(raw, str)
+
+                decoded = decode_server_message(raw)
+                assert decoded.ok
+                assert isinstance(
+                    decoded.value,
+                    RelayActionResultMessage,
+                )
+                assert decoded.value.status == "unknown"
+            finally:
+                await old_connection.close()
+
+            # Re-entering the profile creates a new foreground generation and
+            # therefore a distinct action consumer.
+            await runtime.handle(FocusMessage(True))
+            await asyncio.wait_for(
+                runtime.drain(),
+                timeout=1,
+            )
+            await _wait_until(
+                lambda: _context_is(
+                    relay,
+                    new_context,
+                )
+            )
+            await _wait_until(lambda: runtime.action_ready)
+
+            new_connection = await connect(
+                f"ws://127.0.0.1:{relay.port}/action",
+                proxy=None,
+            )
+            try:
+                await new_connection.send(
+                    encode_action(
+                        new_context,
+                        "look",
+                    )
+                )
+
+                new_receive = asyncio.create_task(new_connection.recv())
+
+                await _wait_until(lambda: len(emitted) == 2)
+                new_dispatch = emitted[1]
+                assert new_dispatch.context == new_context
+                assert new_dispatch.command == "look"
+
+                # A delayed acknowledgement for the retired context must not
+                # resolve the new context's in-flight action.
+                await runtime.handle(
+                    ActionResultMessage(
+                        old_dispatch.id,
+                        "forwarded",
+                    )
+                )
+
+                await asyncio.sleep(0.05)
+                assert not new_receive.done()
+
+                await runtime.handle(
+                    ActionResultMessage(
+                        new_dispatch.id,
+                        "forwarded",
+                    )
+                )
+
+                raw = await asyncio.wait_for(
+                    new_receive,
+                    timeout=1,
+                )
+                assert isinstance(raw, str)
+
+                decoded = decode_server_message(raw)
+                assert decoded.ok
+                assert isinstance(
+                    decoded.value,
+                    RelayActionResultMessage,
+                )
+                assert decoded.value.status == "forwarded"
+            finally:
+                await new_connection.close()
+
+            assert len(emitted) == 2
+        finally:
+            await runtime.close()
+            await relay.close()
+
+    asyncio.run(scenario())

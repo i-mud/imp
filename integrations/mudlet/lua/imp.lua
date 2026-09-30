@@ -2,6 +2,12 @@ Imp = Imp or {
   process = nil,
   buffer = "",
   lastStatus = nil,
+  lastError = nil,
+  session = nil,
+  connected = false,
+  focused = false,
+  connection = 0,
+  foreground = 0,
 }
 
 function Imp.sendFrame(frame)
@@ -11,6 +17,47 @@ function Imp.sendFrame(frame)
 
   Imp.process.send(yajl.to_string(frame) .. "\n")
   return true
+end
+
+function Imp.sendActionResult(id, status)
+  return Imp.sendFrame({
+    type = "action-result",
+    id = id,
+    status = status,
+  })
+end
+
+function Imp.handleAction(frame)
+  if
+    type(frame.id) ~= "string"
+    or type(frame.command) ~= "string"
+    or type(frame.context) ~= "table"
+  then
+    return
+  end
+
+  local context = frame.context
+  local current =
+    Imp.connected
+    and Imp.focused
+    and Imp.session ~= nil
+    and context.session == Imp.session
+    and context.foreground == Imp.foreground
+    and context.connection == Imp.connection
+
+  if not current then
+    Imp.sendActionResult(frame.id, "rejected")
+    return
+  end
+
+  -- This is the final context fence immediately before the client-specific
+  -- write. Passing false bypasses Mudlet aliases.
+  local ok = pcall(send, frame.command, false)
+
+  Imp.sendActionResult(
+    frame.id,
+    ok and "forwarded" or "rejected"
+  )
 end
 
 function Imp.onHelperOutput(chunk)
@@ -28,7 +75,14 @@ function Imp.onHelperOutput(chunk)
     if line ~= "" then
       local ok, frame = pcall(yajl.to_value, line)
       if ok and type(frame) == "table" then
-        Imp.lastStatus = frame
+        if frame.type == "status" then
+          Imp.lastStatus = frame
+          Imp.session = frame.session
+        elseif frame.type == "action" then
+          Imp.handleAction(frame)
+        elseif frame.type == "error" then
+          Imp.lastError = frame
+        end
       end
     end
   end
@@ -48,17 +102,25 @@ function Imp.start(helperPath)
     Imp.process.close()
   end
 
+  local _, _, connected = getConnectionInfo()
+  local focused = hasFocus()
+
   Imp.buffer = ""
   Imp.lastStatus = nil
-  Imp.process = spawn(Imp.onHelperOutput, helperPath)
+  Imp.lastError = nil
+  Imp.session = nil
+  Imp.connected = connected == true
+  Imp.focused = focused == true
+  Imp.connection = Imp.connected and 1 or 0
+  Imp.foreground = Imp.focused and 1 or 0
 
-  local _, _, connected = getConnectionInfo()
+  Imp.process = spawn(Imp.onHelperOutput, helperPath)
 
   Imp.sendFrame({
     type = "init",
     profile = getProfileName(),
-    connected = connected == true,
-    focused = hasFocus(),
+    connected = Imp.connected,
+    focused = Imp.focused,
   })
 end
 
@@ -67,18 +129,33 @@ function Imp.stop()
     Imp.process.close()
     Imp.process = nil
   end
+
+  Imp.session = nil
 end
 
 registerNamedEventHandler("imp", "connected", "sysConnectionEvent", function()
+  if not Imp.connected then
+    Imp.connection = Imp.connection + 1
+  end
+
+  Imp.connected = true
   Imp.sendFrame({type = "connected"})
 end)
 
 registerNamedEventHandler("imp", "disconnected", "sysDisconnectionEvent", function()
+  Imp.connected = false
   Imp.sendFrame({type = "disconnected"})
 end)
 
 registerNamedEventHandler("imp", "focus", "sysProfileFocusChangeEvent", function(_, focused)
-  Imp.sendFrame({type = "focus", focused = focused == true})
+  local nextFocused = focused == true
+
+  if nextFocused and not Imp.focused then
+    Imp.foreground = Imp.foreground + 1
+  end
+
+  Imp.focused = nextFocused
+  Imp.sendFrame({type = "focus", focused = nextFocused})
 end)
 
 registerNamedEventHandler("imp", "protocol enabled", "sysProtocolEnabled", function(_, protocol)

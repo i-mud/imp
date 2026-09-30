@@ -8,6 +8,9 @@ import secrets
 import sys
 from typing import TextIO
 
+from imp_relay.protocol import DispatchMessage
+
+from imp_mudlet.actions import DEFAULT_CONSUMER_URL
 from imp_mudlet.lifecycle import MudletLifecycle
 from imp_mudlet.protocol import decode_lua_message
 from imp_mudlet.runtime import MudletRuntime, PublisherFactory
@@ -15,6 +18,18 @@ from imp_mudlet.runtime import MudletRuntime, PublisherFactory
 
 def new_session() -> str:
     return f"mudlet_{secrets.token_hex(16)}"
+
+
+def _context_wire(
+    session: str,
+    foreground: int,
+    connection: int,
+) -> dict[str, object]:
+    return {
+        "session": session,
+        "foreground": foreground,
+        "connection": connection,
+    }
 
 
 def _status(runtime: MudletRuntime) -> dict[str, object]:
@@ -33,17 +48,37 @@ def _status(runtime: MudletRuntime) -> dict[str, object]:
         "context": (
             None
             if context is None
-            else {
-                "session": context.session,
-                "foreground": context.foreground,
-                "connection": context.connection,
-            }
+            else _context_wire(
+                context.session,
+                context.foreground,
+                context.connection,
+            )
         ),
     }
 
 
+def _action(dispatch: DispatchMessage) -> dict[str, object]:
+    return {
+        "type": "action",
+        "protocol": 1,
+        "id": dispatch.id,
+        "context": _context_wire(
+            dispatch.context.session,
+            dispatch.context.foreground,
+            dispatch.context.connection,
+        ),
+        "command": dispatch.command,
+    }
+
+
 def _write(output: TextIO, value: dict[str, object]) -> None:
-    output.write(json.dumps(value, separators=(",", ":"), ensure_ascii=True))
+    output.write(
+        json.dumps(
+            value,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+    )
     output.write("\n")
     output.flush()
 
@@ -54,11 +89,26 @@ async def run_bridge_async(
     *,
     session: str | None = None,
     publisher_factory: PublisherFactory | None = None,
+    action_url: str = DEFAULT_CONSUMER_URL,
 ) -> None:
     lifecycle = MudletLifecycle(session=session or new_session())
-    runtime = (
-        MudletRuntime(lifecycle) if publisher_factory is None else MudletRuntime(lifecycle, publisher_factory)
-    )
+
+    def emit_action(dispatch: DispatchMessage) -> None:
+        _write(output, _action(dispatch))
+
+    if publisher_factory is None:
+        runtime = MudletRuntime(
+            lifecycle,
+            emit_action=emit_action,
+            action_url=action_url,
+        )
+    else:
+        runtime = MudletRuntime(
+            lifecycle,
+            publisher_factory,
+            emit_action=emit_action,
+            action_url=action_url,
+        )
 
     try:
         while True:
@@ -105,6 +155,7 @@ def run_bridge(
     *,
     session: str | None = None,
     publisher_factory: PublisherFactory | None = None,
+    action_url: str = DEFAULT_CONSUMER_URL,
 ) -> None:
     asyncio.run(
         run_bridge_async(
@@ -112,6 +163,7 @@ def run_bridge(
             output,
             session=session,
             publisher_factory=publisher_factory,
+            action_url=action_url,
         )
     )
 

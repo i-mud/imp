@@ -51,3 +51,21 @@ def test_control_characters_in_profile_are_rejected() -> None:
 
 def test_focus_decodes() -> None:
     assert decode_lua_message('{"type":"focus","focused":false}').message == FocusMessage(False)
+
+
+def test_action_result_decodes() -> None:
+    from imp_mudlet.protocol import ActionResultMessage
+
+    decoded = decode_lua_message('{"type":"action-result","id":"abc_123","status":"forwarded"}')
+
+    assert decoded.message == ActionResultMessage(
+        "abc_123",
+        "forwarded",
+    )
+
+
+def test_action_result_rejects_invalid_correlation() -> None:
+    decoded = decode_lua_message('{"type":"action-result","id":"bad-id","status":"forwarded"}')
+
+    assert not decoded.ok
+    assert decoded.error == "invalid_action_result"

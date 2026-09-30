@@ -1,4 +1,4 @@
-"""Single-flight action forwarding to the active TinyFugue consumer."""
+"""Single-flight action forwarding to the active local client consumer."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ class ActionBroker:
         if context != active_context:
             return "rejected", "context is not active"
         if consumer is None or consumer.context != context:
-            return "rejected", "no matching TinyFugue consumer"
+            return "rejected", "no matching local action consumer"
         if self._inflight_result is not None:
             return "rejected", "another action is in flight"
 

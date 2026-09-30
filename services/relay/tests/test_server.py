@@ -279,7 +279,7 @@ def test_action_rejects_without_matching_consumer() -> None:
                 await action.send(encode_action(CONTEXT, "look"))
                 result = await _receive_type(action, "action-result")
                 assert result["status"] == "rejected"
-                assert result["detail"] == "no matching TinyFugue consumer"
+                assert result["detail"] == "no matching local action consumer"
         finally:
             await relay.close()
 

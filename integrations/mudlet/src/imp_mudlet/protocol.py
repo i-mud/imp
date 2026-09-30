@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Final, cast
 
 from imp_adapter.records import MAX_RECORD_CHARS, Record, parse_record
+from imp_relay.protocol import LIMITS, ConsumerStatus
 
 MAX_FRAME_CHARS: Final = MAX_RECORD_CHARS + 1024
 MAX_PROFILE_CHARS: Final = 128
@@ -46,8 +47,20 @@ class GmcpMessage:
     record: Record
 
 
+@dataclass(frozen=True)
+class ActionResultMessage:
+    id: str
+    status: ConsumerStatus
+
+
 LuaMessage = (
-    InitMessage | ConnectedMessage | DisconnectedMessage | FocusMessage | ProtocolMessage | GmcpMessage
+    InitMessage
+    | ConnectedMessage
+    | DisconnectedMessage
+    | FocusMessage
+    | ProtocolMessage
+    | GmcpMessage
+    | ActionResultMessage
 )
 
 
@@ -139,5 +152,26 @@ def decode_lua_message(line: str) -> DecodeResult:
         if not record.ok or record.record is None:
             return _invalid(record.error or "invalid_gmcp")
         return DecodeResult(GmcpMessage(record.record), None)
+
+    if message_type == "action-result":
+        correlation = _safe_text(
+            body.get("id"),
+            LIMITS["maxCorrelationChars"],
+        )
+        status = body.get("status")
+        if (
+            correlation is None
+            or not correlation.isascii()
+            or not all(char.isalnum() or char == "_" for char in correlation)
+            or status not in ("forwarded", "rejected")
+        ):
+            return _invalid("invalid_action_result")
+        return DecodeResult(
+            ActionResultMessage(
+                correlation,
+                status,
+            ),
+            None,
+        )
 
     return _invalid("unknown_type")

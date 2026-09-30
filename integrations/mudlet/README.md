@@ -24,4 +24,10 @@ that producer without sending a deselection; gaining focus selects the profile's
 latest locally normalized state. This makes profile switching safe regardless
 of the order in which the old and new profiles receive their focus events.
 
-Trusted outbound actions are added in a subsequent Slice 16 checkpoint.
+Trusted outbound actions use the same exact `(session, foreground, connection)`
+context as state publication. The helper registers `/action-consumer` only for
+the focused profile. A dispatch is forwarded to Lua with that exact context;
+Lua independently checks its current connection and foreground generations
+immediately before calling Mudlet `send()`. Only after that call returns without
+a Lua error does it report `forwarded` to the node. A context mismatch reports
+`rejected`; loss after dispatch remains `unknown` and is never retried.
