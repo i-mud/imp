@@ -86,7 +86,7 @@ pub fn run() {
             let runtime_connection = config.runtime_connection_config();
             let config_store = ConnectionConfigStore::new(config_path, config.clone());
             let supervisor = match config.mode {
-                TunnelMode::External => TunnelSupervisor::external(),
+                TunnelMode::External | TunnelMode::Local => TunnelSupervisor::external(),
                 TunnelMode::Managed => TunnelSupervisor::managed(config.ssh_target, LOCAL_PORT),
                 TunnelMode::Direct => TunnelSupervisor::direct(),
             };

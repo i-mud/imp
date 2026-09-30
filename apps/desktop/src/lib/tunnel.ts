@@ -32,7 +32,7 @@ export type RuntimeConnectionConfig =
       readonly authenticationToken: string;
     };
 
-export type ConnectionMode = 'external' | 'managed' | 'direct';
+export type ConnectionMode = 'external' | 'local' | 'managed' | 'direct';
 
 export interface ConnectionSettings {
   readonly mode: ConnectionMode;

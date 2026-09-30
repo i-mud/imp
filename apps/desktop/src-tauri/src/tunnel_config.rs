@@ -22,6 +22,7 @@ use std::os::unix::fs::PermissionsExt;
 pub enum TunnelMode {
     #[default]
     External,
+    Local,
     Managed,
     Direct,
 }
@@ -166,11 +167,13 @@ impl ConnectionConfigStore {
 impl TunnelConfig {
     pub fn runtime_connection_config(&self) -> RuntimeConnectionConfig {
         match self.mode {
-            TunnelMode::External | TunnelMode::Managed => RuntimeConnectionConfig {
-                mode: RuntimeConnectionMode::Local,
-                state_url: None,
-                authentication_token: None,
-            },
+            TunnelMode::External | TunnelMode::Local | TunnelMode::Managed => {
+                RuntimeConnectionConfig {
+                    mode: RuntimeConnectionMode::Local,
+                    state_url: None,
+                    authentication_token: None,
+                }
+            }
             TunnelMode::Direct => RuntimeConnectionConfig {
                 mode: RuntimeConnectionMode::Direct,
                 state_url: Some(self.remote_url.clone()),
@@ -183,6 +186,12 @@ impl TunnelConfig {
         match self.mode {
             TunnelMode::External => ConnectionSettings {
                 mode: TunnelMode::External,
+                ssh_target: String::new(),
+                remote_url: String::new(),
+                has_pairing_token: false,
+            },
+            TunnelMode::Local => ConnectionSettings {
+                mode: TunnelMode::Local,
                 ssh_target: String::new(),
                 remote_url: String::new(),
                 has_pairing_token: false,
@@ -205,6 +214,12 @@ impl TunnelConfig {
     fn updated(&self, update: ConnectionSettingsUpdate) -> Result<Self, &'static str> {
         let candidate = match update.mode {
             TunnelMode::External => TunnelConfig::default(),
+            TunnelMode::Local => TunnelConfig {
+                mode: TunnelMode::Local,
+                ssh_target: String::new(),
+                remote_url: String::new(),
+                pairing_token: String::new(),
+            },
             TunnelMode::Managed => TunnelConfig {
                 mode: TunnelMode::Managed,
                 ssh_target: update.ssh_target.trim().to_owned(),
@@ -236,7 +251,7 @@ impl TunnelConfig {
 
 fn validate(config: &TunnelConfig) -> Result<(), &'static str> {
     match config.mode {
-        TunnelMode::External => Ok(()),
+        TunnelMode::External | TunnelMode::Local => Ok(()),
         TunnelMode::Managed => {
             if config.ssh_target.trim().is_empty() {
                 return Err("managed mode requires a non-empty sshTarget");
@@ -244,8 +259,7 @@ fn validate(config: &TunnelConfig) -> Result<(), &'static str> {
             Ok(())
         }
         TunnelMode::Direct => {
-            let url =
-                Url::parse(&config.remote_url).map_err(|_| "direct remote URL is invalid")?;
+            let url = Url::parse(&config.remote_url).map_err(|_| "direct remote URL is invalid")?;
 
             if url.scheme() != "wss" {
                 return Err("direct remote URL must use wss");
@@ -383,6 +397,61 @@ mod tests {
 
         assert_eq!(config, TunnelConfig::default());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn local_mode_round_trips_and_uses_the_local_runtime_projection() {
+        let dir = tempdir();
+        let path = dir.join("tunnel.json");
+        std::fs::write(&path, r#"{"mode":"local"}"#).unwrap();
+
+        let config = load_or_init(&path);
+
+        assert_eq!(
+            config,
+            TunnelConfig {
+                mode: TunnelMode::Local,
+                ssh_target: String::new(),
+                remote_url: String::new(),
+                pairing_token: String::new(),
+            }
+        );
+
+        let runtime = config.runtime_connection_config();
+        assert_eq!(runtime.mode, RuntimeConnectionMode::Local);
+        assert!(runtime.state_url.is_none());
+        assert!(runtime.authentication_token.is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn local_update_clears_remote_transport_material() {
+        let existing = TunnelConfig {
+            mode: TunnelMode::Direct,
+            ssh_target: "ignored".into(),
+            remote_url: "wss://imp.example/state".into(),
+            pairing_token: VALID_TOKEN.into(),
+        };
+
+        let updated = existing
+            .updated(ConnectionSettingsUpdate {
+                mode: TunnelMode::Local,
+                ssh_target: "ignored".into(),
+                remote_url: "wss://ignored.example/state".into(),
+                pairing_token: Some(VALID_TOKEN.into()),
+            })
+            .unwrap();
+
+        assert_eq!(
+            updated,
+            TunnelConfig {
+                mode: TunnelMode::Local,
+                ssh_target: String::new(),
+                remote_url: String::new(),
+                pairing_token: String::new(),
+            }
+        );
     }
 
     #[test]
@@ -609,7 +678,10 @@ mod tests {
             remote_url: String::new(),
             pairing_token: None,
         });
-        assert_eq!(empty.unwrap_err(), "managed mode requires a non-empty sshTarget");
+        assert_eq!(
+            empty.unwrap_err(),
+            "managed mode requires a non-empty sshTarget"
+        );
 
         let updated = existing
             .updated(ConnectionSettingsUpdate {
@@ -855,8 +927,7 @@ mod tests {
         persist_config(&path, &existing).unwrap();
 
         let before = std::fs::read_to_string(&path).unwrap();
-        let store =
-            ConnectionConfigStore::with_persist(path.clone(), existing, failing_persist);
+        let store = ConnectionConfigStore::with_persist(path.clone(), existing, failing_persist);
 
         let error = store
             .save(ConnectionSettingsUpdate {
