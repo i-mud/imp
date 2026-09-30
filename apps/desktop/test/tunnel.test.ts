@@ -22,6 +22,7 @@ function setTauriRuntime(enabled: boolean): void {
 afterEach(() => {
   setTauriRuntime(false);
   invoke.mockReset();
+  vi.useRealTimers();
 });
 
 describe('watchTunnelDiagnostics', () => {
@@ -32,6 +33,50 @@ describe('watchTunnelDiagnostics', () => {
 
     expect(detail()).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('uses tunnel diagnostics when local node supervision is inactive', async () => {
+    vi.useFakeTimers();
+    setTauriRuntime(true);
+
+    invoke.mockImplementation((command: string) => {
+      if (command === 'tunnel_status') {
+        return Promise.resolve({ diagnostic: 'reconnecting' });
+      }
+      if (command === 'node_status') {
+        return Promise.resolve({ diagnostic: 'inactive' });
+      }
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+
+    const detail = watchTunnelDiagnostics();
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(detail()).toBe('Establishing SSH tunnel…');
+    expect(invoke).toHaveBeenCalledWith('tunnel_status');
+    expect(invoke).toHaveBeenCalledWith('node_status');
+  });
+
+  it('uses local node diagnostics instead of inactive tunnel diagnostics', async () => {
+    vi.useFakeTimers();
+    setTauriRuntime(true);
+
+    invoke.mockImplementation((command: string) => {
+      if (command === 'tunnel_status') {
+        return Promise.resolve({ diagnostic: 'external' });
+      }
+      if (command === 'node_status') {
+        return Promise.resolve({ diagnostic: 'starting' });
+      }
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+
+    const detail = watchTunnelDiagnostics();
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(detail()).toBe('Starting local Imp node…');
   });
 });
 

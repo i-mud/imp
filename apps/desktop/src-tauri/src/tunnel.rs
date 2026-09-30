@@ -86,9 +86,9 @@ pub struct TunnelSupervisor {
 }
 
 impl TunnelSupervisor {
-    /// External/manual mode: Imp owns no process. Kept for compatibility
-    pub fn external() -> Arc<Self> {
-        eprintln!("imp: external tunnel mode; no SSH child");
+    /// No SSH transport is active. Used by Local mode, where node
+    /// supervision is owned separately.
+    pub fn inactive() -> Arc<Self> {
         Arc::new(Self {
             status: Mutex::new(TunnelStatus {
                 diagnostic: TunnelDiagnostic::External,
@@ -97,6 +97,12 @@ impl TunnelSupervisor {
             stop: Arc::new(AtomicBool::new(false)),
             worker: Mutex::new(None),
         })
+    }
+
+    /// External/manual mode: Imp owns no process. Kept for compatibility.
+    pub fn external() -> Arc<Self> {
+        eprintln!("imp: external tunnel mode; no SSH child");
+        Self::inactive()
     }
 
     /// Direct WSS mode: Imp owns no SSH process or local forward.
@@ -298,7 +304,7 @@ fn local_addr(local_port: u16) -> SocketAddr {
 /// here, once, so a caller never has to sequence them itself - and never
 /// publishes an intermediate answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LocalPortState {
+pub(crate) enum LocalPortState {
     /// Held by something that answers like a usable Imp relay.
     RelayEndpoint,
     /// Held by something else; not ours to bind over or kill.
@@ -307,7 +313,7 @@ enum LocalPortState {
     Free,
 }
 
-fn classify_local_port(local_port: u16) -> LocalPortState {
+pub(crate) fn classify_local_port(local_port: u16) -> LocalPortState {
     if probe_relay_healthz(local_port) {
         LocalPortState::RelayEndpoint
     } else if probe_open(local_port) {

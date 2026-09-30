@@ -1,3 +1,4 @@
+mod node;
 mod topmost;
 mod tray;
 mod tunnel;
@@ -7,6 +8,7 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
+use node::{NodeStatus, NodeSupervisor};
 use tunnel::{TunnelStatus, TunnelSupervisor, LOCAL_PORT};
 use tunnel_config::{
     ConnectionConfigStore, ConnectionSettings, ConnectionSettingsUpdate, RuntimeConnectionConfig,
@@ -23,6 +25,11 @@ fn tunnel_status(supervisor: tauri::State<'_, Arc<TunnelSupervisor>>) -> TunnelS
 
 /// Returns only the renderer-facing connection tuple. SSH target/process
 /// details never cross this boundary.
+#[tauri::command]
+fn node_status(supervisor: tauri::State<'_, Arc<NodeSupervisor>>) -> NodeStatus {
+    supervisor.status()
+}
+
 #[tauri::command]
 fn connection_config(config: tauri::State<'_, RuntimeConnectionConfig>) -> RuntimeConnectionConfig {
     config.inner().clone()
@@ -60,6 +67,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             tunnel_status,
+            node_status,
             connection_config,
             connection_settings,
             save_connection_settings,
@@ -85,14 +93,20 @@ pub fn run() {
             let config = tunnel_config::load_or_init(&config_path);
             let runtime_connection = config.runtime_connection_config();
             let config_store = ConnectionConfigStore::new(config_path, config.clone());
-            let supervisor = match config.mode {
-                TunnelMode::External | TunnelMode::Local => TunnelSupervisor::external(),
+            let tunnel_supervisor = match config.mode {
+                TunnelMode::External => TunnelSupervisor::external(),
+                TunnelMode::Local => TunnelSupervisor::inactive(),
                 TunnelMode::Managed => TunnelSupervisor::managed(config.ssh_target, LOCAL_PORT),
                 TunnelMode::Direct => TunnelSupervisor::direct(),
             };
+            let node_supervisor = match config.mode {
+                TunnelMode::Local => NodeSupervisor::local(app.handle().clone(), LOCAL_PORT),
+                _ => NodeSupervisor::inactive(),
+            };
             app.manage(runtime_connection);
             app.manage(config_store);
-            app.manage(supervisor);
+            app.manage(tunnel_supervisor);
+            app.manage(node_supervisor);
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -102,6 +116,9 @@ pub fn run() {
             // Clean it up when the event loop is actually exiting, rather than
             // when exit is merely requested.
             if let tauri::RunEvent::Exit = event {
+                if let Some(supervisor) = app_handle.try_state::<Arc<NodeSupervisor>>() {
+                    supervisor.shutdown();
+                }
                 if let Some(supervisor) = app_handle.try_state::<Arc<TunnelSupervisor>>() {
                     supervisor.shutdown();
                 }

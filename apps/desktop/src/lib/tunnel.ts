@@ -20,6 +20,13 @@ interface TunnelStatus {
   readonly diagnostic: TunnelDiagnostic;
 }
 
+type NodeDiagnostic =
+  'inactive' | 'starting' | 'owned' | 'adopted' | 'local_port_unavailable' | 'spawn_unavailable' | 'down';
+
+interface NodeStatus {
+  readonly diagnostic: NodeDiagnostic;
+}
+
 export type RuntimeConnectionConfig =
   | {
       readonly mode: 'local';
@@ -59,6 +66,13 @@ const DETAIL_BY_DIAGNOSTIC: Partial<Record<TunnelDiagnostic, string>> = {
   local_port_unavailable: 'Local forwarded port is unavailable.',
   ssh_unavailable: 'SSH tunnel unavailable.',
   reconnecting: 'Establishing SSH tunnel…',
+};
+
+const DETAIL_BY_NODE_DIAGNOSTIC: Partial<Record<NodeDiagnostic, string>> = {
+  starting: 'Starting local Imp node…',
+  local_port_unavailable: 'Local Imp node port is unavailable.',
+  spawn_unavailable: 'Local Imp node could not start.',
+  down: 'Local Imp node is down.',
 };
 
 function isTauriRuntime(): boolean {
@@ -119,9 +133,12 @@ export function watchTunnelDiagnostics(): () => string | null {
 
   let lastKnownDetail: string | null = null;
   const pollOnce = (): void => {
-    invoke<TunnelStatus>('tunnel_status')
-      .then((status) => {
-        lastKnownDetail = DETAIL_BY_DIAGNOSTIC[status.diagnostic] ?? null;
+    Promise.all([invoke<TunnelStatus>('tunnel_status'), invoke<NodeStatus>('node_status')])
+      .then(([tunnelStatus, nodeStatus]) => {
+        lastKnownDetail =
+          nodeStatus.diagnostic === 'inactive'
+            ? (DETAIL_BY_DIAGNOSTIC[tunnelStatus.diagnostic] ?? null)
+            : (DETAIL_BY_NODE_DIAGNOSTIC[nodeStatus.diagnostic] ?? null);
       })
       .catch(() => {
         lastKnownDetail = null;
