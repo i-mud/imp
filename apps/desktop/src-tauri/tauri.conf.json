@@ -36,6 +36,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/imp-node"]
+    "externalBin": ["binaries/imp-node"],
+    "resources": {
+      "binaries/imp-node-runtime/": "imp-node-runtime/"
+    }
   }
 }

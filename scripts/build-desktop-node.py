@@ -17,6 +17,8 @@ RAW = OUTPUT / "raw"
 WORK = OUTPUT / "work"
 SPEC = OUTPUT / "spec"
 TAURI_BINARIES = ROOT / "apps" / "desktop" / "src-tauri" / "binaries"
+RUNTIME_NAME = "imp-node-runtime"
+TAURI_RUNTIME = TAURI_BINARIES / RUNTIME_NAME
 
 
 def command_output(*args: str) -> str:
@@ -41,10 +43,14 @@ def main() -> None:
         [
             "uv",
             "run",
+            "--python",
+            "3.12",
             "pyinstaller",
             "--noconfirm",
             "--clean",
-            "--onefile",
+            "--onedir",
+            "--contents-directory",
+            RUNTIME_NAME,
             "--name",
             "imp-node",
             "--distpath",
@@ -60,19 +66,29 @@ def main() -> None:
     )
 
     extension = ".exe" if os.name == "nt" else ""
-    source = RAW / f"imp-node{extension}"
+    bundle = RAW / "imp-node"
+    source = bundle / f"imp-node{extension}"
+    source_runtime = bundle / RUNTIME_NAME
 
     if not source.is_file():
         raise SystemExit(f"PyInstaller did not produce {source}")
+    if not source_runtime.is_dir():
+        raise SystemExit(f"PyInstaller did not produce {source_runtime}")
 
     TAURI_BINARIES.mkdir(parents=True, exist_ok=True)
     destination = TAURI_BINARIES / f"imp-node-{target_triple}{extension}"
+
+    destination.unlink(missing_ok=True)
+    shutil.rmtree(TAURI_RUNTIME, ignore_errors=True)
+
     shutil.copy2(source, destination)
+    shutil.copytree(source_runtime, TAURI_RUNTIME)
 
     if os.name != "nt":
         destination.chmod(destination.stat().st_mode | stat.S_IXUSR)
 
     print(destination)
+    print(TAURI_RUNTIME)
 
 
 if __name__ == "__main__":
