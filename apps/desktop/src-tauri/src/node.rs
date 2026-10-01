@@ -227,14 +227,14 @@ impl NodeSupervisor {
 
             match classify_local_port(local_port) {
                 LocalPortState::RelayEndpoint => return true,
-                LocalPortState::Foreign => {
-                    // Another process won the bind race. Kill only our own
-                    // child and let the next supervision cycle classify the
-                    // actual listener.
-                    self.kill_owned();
-                    return false;
+                LocalPortState::Foreign | LocalPortState::Free => {
+                    // A freshly spawned relay can begin accepting TCP before
+                    // /healthz is ready to answer. Do not mistake that brief
+                    // startup window for a foreign listener and kill our own
+                    // child. If another process actually won the bind race,
+                    // the sidecar will normally exit; otherwise the readiness
+                    // deadline below remains the upper bound.
                 }
-                LocalPortState::Free => {}
             }
 
             sleep_unless_stopped(POLL_INTERVAL, stop);
@@ -540,6 +540,68 @@ mod tests {
         supervisor.shutdown();
 
         assert_eq!(kills.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn owned_startup_tolerates_transient_non_health_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let requests = Arc::new(AtomicUsize::new(0));
+        let worker_requests = Arc::clone(&requests);
+
+        let worker = thread::spawn(move || {
+            while !worker_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+                        let _ = stream.read(&mut [0u8; 1024]);
+
+                        let request = worker_requests.fetch_add(1, Ordering::SeqCst);
+
+                        // The first health probe sees a TCP listener before
+                        // the relay health endpoint is fully ready. The
+                        // classifier will then also perform a bare TCP probe.
+                        let response = if request == 0 {
+                            FOREIGN_RESPONSE
+                        } else {
+                            HEALTH_RESPONSE
+                        };
+
+                        let _ = stream.write_all(response.as_bytes());
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
+
+        let kills = Arc::new(AtomicUsize::new(0));
+        let supervisor = NodeSupervisor::inactive();
+
+        *supervisor.child.lock() = Some(Box::new(FakeNode {
+            kills: Arc::clone(&kills),
+        }) as Box<dyn OwnedNode>);
+
+        let ready = supervisor.wait_for_owned_ready(port, &AtomicBool::new(false));
+
+        stop.store(true, Ordering::SeqCst);
+        worker.join().unwrap();
+
+        assert!(
+            ready,
+            "a transient pre-health listener must become ready without restart"
+        );
+        assert_eq!(
+            kills.load(Ordering::SeqCst),
+            0,
+            "the owned node must not be killed during its health startup window"
+        );
     }
 
     #[test]
