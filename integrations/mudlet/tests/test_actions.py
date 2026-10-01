@@ -120,6 +120,99 @@ def test_action_is_forwarded_only_after_lua_result() -> None:
     asyncio.run(scenario())
 
 
+def test_missing_lua_result_becomes_unknown_and_consumer_recovers() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+
+        context = StateContext("mudlet_test", 1, 1)
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{relay.port}/ingest")
+        emitted: list[DispatchMessage] = []
+        consumer = RelayActionConsumer(
+            context,
+            emitted.append,
+            url=f"ws://127.0.0.1:{relay.port}/action-consumer",
+            result_timeout=0.05,
+        )
+
+        try:
+            await publisher.select(
+                context,
+                EMPTY_STATE,
+            )
+            await _wait_until(lambda: relay.state.active_context == context)
+
+            consumer.start()
+            await asyncio.wait_for(
+                consumer.wait_ready(),
+                timeout=1,
+            )
+
+            first_action = asyncio.create_task(
+                _request_action(
+                    f"ws://127.0.0.1:{relay.port}/action",
+                    context,
+                    "north",
+                )
+            )
+
+            await _wait_until(lambda: len(emitted) == 1)
+            first_dispatch = emitted[0]
+
+            first_result = await asyncio.wait_for(
+                first_action,
+                timeout=1,
+            )
+
+            assert first_result.status == "unknown"
+
+            # The abandoned correlation can never be resurrected by a late
+            # Lua acknowledgement.
+            assert not consumer.resolve(
+                first_dispatch.id,
+                "forwarded",
+            )
+
+            # The consumer must register again for future actions rather than
+            # remaining stuck behind the abandoned dispatch.
+            await asyncio.wait_for(
+                consumer.wait_ready(),
+                timeout=1,
+            )
+
+            assert len(emitted) == 1
+
+            second_action = asyncio.create_task(
+                _request_action(
+                    f"ws://127.0.0.1:{relay.port}/action",
+                    context,
+                    "look",
+                )
+            )
+
+            await _wait_until(lambda: len(emitted) == 2)
+            second_dispatch = emitted[1]
+
+            assert consumer.resolve(
+                second_dispatch.id,
+                "forwarded",
+            )
+
+            second_result = await asyncio.wait_for(
+                second_action,
+                timeout=1,
+            )
+
+            assert second_result.status == "forwarded"
+            assert len(emitted) == 2
+        finally:
+            await consumer.close()
+            await publisher.close()
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
 def test_consumer_loss_after_dispatch_is_unknown_and_not_retried() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)

@@ -8,6 +8,7 @@ from contextlib import suppress
 from typing import Final
 from urllib.parse import urlsplit
 
+from imp_relay.action import DEFAULT_ACTION_RESULT_TIMEOUT
 from imp_relay.protocol import (
     ConsumerReadyMessage,
     ConsumerStatus,
@@ -22,6 +23,8 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 
 DEFAULT_CONSUMER_URL: Final = "ws://127.0.0.1:8787/action-consumer"
 _RETRY_SECONDS: Final = 0.05
+_RESULT_TIMEOUT_MARGIN: Final = 1.0
+_DEFAULT_LUA_RESULT_TIMEOUT: Final = DEFAULT_ACTION_RESULT_TIMEOUT - _RESULT_TIMEOUT_MARGIN
 
 type ActionEmitter = Callable[[DispatchMessage], None]
 
@@ -45,11 +48,16 @@ class RelayActionConsumer:
         emit: ActionEmitter,
         *,
         url: str = DEFAULT_CONSUMER_URL,
+        result_timeout: float = _DEFAULT_LUA_RESULT_TIMEOUT,
     ) -> None:
         _validate_url(url)
+        if not 0 < result_timeout < DEFAULT_ACTION_RESULT_TIMEOUT:
+            raise ValueError("result timeout must be positive and shorter than the relay action deadline")
+
         self.context = context
         self.url = url
         self._emit = emit
+        self._result_timeout = result_timeout
         self._task: asyncio.Task[None] | None = None
         self._ready = asyncio.Event()
         self._pending_id: str | None = None
@@ -125,9 +133,18 @@ class RelayActionConsumer:
                     self._pending_result = result
 
                     self._emit(dispatch)
-                    status = await result
-
-                    await connection.send(encode_consumer_result(dispatch.id, status))
+                    try:
+                        status = await asyncio.wait_for(
+                            result,
+                            timeout=self._result_timeout,
+                        )
+                    except TimeoutError:
+                        # Closing this registration makes the relay resolve
+                        # the already-dispatched action as unknown. Never retry
+                        # or re-emit that dispatch.
+                        pass
+                    else:
+                        await connection.send(encode_consumer_result(dispatch.id, status))
 
                 except (ConnectionClosed, OSError, WebSocketException):
                     pass
