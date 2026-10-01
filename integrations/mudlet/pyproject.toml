@@ -25,6 +25,7 @@ imp-relay = { path = "../../services/relay", editable = true }
 [dependency-groups]
 dev = [
   "mypy>=1.19",
+  "pyinstaller>=6.22,<7",
   "pytest>=9.0",
   "ruff>=0.15",
 ]

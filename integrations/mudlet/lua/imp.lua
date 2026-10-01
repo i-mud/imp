@@ -28,6 +28,8 @@ function Imp.sendActionResult(id, status)
 end
 
 function Imp.handleAction(frame)
+  Imp.refreshFocus()
+
   if
     type(frame.id) ~= "string"
     or type(frame.command) ~= "string"
@@ -88,7 +90,41 @@ function Imp.onHelperOutput(chunk)
   end
 end
 
+function Imp.setFocus(focused)
+  local nextFocused = focused == true
+
+  if nextFocused == Imp.focused then
+    return false
+  end
+
+  if nextFocused then
+    Imp.foreground = Imp.foreground + 1
+  end
+
+  Imp.focused = nextFocused
+  Imp.sendFrame({
+    type = "focus",
+    focused = nextFocused,
+  })
+
+  return true
+end
+
+function Imp.refreshFocus()
+  -- hasFocus() also becomes false when Mudlet itself loses OS focus.
+  -- That does not mean this profile stopped being Mudlet's foreground
+  -- profile. Only sysProfileFocusChangeEvent is authoritative for
+  -- demotion.
+  if hasFocus() == true and not Imp.focused then
+    return Imp.setFocus(true)
+  end
+
+  return false
+end
+
 function Imp.gmcpFrame(packageName, payload)
+  Imp.refreshFocus()
+
   Imp.sendFrame({
     type = "gmcp",
     at = math.floor(getEpoch() * 1000),
@@ -97,24 +133,107 @@ function Imp.gmcpFrame(packageName, payload)
   })
 end
 
-function Imp.start(helperPath)
+function Imp.defaultHelperPath()
+  -- Explicit override is useful for development and unusual installations.
+  local override = os.getenv("IMP_MUDLET_HELPER")
+  if override and override ~= "" then
+    local attributes = lfs.attributes(override)
+    if attributes and attributes.mode == "file" then
+      return override
+    end
+  end
+
+  local roots = {}
+
+  -- Windows production location. The Imp desktop installation provisions
+  -- the native helper here once for all Mudlet profiles.
+  local localAppData = os.getenv("LOCALAPPDATA")
+  if localAppData and localAppData ~= "" then
+    table.insert(roots, localAppData .. "/Imp/mudlet")
+  end
+
+  -- Linux production locations.
+  local xdgDataHome = os.getenv("XDG_DATA_HOME")
+  if xdgDataHome and xdgDataHome ~= "" then
+    table.insert(roots, xdgDataHome .. "/imp/mudlet")
+  end
+
+  local home = os.getenv("HOME")
+  if home and home ~= "" then
+    table.insert(roots, home .. "/.local/share/imp/mudlet")
+    table.insert(roots, home .. "/Library/Application Support/Imp/mudlet")
+  end
+
+  -- Compatibility with the initial package-bundled helper spike.
+  table.insert(roots, getMudletHomeDir() .. "/Imp")
+
+  for _, root in ipairs(roots) do
+    local candidates = {
+      root .. "/imp-mudlet-helper.exe",
+      root .. "/imp-mudlet-helper",
+    }
+
+    for _, path in ipairs(candidates) do
+      local attributes = lfs.attributes(path)
+      if attributes and attributes.mode == "file" then
+        return path
+      end
+    end
+  end
+
+  return nil
+end
+
+function Imp.start(helperPath, ...)
   if Imp.process and Imp.process.isRunning() then
     Imp.process.close()
   end
-
-  local _, _, connected = getConnectionInfo()
-  local focused = hasFocus()
 
   Imp.buffer = ""
   Imp.lastStatus = nil
   Imp.lastError = nil
   Imp.session = nil
+
+  local resolvedHelperPath = helperPath
+  if resolvedHelperPath == nil or resolvedHelperPath == "" then
+    resolvedHelperPath = Imp.defaultHelperPath()
+  end
+
+  if resolvedHelperPath == nil then
+    Imp.lastError = {
+      type = "error",
+      protocol = 1,
+      code = "helper_not_found",
+    }
+    return false
+  end
+
+  local _, _, connected = getConnectionInfo()
+  local focused = hasFocus()
+
   Imp.connected = connected == true
   Imp.focused = focused == true
   Imp.connection = Imp.connected and 1 or 0
   Imp.foreground = Imp.focused and 1 or 0
 
-  Imp.process = spawn(Imp.onHelperOutput, helperPath)
+  local ok, process = pcall(
+    spawn,
+    Imp.onHelperOutput,
+    resolvedHelperPath,
+    ...
+  )
+
+  if not ok then
+    Imp.lastError = {
+      type = "error",
+      protocol = 1,
+      code = "helper_spawn_failed",
+      detail = tostring(process),
+    }
+    return false
+  end
+
+  Imp.process = process
 
   Imp.sendFrame({
     type = "init",
@@ -122,6 +241,16 @@ function Imp.start(helperPath)
     connected = Imp.connected,
     focused = Imp.focused,
   })
+
+  -- Package/module scripts can execute before Mudlet has settled profile
+  -- focus. Reconcile once on the next event-loop turn.
+  tempTimer(0, function()
+    if Imp.process and Imp.process.isRunning() then
+      Imp.refreshFocus()
+    end
+  end)
+
+  return true
 end
 
 function Imp.stop()
@@ -140,6 +269,7 @@ registerNamedEventHandler("imp", "connected", "sysConnectionEvent", function()
 
   Imp.connected = true
   Imp.sendFrame({type = "connected"})
+  Imp.refreshFocus()
 end)
 
 registerNamedEventHandler("imp", "disconnected", "sysDisconnectionEvent", function()
@@ -148,14 +278,7 @@ registerNamedEventHandler("imp", "disconnected", "sysDisconnectionEvent", functi
 end)
 
 registerNamedEventHandler("imp", "focus", "sysProfileFocusChangeEvent", function(_, focused)
-  local nextFocused = focused == true
-
-  if nextFocused and not Imp.focused then
-    Imp.foreground = Imp.foreground + 1
-  end
-
-  Imp.focused = nextFocused
-  Imp.sendFrame({type = "focus", focused = nextFocused})
+  Imp.setFocus(focused == true)
 end)
 
 registerNamedEventHandler("imp", "protocol enabled", "sysProtocolEnabled", function(_, protocol)
