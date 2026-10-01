@@ -127,6 +127,9 @@ jobs:
       - name: Build desktop node sidecar
         run: python scripts/build-desktop-node.py
 
+      - name: Build Mudlet desktop helper
+        run: python scripts/build-mudlet-package.py --desktop-resource
+
       - name: Verify release version
         env:
           RELEASE_TAG: ${{ inputs.tag }}

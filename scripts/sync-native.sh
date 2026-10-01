@@ -11,6 +11,8 @@ rsync -a --delete \
   --exclude='dist/' \
   --exclude='target/' \
   --exclude='apps/desktop/src-tauri/binaries/' \
+  --exclude='apps/desktop/src-tauri/resources/mudlet/imp-mudlet-helper*' \
+  --exclude='apps/desktop/src-tauri/resources/mudlet/imp-mudlet-runtime/' \
   --exclude='.venv/' \
   --exclude='venv/' \
   --exclude='__pycache__/' \

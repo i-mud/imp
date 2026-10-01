@@ -133,6 +133,22 @@ function Imp.gmcpFrame(packageName, payload)
   })
 end
 
+function Imp.addHelperRoot(roots, root)
+  local current = io.open(root .. "/current.txt", "r")
+
+  if current then
+    local relative = current:read("*l")
+    current:close()
+
+    if relative and relative:match("^versions/[%w%._%-%+]+$") then
+      table.insert(roots, root .. "/" .. relative)
+    end
+  end
+
+  -- Compatibility with the pre-versioned helper location.
+  table.insert(roots, root)
+end
+
 function Imp.defaultHelperPath()
   -- Explicit override is useful for development and unusual installations.
   local override = os.getenv("IMP_MUDLET_HELPER")
@@ -149,23 +165,25 @@ function Imp.defaultHelperPath()
   -- the native helper here once for all Mudlet profiles.
   local localAppData = os.getenv("LOCALAPPDATA")
   if localAppData and localAppData ~= "" then
-    table.insert(roots, localAppData .. "/Imp/mudlet")
+    Imp.addHelperRoot(roots, localAppData .. "/Imp/mudlet")
   end
 
   -- Linux production locations.
   local xdgDataHome = os.getenv("XDG_DATA_HOME")
   if xdgDataHome and xdgDataHome ~= "" then
-    table.insert(roots, xdgDataHome .. "/imp/mudlet")
+    Imp.addHelperRoot(roots, xdgDataHome .. "/Imp/mudlet")
+    Imp.addHelperRoot(roots, xdgDataHome .. "/imp/mudlet")
   end
 
   local home = os.getenv("HOME")
   if home and home ~= "" then
-    table.insert(roots, home .. "/.local/share/imp/mudlet")
-    table.insert(roots, home .. "/Library/Application Support/Imp/mudlet")
+    Imp.addHelperRoot(roots, home .. "/.local/share/Imp/mudlet")
+    Imp.addHelperRoot(roots, home .. "/.local/share/imp/mudlet")
+    Imp.addHelperRoot(roots, home .. "/Library/Application Support/Imp/mudlet")
   end
 
   -- Compatibility with the initial package-bundled helper spike.
-  table.insert(roots, getMudletHomeDir() .. "/Imp")
+  Imp.addHelperRoot(roots, getMudletHomeDir() .. "/Imp")
 
   for _, root in ipairs(roots) do
     local candidates = {

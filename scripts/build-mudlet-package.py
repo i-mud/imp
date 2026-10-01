@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
@@ -21,6 +22,7 @@ RAW = OUTPUT / "raw"
 WORK = OUTPUT / "work"
 SPEC = OUTPUT / "spec"
 PROJECT = OUTPUT / "project"
+DESKTOP_RESOURCE = ROOT / "apps" / "desktop" / "src-tauri" / "resources" / "mudlet"
 
 HELPER_NAME = "imp-mudlet-helper"
 RUNTIME_NAME = "imp-mudlet-runtime"
@@ -207,6 +209,19 @@ def assemble_distribution(
     return destination
 
 
+def stage_desktop_resource(
+    executable: Path,
+    runtime: Path,
+) -> Path:
+    reset(DESKTOP_RESOURCE)
+    (DESKTOP_RESOURCE / ".gitkeep").touch()
+
+    shutil.copy2(executable, DESKTOP_RESOURCE / executable.name)
+    shutil.copytree(runtime, DESKTOP_RESOURCE / RUNTIME_NAME)
+
+    return DESKTOP_RESOURCE
+
+
 def verify_package(package: Path) -> None:
     with zipfile.ZipFile(package) as archive:
         names = set(archive.namelist())
@@ -245,9 +260,23 @@ def verify_distribution(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--desktop-resource",
+        action="store_true",
+        help="build and stage only the helper bundled with the desktop app",
+    )
+    args = parser.parse_args()
+
     OUTPUT.mkdir(parents=True, exist_ok=True)
 
     executable, runtime = freeze_helper()
+
+    if args.desktop_resource:
+        destination = stage_desktop_resource(executable, runtime)
+        print(destination)
+        return
+
     stage_muddler_project()
 
     package = build_package()

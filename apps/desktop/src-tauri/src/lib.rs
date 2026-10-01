@@ -1,3 +1,4 @@
+mod mudlet;
 mod node;
 mod topmost;
 mod tray;
@@ -74,6 +75,15 @@ pub fn run() {
             alerts_muted
         ])
         .setup(|app| {
+            match mudlet::provision_helper(app.handle()) {
+                Ok(path) => {
+                    eprintln!("imp: Mudlet helper ready at {}", path.display());
+                }
+                Err(error) => {
+                    eprintln!("imp: Mudlet helper provisioning skipped: {error}");
+                }
+            }
+
             app.manage(tray::AlertMuteState::default());
             tray::install(app)?;
 
