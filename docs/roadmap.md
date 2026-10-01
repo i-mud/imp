@@ -529,8 +529,14 @@ The slice does **not** implement Imp-to-Imp chaining. A future desktop or mobile
 Imp may consume one node and expose that state to another Imp peer, so this
 slice must avoid a design that prevents that later topology.
 
-General MUD normalization also remains separate. Initial Mudlet acceptance may
-use the same AVATAR GMCP mapping already established through TinyFugue.
+MUD-specific GMCP interpretation is client-neutral. Mudlet, TinyFugue, and
+future MUD-client adapters emit the same validated GMCP record shape; shared
+GMCP adapters translate those records into Imp's canonical state model. A
+client package must not embed a MUD-specific normalization implementation.
+
+Initial Slice 16 packaging may continue using the normalization behavior already
+proved with AVATAR while the shared GMCP-adapter interface and automatic MUD
+selection are implemented incrementally. See ADR 0012.
 
 ## Candidate work
 

@@ -73,19 +73,20 @@ Read the card for the concept you are changing, then the source it cites.
 `decisions/` holds the reasoning behind the architecture. Read one when you are
 about to contradict it.
 
-| ADR                                                               | Decision                                          |
-| ----------------------------------------------------------------- | ------------------------------------------------- |
-| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay loopback boundary and SSH transport         |
-| [0002](decisions/0002-imp-owned-protocol.md)                      | Imp owns its protocol; GMCP stops at normalize    |
-| [0003](decisions/0003-snapshot-only-state-transfer.md)            | whole snapshots, never partial updates            |
-| [0004](decisions/0004-hand-written-validators-shared-fixtures.md) | hand-written decoders, shared fixture corpus      |
-| [0005](decisions/0005-python-relay-with-websockets.md)            | small Python relay on `websockets`                |
-| [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework        |
-| [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                        |
-| [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds         |
-| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context      |
-| [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway  |
-| [0011](decisions/0011-local-client-adapters-and-imp-node.md)      | MUD-client adapters attach locally to an Imp node |
+| ADR                                                               | Decision                                           |
+| ----------------------------------------------------------------- | -------------------------------------------------- |
+| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay loopback boundary and SSH transport          |
+| [0002](decisions/0002-imp-owned-protocol.md)                      | Imp owns its protocol; GMCP stops at normalize     |
+| [0003](decisions/0003-snapshot-only-state-transfer.md)            | whole snapshots, never partial updates             |
+| [0004](decisions/0004-hand-written-validators-shared-fixtures.md) | hand-written decoders, shared fixture corpus       |
+| [0005](decisions/0005-python-relay-with-websockets.md)            | small Python relay on `websockets`                 |
+| [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework         |
+| [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                         |
+| [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds          |
+| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context       |
+| [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway   |
+| [0011](decisions/0011-local-client-adapters-and-imp-node.md)      | MUD-client adapters attach locally to an Imp node  |
+| [0012](decisions/0012-client-neutral-gmcp-adapters.md)            | MUD-specific GMCP interpretation is client-neutral |
 
 ## Invariants worth knowing before you edit
 
