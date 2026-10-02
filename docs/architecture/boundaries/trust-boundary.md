@@ -8,40 +8,51 @@ payload. Imp treats all of it as adversarial input.
 
 ## Where untrusted data is checked
 
-| Boundary                    | Enforced by                                                |
-| --------------------------- | ---------------------------------------------------------- |
-| versioned TF spool event    | `integrations/tinyfugue/src/imp_tf/events.py`              |
-| offline adapter record      | `integrations/common/src/imp_adapter/records.py`           |
-| GMCP -> normalized state    | `integrations/common/src/imp_adapter/normalize.py`         |
-| producer output             | `publisher.py`, via protocol encoders before sending       |
-| relay ingest/action/helper  | `services/relay/src/imp_relay/protocol.py`                 |
-| HUD state and action result | `packages/protocol/src/decode.ts`                          |
-| TF action delivery          | `action_consumer.py` plus the private exact-context marker |
+| Boundary                        | Enforced by                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| versioned TF spool event        | `integrations/tinyfugue/src/imp_tf/events.py`                                    |
+| Mudlet helper/Lua protocol      | `integrations/mudlet/src/imp_mudlet/protocol.py` plus the fixed Lua adapter      |
+| client-neutral GMCP record      | `integrations/common/src/imp_adapter/records.py`                                 |
+| GMCP -> normalized state        | `integrations/common/src/imp_adapter/normalize.py`                               |
+| producer output                 | shared `publisher.py`, via protocol encoders                                     |
+| node ingest/action/helper       | `services/relay/src/imp_relay/protocol.py`                                       |
+| HUD state and action result     | `packages/protocol/src/decode.ts`                                                |
+| TinyFugue final action delivery | `action_consumer.py` plus the private exact-context marker and `/imp_send` fence |
+| Mudlet final action delivery    | Lua exact-context check immediately before `send(command, false)`                |
 
 Bounds and character rules are specified once in `packages/protocol/SPEC.md`.
 
 ## Host-local trust model
 
 Loopback prevents remote network access; it does not enforce UID or same-user
-ownership. On the VPS, any process in the relay's network namespace, including
-one owned by another local OS user, can reach its loopback listener. The relay
-itself remains unauthenticated.
+ownership.
+
+Any process that can reach an Imp node's loopback listener can reach the
+host-local endpoints allowed on that node. On a VPS this includes processes
+owned by another local OS user. On a workstation it includes the desktop-owned
+node used by local Mudlet/TinyFugue adapters.
+
+The relay/node itself remains unauthenticated. In particular, its privileged
+producer and action-consumer endpoints rely on the supported host-local trust
+model rather than per-process authentication.
 
 The authenticated remote gateway is a separate loopback process. Remote WSS
-clients must authenticate before the gateway opens a relay connection, but a
-host-local process can still reach the relay directly and bypass the gateway.
-Gateway authentication therefore protects the remote network boundary; it does
-not turn loopback into same-user isolation.
+clients authenticate before the gateway opens a node connection, and the
+gateway exposes only the desktop-facing state/action routes. A host-local
+process can still reach the node directly; gateway authentication therefore
+protects the remote network boundary, not local process isolation.
 
-In SSH mode, any process that can reach the workstation's local forwarded
-listener has the same state/action access as the desktop.
+In SSH mode, the workstation listener on `127.0.0.1:8789` exposes the
+desktop-facing state/action capability of the remote node to host-local
+processes that can reach that listener.
 
-`Origin` checks remain browser defense-in-depth against cross-site requests.
-An `Origin` header is not process identity and is not authentication.
+`Origin` checks remain browser defense-in-depth. An `Origin` header is neither
+process identity nor authentication.
 
-Supported deployment therefore still requires a single-user workstation and
-VPS, or mutual trust among every host-local user and process. An untrusted
-multi-user host is outside Imp's supported trust boundary.
+Supported deployment therefore requires a single-user host, or mutual trust
+among every host-local user and process that can reach these loopback
+listeners. An untrusted multi-user host remains outside Imp's supported trust
+boundary.
 
 ## Why validation is repeated
 
@@ -59,61 +70,56 @@ Sanitising happens exactly once, deliberately, in `normalize.py`, which is the
 component whose job is to convert MUD reality into protocol values. After that
 point a control character is a bug, and the decoder says so.
 
-## Shell safety
+## Shell and process-execution safety
 
-No server-provided value is ever interpolated into a shell command, in any
-component. Concretely:
+No MUD-derived value is interpolated into a shell command.
 
-- The TF hook appends versioned `IMP2` events to the fixed private spool path.
+TinyFugue:
+
+- The TF hook appends versioned `IMP2` events to a fixed private spool path.
   Session, generation, and world tokens come from local TinyFugue state. Raw
-  GMCP remains the final data field and is parsed only by Python. No MUD value
-  is evaluated as TF source or placed in a command line.
-- `integrations/tinyfugue/src/imp_tf/bridge.py` uses no `shell=True`, no
-  `os.system`, and constructs no subprocess from record content.
-- The relay executes nothing. Its outbound broker only moves a bounded
-  printable-ASCII command between WebSocket peers.
-- The action helper receives the raw command only as decoded WebSocket data. It
-  verifies the private exact-context marker, converts the command with the
-  `textencode.tf` representation, and writes one fixed `/imp_send
-<session> <foreground> <connection> <world-token> <encoded-data>` line to its
-  stdout pipe. TinyFugue rechecks that locally generated context and the
-  quote-pinned current world before decoding the command, calling `send()`, and
-  starting a replacement helper inside the same guard. A stale line cannot
-  recreate its old context. The raw command is never shell argv, shell syntax,
-  a generated macro name, or evaluated TF source.
-- TinyFugue's asynchronous `/quote -dexec` starts only the fixed
-  `imp-action-consumer` executable with locally generated session,
-  generation, and encoded-world arguments. Blank `-w` pins its output to the
-  world selected when the helper started. Each registration accepts at most one
-  dispatch; after one fixed write and flush the helper exits and closes stdout.
-  While idle it writes no liveness bytes and observes only terminal stdout
-  reader-loss events; reader loss ends the helper without a result or reconnect.
-  Before any dispatch it reconnects only while its exact marker remains current.
-- Managed mode in `apps/desktop/src-tauri/src/tunnel.rs` is the one permitted
-  desktop process-execution boundary. It constructs the system `ssh` command
-  directly with `std::process::Command`, fixed SSH options and loopback
-  forwarding arguments; no shell is involved. The operator-provided SSH alias
-  follows `--`, and no MUD-derived value reaches process argv. OpenSSH retains
-  ownership of credentials, host verification and SSH configuration.
-  `TunnelSupervisor` tracks, terminates and reaps only the child it spawned;
-  external mode owns no process, and a pre-existing listener or unrelated SSH
-  process is never killed.
+  GMCP remains data parsed by Python rather than evaluated TF source.
+- `integrations/tinyfugue/src/imp_tf/bridge.py` uses no `shell=True` or
+  `os.system`.
+- The action helper converts the bounded command into the fixed `/imp_send`
+  bridge representation. TinyFugue rechecks locally generated context and the
+  quote-pinned world immediately before decoding and calling `send()`.
+- `/quote -dexec` starts only the fixed `imp-action-consumer` executable with
+  locally generated context arguments. Raw action text is never shell argv.
 
-This is checkable rather than asserted. Search the process-execution surfaces:
+Mudlet:
+
+- The package resolves a locally provisioned helper path and starts that helper
+  with Mudlet's process API. MUD/GMCP values do not choose the executable path
+  or become process argv.
+- GMCP and lifecycle material cross the Lua/helper boundary as JSONL data.
+- Trusted action text returns as data, is checked against the exact current
+  context, and is passed directly to `send(command, false)`. It is not shell
+  syntax, generated Lua source, or a Mudlet alias expansion.
+
+Desktop native runtime:
+
+- `NodeSupervisor` starts only the packaged `imp-node` sidecar with fixed
+  loopback node arguments.
+- `GatewaySupervisor` starts the same packaged sidecar in `gateway` mode with
+  loopback endpoints and locally configured pairing-token digest material.
+- `TunnelSupervisor` invokes the system `ssh` executable directly by argv with
+  fixed forwarding/options. The operator-provided SSH alias follows `--`;
+  no MUD-derived value reaches its argv.
+- Each supervisor tracks and terminates only children it spawned. Existing
+  listeners are never killed merely because they occupy a desired port.
+
+The relay/node itself executes no MUD command. Its action broker only transfers
+a bounded printable-ASCII command between protocol peers.
+
+The process-execution surfaces are deliberately inspectable:
 
 ```bash
-grep -rnE 'shell=True|os\.system|subprocess\.|child_process|execSync|Command::new|\.spawn\(' \
-  services/relay/src integrations/tinyfugue/src apps/desktop/src \
-  packages/protocol/src apps/desktop/src-tauri/src
+grep -rnE 'shell=True|os\.system|subprocess\.|child_process|execSync|Command::new|\.spawn\(|\bspawn\('   services/relay/src   integrations/common/src   integrations/mudlet   integrations/tinyfugue/src   apps/desktop/src   apps/desktop/src-tauri/src   packages/protocol/src
 ```
 
-The expected source hit is the managed OpenSSH `Command::new("ssh")` and
-`.spawn()` path in `tunnel.rs`; it is permitted because the command uses direct
-argv, fixed forwarding/options, and accepts no MUD-derived input. The
-TinyFugue `/quote` boundary is declarative TF source rather than a Python or
-desktop spawn and is constrained as described above. Any relay execution hit,
-shell-based execution, additional spawn path, or path carrying server content
-into argv requires investigation.
+Any new shell-based execution, executable path derived from MUD data, or raw
+MUD/action value placed into process argv requires explicit security review.
 
 ## Credentials and local command text
 
@@ -162,8 +168,8 @@ plaintext WebView `localStorage`. Operators must not use saved actions to store
 passwords or other secrets.
 
 Persisted definitions are reusable command templates, not queued dispatches,
-retained action history, relay payload retention, retries, or reconnect resend.
-The relay/TinyFugue no-replay contract is unchanged.
+retained action history, node payload retention, retries, or reconnect resend.
+The node/client-adapter no-replay contract is unchanged.
 
 Managed tunnel mode delegates credentials and host verification to the system
 SSH client. Copying private keys into the app, persisting an SSH password, or
@@ -201,6 +207,7 @@ character class requires a new rejection fixture, in both languages.
 
 Status: verified
 Verified against: protocol rejection tests, hostile event/record tests,
-context-marker and action-helper tests, relay Origin/action tests, authenticated
-gateway pre-auth/origin/route/loopback tests, managed OpenSSH argv and ownership
-tests, and the live Direct-WSS boundary recorded in `docs/status.md`.
+TinyFugue context/action-helper tests, Mudlet helper/lifecycle/action tests,
+node Origin/action tests, authenticated-gateway pre-auth/origin/route/loopback
+tests, local-node/gateway ownership tests, Managed OpenSSH argv/ownership tests,
+and the live local/SSH/Direct-WSS evidence recorded in `docs/status.md`.

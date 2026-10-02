@@ -24,7 +24,7 @@ untrusted multi-user hosts are unsupported.
 The normal server installation does **not** require an Imp source checkout,
 Node.js, npm, Rust, or `uv` on the VPS.
 
-The `v0.1.0` server bundle supports:
+The release server bundle supports:
 
 - Linux x86_64;
 - CPython 3.12;

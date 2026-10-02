@@ -6,7 +6,8 @@ Imp is currently an alpha project.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | Yes       |
+| 0.2.x   | Yes       |
+| 0.1.x   | No        |
 | Older   | No        |
 
 Security fixes may require upgrading to the newest available release.
@@ -36,16 +37,16 @@ Do not include unrelated secrets or personal data.
 
 Relevant Imp security boundaries include:
 
-- desktop connection handling;
+- desktop connection handling and local-node supervision;
 - Managed and External SSH integration;
 - authenticated Direct WSS;
 - pairing-token handling;
-- the loopback relay and gateway;
-- TinyFugue capture and outbound actions;
-- protocol validation and normalization; and
+- the loopback Imp node and gateway;
+- TinyFugue and Mudlet capture/action boundaries;
+- shared GMCP normalization and protocol validation; and
 - server installation and update behavior.
 
-Vulnerabilities that exist entirely in an upstream dependency or TinyFugue
+Vulnerabilities that exist entirely in an upstream dependency or MUD client
 itself should normally be reported to that upstream project unless Imp
 introduces or materially worsens the issue.
 

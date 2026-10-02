@@ -9,33 +9,51 @@ fix the map, do not "fix" the code to match it.
 
 ## What Imp is
 
-A small always-on-top companion HUD for MUDs. It reads character vitals out of
-a running TinyFugue session on a remote VPS and renders them in a compact
-frameless window on the operator's desktop.
+A small always-on-top companion HUD for MUDs. A supported MUD-client adapter
+attaches to an Imp node on the same host, emits client-neutral GMCP records, and
+uses the shared normalization layer to publish canonical Imp state. The desktop
+HUD may consume that node locally or reach another node through SSH or
+authenticated WSS.
 
+```text
+MUD <-> GMCP <-> MUD client
+                 |
+                 v
+           client adapter
+                 |
+                 v
+       shared GMCP normalization
+                 |
+                 v
+          Imp node :8787
+            |       |
+            |       +-> gateway :8788 -> TLS/WSS -> remote desktop
+            |
+            +-> local desktop
+
+remote SSH desktop :8789 -- SSH --> remote Imp node :8787
 ```
-MUD <-> GMCP <-> TinyFugue <-> Imp TF adapter <-> relay (loopback)
-                                                        |         |
-                                                        | SSH     | gateway (loopback)
-                                                        |         | -> TLS/WSS
-                                                        +---------+----> desktop
-```
+
+TinyFugue and Mudlet are the current client adapters. MUD-specific GMCP
+interpretation is shared rather than duplicated between them.
 
 ## Where things live
 
-| Concern                                  | Path                        |
-| ---------------------------------------- | --------------------------- |
-| Wire protocol + validation               | `packages/protocol/`        |
-| Protocol reference                       | `packages/protocol/SPEC.md` |
-| Desktop HUD (Tauri + Svelte)             | `apps/desktop/`             |
-| Relay + remote gateway services (Python) | `services/relay/`           |
-| TinyFugue integration                    | `integrations/tinyfugue/`   |
-| VPS systemd units, install               | `deploy/`                   |
-| Cross-component e2e check                | `tests/e2e/`                |
-| Commands, prerequisites                  | `README.md`                 |
-| Platform/build strategy                  | `docs/development.md`       |
-| Current implementation and verification  | `docs/status.md`            |
-| Planned slices and deferred future work  | `docs/roadmap.md`           |
+| Concern                                 | Path                        |
+| --------------------------------------- | --------------------------- |
+| Wire protocol + validation              | `packages/protocol/`        |
+| Protocol reference                      | `packages/protocol/SPEC.md` |
+| Desktop HUD + native supervisors        | `apps/desktop/`             |
+| Imp node + remote gateway services      | `services/relay/`           |
+| Shared client-neutral adapter core      | `integrations/common/`      |
+| Mudlet integration                      | `integrations/mudlet/`      |
+| TinyFugue integration                   | `integrations/tinyfugue/`   |
+| VPS systemd units, install              | `deploy/`                   |
+| Cross-component e2e check               | `tests/e2e/`                |
+| Commands, prerequisites                 | `README.md`                 |
+| Platform/build strategy                 | `docs/development.md`       |
+| Current implementation and verification | `docs/status.md`            |
+| Planned slices and deferred future work | `docs/roadmap.md`           |
 
 ## Map entries
 
@@ -83,7 +101,7 @@ about to contradict it.
 | [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework         |
 | [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                         |
 | [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds          |
-| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact TF context       |
+| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact context          |
 | [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway   |
 | [0011](decisions/0011-local-client-adapters-and-imp-node.md)      | MUD-client adapters attach locally to an Imp node  |
 | [0012](decisions/0012-client-neutral-gmcp-adapters.md)            | MUD-specific GMCP interpretation is client-neutral |
@@ -98,14 +116,14 @@ about to contradict it.
    no authentication by design.
 4. A rejected protocol frame never mutates state, in any component.
 5. No server-provided value is ever concatenated into a shell command.
-6. State and actions are bound to an exact TinyFugue session, foreground
-   generation, and connection generation.
+6. State and actions are bound to an exact client-adapter session,
+   foreground generation, and connection generation.
 7. Desktop `StateSource` and `ActionSink` are separate boundaries; adding
    outbound control must not make state observation bidirectional.
 8. Desktop alerts consume normalized `GameState` plus the existing desktop
    freshness model; they do not publish state or trigger outbound actions.
 9. Saved desktop actions are local command templates, not queued or retained
-   dispatches; the relay and TinyFugue no-replay contract remains unchanged.
+   dispatches; the relay/client-adapter no-replay contract remains unchanged.
 10. Public Direct WSS terminates at the authenticated loopback gateway, never
     at the relay. Authentication succeeds before the gateway opens the relay,
     and privileged producer/helper routes remain unreachable remotely.

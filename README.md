@@ -6,29 +6,45 @@ Imp is a compact desktop companion for MUDs. It displays live character state
 from your MUD client, provides configurable alerts, and lets you define trusted
 action shortcuts.
 
-Imp `v0.1.0` ships with:
+The current release ships with:
 
-- a Windows x64 desktop installer;
-- a Linux x86_64 server bundle; and
-- TinyFugue integration for GMCP capture and outbound actions.
+- a Windows x64 desktop installer, including the desktop-owned local Imp node
+  and Mudlet helper/package;
+- a Linux x86_64 server bundle for TinyFugue deployments; and
+- TinyFugue and Mudlet MUD-client integrations for GMCP state and trusted
+  outbound actions.
 
-TinyFugue is the currently supported MUD client integration. AVATAR is the
-currently live-verified GMCP mapping.
+AVATAR is the currently live-verified GMCP mapping.
 
 ## Quick start
 
-The recommended setup is **Managed SSH**:
+Imp supports both local and remote MUD-client topologies.
+
+For Mudlet running on the same Windows machine as Imp, the simplest path is:
 
 ```text
-MUD <-> TinyFugue on VPS <-> Imp server
+MUD <-> Mudlet <-> Imp local node <-> Imp desktop
+```
+
+Install Imp, launch it once so the Mudlet helper/package is provisioned, install
+`Imp.mpackage` in the Mudlet profile, and select **Local** connection mode. See
+[Windows installation](docs/install-windows.md#mudlet-integration) for the
+profile setup.
+
+For TinyFugue running on a VPS, the recommended remote setup is **Managed SSH**:
+
+```text
+MUD <-> TinyFugue on VPS <-> Imp node
                               |
                               | SSH
                               v
                          Imp desktop
 ```
 
-The Imp server stays bound to the VPS loopback interface. The desktop uses your
-existing OpenSSH configuration to reach it.
+The remote Imp node stays bound to the VPS loopback interface. The desktop uses
+your existing OpenSSH configuration to reach it.
+
+The numbered walkthrough below describes this remote TinyFugue topology.
 
 ### What you need
 
@@ -55,17 +71,17 @@ From the matching
 [GitHub release](https://github.com/i-mud/imp/releases), download:
 
 ```text
-imp-server-0.1.0-linux-x86_64.tar.gz
-imp-server-0.1.0-linux-x86_64.tar.gz.sha256
+imp-server-<version>-linux-x86_64.tar.gz
+imp-server-<version>-linux-x86_64.tar.gz.sha256
 ```
 
 Then, on the VPS:
 
 ```bash
-sha256sum -c imp-server-0.1.0-linux-x86_64.tar.gz.sha256
+sha256sum -c imp-server-<version>-linux-x86_64.tar.gz.sha256
 
-tar -xzf imp-server-0.1.0-linux-x86_64.tar.gz
-cd imp-server-0.1.0
+tar -xzf imp-server-<version>-linux-x86_64.tar.gz
+cd imp-server-<version>
 
 ./install.sh
 ```
@@ -124,8 +140,8 @@ From the same
 [GitHub release](https://github.com/i-mud/imp/releases), download and run the
 Windows x64 `.exe` installer.
 
-The `v0.1.0` installer is unsigned, so Windows may display a SmartScreen or
-reputation warning.
+The Windows installer is currently unsigned, so Windows may display a
+SmartScreen or reputation warning.
 
 Launch Imp after installation.
 
@@ -167,15 +183,25 @@ You can then configure alerts and create action shortcuts from Imp's settings.
 
 ## Connection modes
 
-Imp supports three desktop connection modes.
+Imp supports four desktop connection modes.
 
-### Managed SSH — recommended
+### Local
+
+Local mode consumes the desktop-owned same-host Imp node directly on
+`127.0.0.1:8787`. This is the normal mode for a local Mudlet integration.
+
+The local node is supervised independently of the HUD's selected connection
+mode, so local adapters may remain attached even while the HUD consumes another
+Imp node remotely.
+
+### Managed SSH — recommended for remote SSH
 
 Imp starts and supervises the SSH forwarding process itself. It uses the
 platform OpenSSH client and your existing SSH configuration, keys,
 `known_hosts`, and agent.
 
-Imp does not store your SSH password or private key.
+Imp does not store your SSH password or private key. The local SSH consumer
+endpoint is `127.0.0.1:8789`, which forwards to the remote node on port `8787`.
 
 ### External SSH
 
@@ -185,7 +211,7 @@ Use this when you want to manage the SSH process yourself:
 ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
 ```
 
-Leave Imp in **External** connection mode. It connects to the forwarded relay at
+Leave Imp in **External** connection mode. It connects to the forwarded node at
 `127.0.0.1:8789`.
 
 ### Direct WSS — advanced
@@ -213,30 +239,38 @@ gateway, TLS, and pairing setup.
 ## How it works
 
 ```text
-MUD <-> GMCP <-> TinyFugue                  VPS
-                  |
-                  v
-              Imp adapter
-                  |
-                  v
-           Imp relay :8787
-                  |
-             SSH forward
-                  |
-                  v
-             Imp desktop
+MUD <-> GMCP <-> Mudlet / TinyFugue
+                    |
+                    | client-specific capture/lifecycle
+                    v
+             shared GMCP adapter
+                    |
+                    | normalized state + exact context
+                    v
+             Imp node :8787
+               |          |
+               |          +-> gateway :8788 -> TLS/WSS -> remote HUD
+               |
+               +-> local HUD
+
+Managed/External remote consumption:
+Imp desktop :8789 -- SSH --> remote Imp node :8787
 ```
 
-TinyFugue captures GMCP and writes private session/world events. `imp-feed`
-normalizes those events into Imp's protocol and publishes the selected
-character state to the relay.
+MUD-client integrations own client-specific lifecycle, foreground selection,
+GMCP capture, and the final trusted command write. TinyFugue uses its
+versioned spool and `imp-feed`; Mudlet uses its Lua package and local helper.
 
-Outbound action shortcuts travel in the opposite direction through the same
-trusted connection and are accepted only for the currently selected TinyFugue
-context.
+Both feed the shared client-neutral record/normalization layer before publishing
+canonical Imp state to the same-host node. The node owns selected context,
+retained state, freshness, and the single-flight action broker.
 
-The relay remains loopback-only. It is never intended to be exposed directly
-to the Internet.
+Outbound actions travel in the opposite direction and remain bound to the exact
+current client context. The final command write is client-specific.
+
+The node remains loopback-only. Remote UI access is a separate transport choice:
+Managed/External SSH forwards a consumer endpoint, while Direct WSS uses the
+separate authenticated gateway.
 
 ## Installation and operation
 
@@ -245,19 +279,20 @@ For more detail:
 - [Windows installation](docs/install-windows.md)
 - [VPS deployment and troubleshooting](deploy/README.md)
 - [TinyFugue integration](integrations/tinyfugue/README.md)
+- [Mudlet integration](integrations/mudlet/README.md)
 
-## v0.1.0 support boundary
+## Release support boundary
 
-`v0.1.0` is an alpha release.
+Imp remains an alpha project.
 
 Currently supported and verified:
 
 - Windows x64 prebuilt desktop installer;
 - Linux x86_64 prebuilt server bundle;
 - CPython 3.12 server runtime;
-- `systemd --user` services;
-- TinyFugue integration; and
-- AVATAR GMCP normalization.
+- `systemd --user` services for the server deployment;
+- TinyFugue and Mudlet MUD-client integrations; and
+- AVATAR GMCP normalization through the shared adapter.
 
 Current limitations:
 
@@ -285,6 +320,8 @@ Clone the repository and install the development dependencies:
 ```bash
 npm install
 uv sync --project services/relay
+uv sync --project integrations/common
+uv sync --project integrations/mudlet
 uv sync --project integrations/tinyfugue
 ```
 
@@ -313,9 +350,11 @@ npm run check
 Repository areas:
 
 ```text
-apps/desktop/           Tauri + Svelte desktop HUD
-services/relay/         Relay and authenticated gateway
-integrations/tinyfugue/ TinyFugue capture, normalization, and actions
+apps/desktop/           Tauri + Svelte desktop HUD and native supervisors
+services/relay/         Imp node relay and authenticated gateway
+integrations/common/    Client-neutral GMCP normalization and publisher
+integrations/mudlet/    Mudlet lifecycle, helper, state, and actions
+integrations/tinyfugue/ TinyFugue capture, feed, state, and actions
 packages/protocol/      Canonical Imp wire protocol
 deploy/                 Server installer and systemd units
 docs/                   Architecture, decisions, status, and roadmap
@@ -325,8 +364,8 @@ docs/                   Architecture, decisions, status, and roadmap
 
 Imp treats MUD and GMCP input as untrusted.
 
-The normal relay binds only to `127.0.0.1`. SSH credentials remain owned by
-OpenSSH, outbound actions are tied to the current TinyFugue context, and
+The normal node binds only to `127.0.0.1`. SSH credentials remain owned by
+OpenSSH, outbound actions are tied to the exact current MUD-client context, and
 malformed protocol input fails closed.
 
 Imp's loopback services are intended for a single-user host, or a host where
