@@ -34,6 +34,7 @@ package_versions = []
 
 for relative in (
     "services/relay/pyproject.toml",
+    "integrations/common/pyproject.toml",
     "integrations/tinyfugue/pyproject.toml",
 ):
     with (root / relative).open("rb") as f:
@@ -103,6 +104,11 @@ mkdir -p \
 
 uv build \
   --project "$ROOT/services/relay" \
+  --wheel \
+  --out-dir "$BUNDLE_DIR/wheels"
+
+uv build \
+  --project "$ROOT/integrations/common" \
   --wheel \
   --out-dir "$BUNDLE_DIR/wheels"
 

@@ -243,7 +243,7 @@ import sys
 
 expected = sys.argv[1]
 
-for package in ("imp-relay", "imp-tinyfugue"):
+for package in ("imp-relay", "imp-adapter", "imp-tinyfugue"):
     actual = version(package)
     if actual != expected:
         raise SystemExit(
@@ -402,6 +402,7 @@ else
     --no-cache-dir \
     --find-links "$BUNDLE_DIR/wheels" \
     "imp-relay==$VERSION" \
+    "imp-adapter==$VERSION" \
     "imp-tinyfugue==$VERSION"
 
   "$RELEASE_DIR/.venv/bin/python" -m pip check
