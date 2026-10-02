@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.1] - 2026-10-02
+
+### Bug Fixes
+
+- version all Python release packages ([8f85a95](https://github.com/i-mud/imp/commit/8f85a9595b3778a558abeb7e89212d15eb84875c))
+
 ## [0.2.0] - 2026-10-02
 
 ### Bug Fixes

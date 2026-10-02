@@ -1,6 +1,6 @@
 [package]
 name = "imp-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "Imp desktop companion for live MUD state, alerts, and trusted actions"
 edition = "2021"
 

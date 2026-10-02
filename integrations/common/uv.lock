@@ -81,7 +81,7 @@ wheels = [
 
 [[package]]
 name = "imp-adapter"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "imp-relay" },
@@ -110,7 +110,7 @@ dev = [
 
 [[package]]
 name = "imp-relay"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "../../services/relay" }
 dependencies = [
     { name = "websockets" },
