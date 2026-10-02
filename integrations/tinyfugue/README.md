@@ -20,11 +20,13 @@ prevents remote network access but does not enforce OS-user ownership. Any
 process in the VPS network namespace, including another local user, can reach
 the relay's local endpoints.
 
-SSH transport forwards the relay's desktop-facing state/action endpoints to
-the workstation without adding application authentication, so the forwarded
-local listener has the same host-local trust requirement. Direct WSS instead
-authenticates one pairing token at the separate gateway before the gateway
-opens a relay connection. That is transport authentication, not per-user
+SSH transport forwards the relay's entire TCP port to the workstation,
+including producer and action-consumer routes, without application
+authentication. The forwarded local listener therefore has the same host-local
+trust requirement. Direct WSS instead authenticates one pairing token at the
+separate gateway before the gateway opens a relay connection. It exposes only
+state and action routes (and optionally health), not the relay's producer or
+action-consumer routes. That is transport authentication, not per-user
 authorization. Browser `Origin` checks remain defense-in-depth rather than
 authentication.
 

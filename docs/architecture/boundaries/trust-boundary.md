@@ -42,9 +42,11 @@ gateway exposes only the desktop-facing state/action routes. A host-local
 process can still reach the node directly; gateway authentication therefore
 protects the remote network boundary, not local process isolation.
 
-In SSH mode, the workstation listener on `127.0.0.1:8789` exposes the
-desktop-facing state/action capability of the remote node to host-local
-processes that can reach that listener.
+In SSH mode, the workstation listener on `127.0.0.1:8789` forwards the remote
+node's entire loopback port, not a route-filtered state/action capability.
+Host-local processes that can reach that listener can also reach `/ingest` and
+`/action-consumer` without an `Origin` header. SSH authenticates the transport;
+it does not add per-route authentication to the node.
 
 `Origin` checks remain browser defense-in-depth. An `Origin` header is neither
 process identity nor authentication.

@@ -8,11 +8,12 @@ authentication.
 
 Remote desktop access has two transport shapes:
 
-- SSH forwards the relay's desktop-facing state/action endpoints to the local
-  workstation.
+- SSH forwards the entire relay TCP port to the local workstation, including
+  producer and action-consumer routes; it adds no application authentication.
 - Direct WSS uses the separate `imp-gateway`, which listens only on
   `127.0.0.1:8788`, authenticates the desktop before contacting the relay, and
-  exposes only state and action capabilities behind a TLS reverse proxy.
+  exposes only state/action and optionally health routes behind a TLS reverse
+  proxy.
 
 The gateway never exposes relay `/ingest` or `/action-consumer`.
 

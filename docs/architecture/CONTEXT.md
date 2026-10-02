@@ -91,20 +91,21 @@ Read the card for the concept you are changing, then the source it cites.
 `decisions/` holds the reasoning behind the architecture. Read one when you are
 about to contradict it.
 
-| ADR                                                               | Decision                                           |
-| ----------------------------------------------------------------- | -------------------------------------------------- |
-| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)         | relay loopback boundary and SSH transport          |
-| [0002](decisions/0002-imp-owned-protocol.md)                      | Imp owns its protocol; GMCP stops at normalize     |
-| [0003](decisions/0003-snapshot-only-state-transfer.md)            | whole snapshots, never partial updates             |
-| [0004](decisions/0004-hand-written-validators-shared-fixtures.md) | hand-written decoders, shared fixture corpus       |
-| [0005](decisions/0005-python-relay-with-websockets.md)            | small Python relay on `websockets`                 |
-| [0006](decisions/0006-npm-workspaces-and-uv.md)                   | npm workspaces + uv, no monorepo framework         |
-| [0007](decisions/0007-typescript-6-pin.md)                        | TypeScript pinned to 6.0.x                         |
-| [0008](decisions/0008-wsl2-canonical-checkout.md)                 | WSL2 checkout, native per-platform builds          |
-| [0009](decisions/0009-context-bound-trusted-actions.md)           | outbound actions require an exact context          |
-| [0010](decisions/0010-authenticated-remote-gateway.md)            | public WSS uses a separate authenticated gateway   |
-| [0011](decisions/0011-local-client-adapters-and-imp-node.md)      | MUD-client adapters attach locally to an Imp node  |
-| [0012](decisions/0012-client-neutral-gmcp-adapters.md)            | MUD-specific GMCP interpretation is client-neutral |
+| ADR                                                                 | Decision                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------- |
+| [0001](decisions/0001-loopback-relay-and-ssh-boundary.md)           | relay loopback boundary and SSH transport          |
+| [0002](decisions/0002-imp-owned-protocol.md)                        | Imp owns its protocol; GMCP stops at normalize     |
+| [0003](decisions/0003-snapshot-only-state-transfer.md)              | whole snapshots, never partial updates             |
+| [0004](decisions/0004-hand-written-validators-shared-fixtures.md)   | hand-written decoders, shared fixture corpus       |
+| [0005](decisions/0005-python-relay-with-websockets.md)              | small Python relay on `websockets`                 |
+| [0006](decisions/0006-npm-workspaces-and-uv.md)                     | npm workspaces + uv, no monorepo framework         |
+| [0007](decisions/0007-typescript-6-pin.md)                          | TypeScript pinned to 6.0.x                         |
+| [0008](decisions/0008-wsl2-canonical-checkout.md)                   | WSL2 checkout, native per-platform builds          |
+| [0009](decisions/0009-context-bound-trusted-actions.md)             | outbound actions require an exact context          |
+| [0010](decisions/0010-authenticated-remote-gateway.md)              | public WSS uses a separate authenticated gateway   |
+| [0011 (rename)](decisions/0011-rename-to-imp.md)                    | historical TinyScry-to-Imp identity decision       |
+| [0011 (node)](decisions/0011-local-client-adapters-and-imp-node.md) | MUD-client adapters attach locally to an Imp node  |
+| [0012](decisions/0012-client-neutral-gmcp-adapters.md)              | MUD-specific GMCP interpretation is client-neutral |
 
 ## Invariants worth knowing before you edit
 
@@ -114,7 +115,7 @@ about to contradict it.
    `integrations/common/src/imp_adapter/normalize.py`.
 3. The relay binds loopback only, cannot be opted into a public bind, and has
    no authentication by design.
-4. A rejected protocol frame never mutates state, in any component.
+4. A rejected protocol frame never applies partial or invalid `GameState`.
 5. No server-provided value is ever concatenated into a shell command.
 6. State and actions are bound to an exact client-adapter session,
    foreground generation, and connection generation.
@@ -126,7 +127,7 @@ about to contradict it.
    dispatches; the relay/client-adapter no-replay contract remains unchanged.
 10. Public Direct WSS terminates at the authenticated loopback gateway, never
     at the relay. Authentication succeeds before the gateway opens the relay,
-    and privileged producer/helper routes remain unreachable remotely.
+    and privileged producer/helper routes remain unreachable through the gateway.
 
 ## Maintaining this map
 

@@ -88,6 +88,12 @@ the Rust crate and does not prove native or live runtime behavior.
 These checks require a native platform, real processes, or operator-controlled
 infrastructure and remain separate from CI:
 
+Slice-specific evidence below records what was exercised at that milestone,
+not the current package version or release procedure. In particular, pre-Slice-16
+SSH tests used local port `8787`; today's SSH consumer port is `8789`, and the
+desktop-owned local node runs even in Direct mode. Historical release mechanics
+are superseded by [`releases.md`](releases.md).
+
 | Evidence                  | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Windows Tauri runtime     | Verified on Windows 11: clean launch and console, close, topmost, drag, transparency, live updates, and a non-maximizable HUD. Slice 8 verified expanded/compact Settings and Actions sizing/restoration, width-preserving attached panels, originating-width management and its drag region, the bounded wrapped compact palette and icon trigger, native restart persistence, and keyboard focus paths. The final post-PR #6 polish/theme smoke re-checked theme switching, compact/expanded behavior, Settings, Manage Actions, native sizing, drag, non-maximizable behavior, keyboard/focus paths, and general polish. It did not add live MUD action-path or VPS evidence.                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -110,8 +116,8 @@ infrastructure and remain separate from CI:
 
 ### Slice 14 Imp rename evidence
 
-Slice 14 establishes Imp as a clean product and runtime identity break before
-the final canonical `v0.1.0` release is published.
+Slice 14 established Imp as a clean product and runtime identity break before
+the canonical `v0.1.0` release was published after Slice 15.
 
 - `git diff --check` and the complete `npm run check` gate passed, including 62
   protocol tests, 146 desktop tests, 120 relay tests, 89 TinyFugue integration
@@ -126,14 +132,14 @@ the final canonical `v0.1.0` release is published.
   services. Live state reached the relay with `feed:"live"`, and a desktop
   outbound-action smoke test reached the MUD successfully. Obsolete VPS
   service, helper, configuration, state, and checkout identities were removed.
-- Final GitHub repository rename and canonical Imp `v0.1.0` tag/release
-  publication remain release-close steps.
+- GitHub repository rename and canonical Imp `v0.1.0` publication were completed
+  after Slice 15; see the completed release history in [`roadmap.md`](roadmap.md).
 
 ### Slice 13 release-readiness evidence
 
-- The repository release version is `0.1.0` and is checked deterministically
-  across 15 version-bearing locations. Tag validation additionally requires an
-  exact `v<version>` match before a tagged release can publish.
+- At Slice 13, the repository release version was `0.1.0`, checked
+  deterministically across 15 version-bearing locations. Current checks include
+  the later shared-adapter and Mudlet packages; tags must match `v<version>`.
 - The native Settings surface reports the running Tauri application version
   rather than a separately hard-coded renderer version.
 - The Windows candidate workflow built an x64 NSIS installer on GitHub Actions.
@@ -170,9 +176,8 @@ the final canonical `v0.1.0` release is published.
   `05ed219a57951f96e8e8de584fd1a3256840af2d1863766e0200c7e104268b79` are
   historical evidence for that superseded publication only; they are not Imp
   release identifiers.
-- Final Imp `v0.1.0` publication is pending Slice 14 merge and retagging. Record
-  the new tag target, workflow run, installer asset, and SHA-256 digest here
-  after publication.
+- The final Imp `v0.1.0` publication followed Slice 15. The superseded Slice 13
+  workflow run and digest above must not be used to identify that public release.
 
 ### Slice 12 native connection settings evidence
 
@@ -517,11 +522,11 @@ commands, protocol/context markers, native identifier, configuration/state
 paths, services, documentation, and release artifact naming. The live VPS and
 Windows desktop were smoke-tested under the renamed identity.
 
-Slice 15, `server-install-bootstrap`, is complete. The repository now builds
-a versioned Linux x86_64 server archive containing the relay and TinyFugue
-wheels, exact locked `websockets` wheel, TinyFugue hook, user-systemd units,
-installer, and internal checksum manifest. An adjacent SHA-256 file protects
-the complete archive.
+Slice 15, `server-install-bootstrap`, is complete. It introduced the versioned
+Linux x86_64 server archive containing the relay and TinyFugue wheels, exact
+locked `websockets` wheel, TinyFugue hook, user-systemd units, installer, and
+internal checksum manifest. Current bundles also include the shared
+`imp-adapter` wheel. An adjacent SHA-256 file protects the complete archive.
 
 The installer creates a private CPython 3.12 virtual environment from the
 bundle without network dependency resolution, uses versioned releases behind
@@ -534,8 +539,8 @@ The reusable bundle acceptance passed on the target VPS environment for outer
 and internal integrity, clean install, idempotent reinstall, package versions,
 permissions, TinyFugue startup insertion, tamper rejection, final-path console
 script interpreters, and complete failed-activation rollback. CI and the
-release workflow now build and test that server artifact, and a tagged release
-will publish its archive and checksum alongside the Windows installer.
+release workflow build and test that server artifact; releases publish its
+archive and checksum alongside the Windows installer.
 
 Production live acceptance also passed using the exact accepted server archive.
 `~/.local/share/imp/current` selected the versioned `0.1.0` runtime; relay,

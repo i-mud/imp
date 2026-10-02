@@ -3,6 +3,13 @@
 Status: accepted
 Date: 2026-09-19
 
+Scope note: this records the original TinyFugue action integration. The exact
+context and no-retry/no-replay rules remain node-wide; the fixed macro and
+write/flush meaning of `forwarded` apply specifically to TinyFugue. Mudlet uses
+its own context-fenced command API, not a TinyFugue macro. See
+[`0011-local-client-adapters-and-imp-node.md`](0011-local-client-adapters-and-imp-node.md)
+and [`../objects/desktop-actions.md`](../objects/desktop-actions.md).
+
 ## Context
 
 Imp needs a narrow path for future desktop controls to send an operator

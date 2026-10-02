@@ -34,6 +34,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 14 - Imp rename                                 | ✅ Complete | `imp-rename`                          |
 | Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`            |
 | Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
+| Slice 16 - Mudlet and local client integration        | ✅ Complete | `mudlet-local-integration`            |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -330,10 +331,10 @@ WSS probe verified wrong-token rejection without exposing state.
 Detailed evidence lives in [`status.md`](status.md) and
 [`architecture/processes/managed-runtime.md`](architecture/processes/managed-runtime.md).
 
-Provisioning and onboarding remain deliberately separate from the transport
-itself: automated VPS installation, reverse-proxy/certificate setup,
-pairing-token generation/rotation UX, and general TinyFugue installation
-workflow are candidate distribution work rather than unfinished Slice 11 scope.
+At Slice 11 completion, VPS installation and general TinyFugue installation
+workflow were still deferred; Slice 15 later added the packaged server installer.
+Reverse-proxy/certificate setup and pairing-token generation/rotation UX remain
+separate from the transport itself.
 
 ## ✅ Slice 12 - Native connection settings
 
@@ -369,9 +370,9 @@ Detailed implementation and verification evidence lives in
 and
 [`architecture/boundaries/trust-boundary.md`](architecture/boundaries/trust-boundary.md).
 
-VPS installation, reverse-proxy/certificate provisioning, server-side
-pairing-token generation/rotation, live transport hot-switching, multi-user
-credentials, and first-run deployment automation remain separate future work.
+VPS installation was later delivered in Slice 15. Reverse-proxy/certificate
+provisioning, server-side pairing-token generation/rotation UX, live transport
+hot-switching, and multi-user credentials remain separate future work.
 
 ## ✅ Slice 13 - First release readiness
 
@@ -411,8 +412,9 @@ protocol identity, documentation, repository, and release-facing artifact
 names.
 
 The rename preserved the existing architecture and trust boundaries. The
-canonical wire protocol is `IMP2`, the private context marker is `IMPCTX 2`,
-and the native application identifier is `dev.imud.imp`.
+canonical WebSocket protocol uses JSON with `protocol: 2`; `IMP2` is the
+TinyFugue spool event marker and `IMPCTX 2` is its private context marker.
+The native application identifier is `dev.imud.imp`.
 
 The historical TinyScry `v0.1.0` prerelease/tag was removed rather than
 retained as Imp's first release. The descriptive `imp-rename` milestone tag
@@ -534,9 +536,10 @@ future MUD-client adapters emit the same validated GMCP record shape; shared
 GMCP adapters translate those records into Imp's canonical state model. A
 client package must not embed a MUD-specific normalization implementation.
 
-Initial Slice 16 packaging may continue using the normalization behavior already
-proved with AVATAR while the shared GMCP-adapter interface and automatic MUD
-selection are implemented incrementally. See ADR 0012.
+The implemented shared `Normalizer` retains the mapping proved with AVATAR.
+A selectable GMCP-adapter interface, automatic MUD selection, and a generic
+fallback are not implemented; ADR 0012 places any future selection in the shared
+layer rather than in individual client integrations.
 
 Implementation and live verification cover:
 
@@ -581,7 +584,7 @@ that exposes a more urgent defect can reorder this work.
 #### Plugin / consumer interface
 
 Define a stable extension boundary so optional consumers can subscribe to Imp's
-normalized data without becoming part of the TinyFugue, relay, or HUD
+normalized data without becoming part of a client integration, node, or HUD
 implementation.
 
 A database logger is the first concrete motivating consumer, but the boundary
@@ -681,9 +684,9 @@ Native Connection settings currently configure the next application start.
 Saving settings does not replace the running state source, action sink, or SSH
 supervisor.
 
-A future slice could design safe live switching between External SSH, Managed
-SSH, and Direct WSS without weakening the existing ownership, credential, and
-no-replay guarantees.
+A future slice could design safe live switching between Local, External SSH,
+Managed SSH, and Direct WSS without weakening the existing ownership, credential,
+and no-replay guarantees.
 
 #### Desktop distribution hardening
 

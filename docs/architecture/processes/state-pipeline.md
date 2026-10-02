@@ -137,10 +137,10 @@ and rechecks `(session, foreground, connection)` immediately before
 | desktop local node exits          | native supervisor retries; adapters reconnect                                                                      |
 | Managed SSH child exits           | transport supervisor retries; HUD remains reconnecting                                                             |
 | Direct WSS authentication fails   | no upstream node connection is opened                                                                              |
-| gateway or reverse proxy drops    | desktop reconnects with bounded backoff; no state/action replay                                                    |
+| gateway or reverse proxy drops    | desktop reconnects with bounded backoff; retained snapshot returns, transient text/actions are not replayed        |
 | producer disconnects              | snapshot retained; `feed` becomes `down`                                                                           |
 | binary or malformed HUD frame     | `protocol-error`; socket closes; state remains untouched                                                           |
-| unknown message `type`            | ignored for forwards compatibility                                                                                 |
+| unknown message `type`            | state source ignores server frames; relay closes unknown client frames; action sink reports `unknown`              |
 | node unreachable                  | producer/desktop reconnect according to their bounded policies                                                     |
 | action context/helper unavailable | rejected without dispatch                                                                                          |
 | action times out after dispatch   | `unknown`; never retried automatically                                                                             |

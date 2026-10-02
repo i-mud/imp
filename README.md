@@ -6,7 +6,7 @@ Imp is a compact desktop companion for MUDs. It displays live character state
 from your MUD client, provides configurable alerts, and lets you define trusted
 action shortcuts.
 
-The current release ships with:
+The latest published release (`v0.2.1`) ships with:
 
 - a Windows x64 desktop installer, including the desktop-owned local Imp node
   and Mudlet helper/package;
@@ -173,8 +173,8 @@ In Imp:
 4. Save.
 5. Restart Imp.
 
-Imp starts and supervises its own SSH forward to the loopback-only relay on the
-VPS.
+Imp starts and supervises its own SSH forward to the loopback-only Imp node on
+the VPS.
 
 After TinyFugue is connected to the MUD, the HUD should begin showing live
 character state.
@@ -200,8 +200,9 @@ Imp starts and supervises the SSH forwarding process itself. It uses the
 platform OpenSSH client and your existing SSH configuration, keys,
 `known_hosts`, and agent.
 
-Imp does not store your SSH password or private key. The local SSH consumer
-endpoint is `127.0.0.1:8789`, which forwards to the remote node on port `8787`.
+Imp does not store your SSH password or private key. The SSH local listener is
+`127.0.0.1:8789` and forwards the **entire remote relay TCP port** on `8787`;
+Imp uses its state/action routes, but SSH does not filter other relay routes.
 
 ### External SSH
 

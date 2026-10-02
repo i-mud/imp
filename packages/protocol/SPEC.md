@@ -17,8 +17,9 @@ explicit client-adapter context.
 
 ## Transport
 
-JSON text frames over WebSocket. One message per frame. A binary frame or an
-invalid message is a policy violation and closes the connection.
+JSON text frames over WebSocket. One message per frame. Binary or malformed
+frames close the connection. Unknown message types have consumer-specific
+handling described under Error codes below.
 
 | Endpoint                              | Direction                    | Messages                                                    |
 | ------------------------------------- | ---------------------------- | ----------------------------------------------------------- |
@@ -32,9 +33,11 @@ invalid message is a policy violation and closes the connection.
 `http://localhost:1420` or `http://tauri.localhost`. `/ingest` and
 `/action-consumer` reject every request carrying an `Origin` header. This is
 browser defense-in-depth against cross-site requests, not authentication.
-Loopback prevents remote access but does not enforce UID ownership; Imp
-provides no per-user endpoint authentication. Both VPS and workstation must be
-single-user or trust every host-local process.
+Loopback prevents direct remote network access but does not enforce UID
+ownership; Imp provides no per-user endpoint authentication. Both producer and
+consumer hosts must be single-user or trust every host-local process. SSH
+forwards the entire node port; only the authenticated WSS gateway filters
+remote access to `/state` and `/action`.
 
 ## Context
 
@@ -52,8 +55,8 @@ A non-null state context is:
 The tuple is opaque downstream. Equality means exact equality of all three
 fields. The relay holds only one active context. A `select` replaces it and
 invalidates feed freshness until a matching `publish` arrives. A `select` with a
-null context means that no world is selected. A `publish` for any context other
-than the active one is ignored.
+null context means that no game connection is selected. A `publish` for any
+context other than the active one is ignored.
 
 ## Normalized state
 
@@ -170,20 +173,22 @@ Bounds live in `src/limits.ts` (`LIMITS`).
 
 ## Error codes
 
-| Code                   | Meaning                            | Caller policy        |
-| ---------------------- | ---------------------------------- | -------------------- |
-| `frame_too_large`      | frame exceeded the pre-parse cap   | violation            |
-| `invalid_json`         | not parseable JSON                 | violation            |
-| `unsupported_protocol` | `protocol` is not `2`              | violation            |
-| `unknown_type`         | a `type` this build does not model | **ignore the frame** |
-| `invalid_field`        | a field failed its rule            | violation            |
+| Code                   | Meaning                            | Caller policy     |
+| ---------------------- | ---------------------------------- | ----------------- |
+| `frame_too_large`      | frame exceeded the pre-parse cap   | violation         |
+| `invalid_json`         | not parseable JSON                 | violation         |
+| `unsupported_protocol` | `protocol` is not `2`              | violation         |
+| `unknown_type`         | a `type` this build does not model | consumer-specific |
+| `invalid_field`        | a field failed its rule            | violation         |
 
 Errors carry a dotted `path` such as `state.character.hp.max`. The rejected
 input is never included in the error or in logs: it is attacker-controlled, and
 keeping it out of logs and terminals is the point of rejecting it.
 
-`unknown_type` is the forwards-compatibility escape hatch and is the one code a
-caller must not treat as a fault.
+`RelayStateSource` ignores `unknown_type` server frames for forwards
+compatibility. The relay rejects unknown client message types with close code
+`1008`; `RelayActionSink` treats any non-`action-result` frame, including an
+unknown type, as an `unknown` outcome and does not retry.
 
 ## Versioning
 

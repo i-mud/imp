@@ -72,7 +72,11 @@ ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
 ```
 
 Then leave Imp in **External** connection mode. Imp connects to the
-forwarded relay at `127.0.0.1:8789`.
+forwarded node at `127.0.0.1:8789`.
+
+SSH forwards the entire remote relay TCP port, not just the routes used by the
+HUD. The local listener is loopback-only, but local users and processes can
+reach every forwarded relay route.
 
 ## Direct WSS
 

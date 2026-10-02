@@ -129,16 +129,20 @@ npm run relay -- --port 0
 
 ## Debugging the HUD over the tunnel
 
-Point the browser build at the tunnelled relay - no native build needed:
+Point the browser build at a separate local port forwarded to the VPS node:
 
 ```bash
-ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
-VITE_IMP_SOURCE=relay npm run dev
+ssh -N -L 8790:127.0.0.1:8787 <user>@<vps>
+VITE_IMP_SOURCE=relay VITE_IMP_RELAY_URL=ws://127.0.0.1:8790/state npm run dev
 ```
 
-If the HUD shows "no data" while connected, the relay is reachable but the feed
-is not: check `curl http://127.0.0.1:8787/healthz` and whether a producer is
-attached. Socket liveness and feed liveness are separate signals by design -
+Use a free local port such as `8790`, not `8787`, which the desktop-owned local
+node uses. `VITE_IMP_RELAY_URL` sets the browser relay state URL; the matching
+action URL is derived from it.
+
+If the HUD shows "no data" while connected, inspect the forwarded node with
+`curl http://127.0.0.1:8790/healthz`: check whether a producer is attached and a
+snapshot has arrived. Socket liveness and feed liveness are separate signals -
 see
 [`architecture/processes/connection-lifecycle.md`](architecture/processes/connection-lifecycle.md).
 
@@ -150,5 +154,6 @@ npm run check
 
 Chains lint/docs/version checks, TypeScript typechecks and tests, relay,
 shared-adapter, Mudlet, and TinyFugue lint/tests, the cross-component
-end-to-end check, and the frontend production build. The Linux CI job runs exactly this. Native Rust tests and
-Windows NSIS builds are separate native gates.
+end-to-end check, and the frontend production build. The Linux CI job runs
+exactly this. Native Rust tests and Windows NSIS builds are separate native
+gates.
