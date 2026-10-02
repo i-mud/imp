@@ -4,7 +4,7 @@ import type { ActionSink } from './action/types.ts';
 import { MockStateSource } from './source/mock.ts';
 import { RelayStateSource } from './source/relay.ts';
 import type { StateSource } from './source/types.ts';
-import { loadConnectionConfig, type RuntimeConnectionConfig, watchTunnelDiagnostics } from './tunnel.ts';
+import { loadConnectionConfig, type RuntimeConnectionConfig, watchConnectionDiagnostics } from './tunnel.ts';
 
 const DEFAULT_RELAY_URL = 'ws://127.0.0.1:8787/state';
 
@@ -80,7 +80,7 @@ export function relayConnectionFromNative(
   if (native.mode === 'local') {
     return {
       mode: 'local',
-      stateUrl: readRelayUrl(localStateUrl ?? configuredRelayUrl()),
+      stateUrl: readRelayUrl(native.stateUrl ?? localStateUrl ?? configuredRelayUrl()),
     };
   }
 
@@ -122,7 +122,12 @@ export async function createRuntimeClients(): Promise<AppRuntime> {
       ? {}
       : { authenticationToken: connection.authenticationToken };
 
-  const diagnostic = connection.mode === 'local' ? { diagnosticDetail: watchTunnelDiagnostics() } : {};
+  const diagnostic =
+    connection.mode === 'local'
+      ? {
+          diagnosticDetail: watchConnectionDiagnostics(native.stateUrl === null ? 'node' : 'tunnel'),
+        }
+      : {};
 
   return {
     source: new RelayStateSource({

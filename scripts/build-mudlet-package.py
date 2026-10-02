@@ -27,6 +27,7 @@ DESKTOP_RESOURCE = ROOT / "apps" / "desktop" / "src-tauri" / "resources" / "mudl
 HELPER_NAME = "imp-mudlet-helper"
 RUNTIME_NAME = "imp-mudlet-runtime"
 PACKAGE_NAME = "Imp.mpackage"
+PACKAGE_OUTPUT = OUTPUT / PACKAGE_NAME
 
 MUDDLER_IMAGE = os.environ.get(
     "MUDDLER_IMAGE",
@@ -212,9 +213,25 @@ def assemble_distribution(
 def stage_desktop_resource(
     executable: Path,
     runtime: Path,
+    *,
+    require_package: bool = False,
 ) -> Path:
+    package = DESKTOP_RESOURCE / PACKAGE_NAME
+    package_bytes = package.read_bytes() if package.is_file() else None
+
+    if require_package and package_bytes is None:
+        raise SystemExit(
+            f"desktop Mudlet resource is missing {PACKAGE_NAME}"
+        )
+
+    if package.is_file():
+        verify_package(package)
+
     reset(DESKTOP_RESOURCE)
     (DESKTOP_RESOURCE / ".gitkeep").touch()
+
+    if package_bytes is not None:
+        (DESKTOP_RESOURCE / PACKAGE_NAME).write_bytes(package_bytes)
 
     shutil.copy2(executable, DESKTOP_RESOURCE / executable.name)
     shutil.copytree(runtime, DESKTOP_RESOURCE / RUNTIME_NAME)
@@ -261,19 +278,48 @@ def verify_distribution(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--desktop-resource",
         action="store_true",
-        help="build and stage only the helper bundled with the desktop app",
+        help="build and stage the helper bundled with the desktop app",
     )
+    mode.add_argument(
+        "--package-only",
+        action="store_true",
+        help="build only the platform-neutral Mudlet package",
+    )
+
+    parser.add_argument(
+        "--require-package",
+        action="store_true",
+        help="fail desktop-resource staging unless Imp.mpackage is present",
+    )
+
     args = parser.parse_args()
 
+    if args.require_package and not args.desktop_resource:
+        parser.error("--require-package requires --desktop-resource")
+
     OUTPUT.mkdir(parents=True, exist_ok=True)
+
+    if args.package_only:
+        stage_muddler_project()
+        package = build_package()
+        verify_package(package)
+        shutil.copy2(package, PACKAGE_OUTPUT)
+        print(PACKAGE_OUTPUT)
+        return
 
     executable, runtime = freeze_helper()
 
     if args.desktop_resource:
-        destination = stage_desktop_resource(executable, runtime)
+        destination = stage_desktop_resource(
+            executable,
+            runtime,
+            require_package=args.require_package,
+        )
         print(destination)
         return
 

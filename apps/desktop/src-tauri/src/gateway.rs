@@ -1,15 +1,9 @@
-//! Supervises Imp's bundled same-host loopback node.
+//! Supervises Imp's bundled authenticated gateway for a desktop-local node.
 //!
-//! The node process is distinct from the UI and runs independently of which
-//! transport the desktop HUD consumes. A MUD-client adapter talks only to this
-//! host-local node.
-//!
-//! Ownership is strict:
-//! - any pre-existing listener, including a relay-shaped endpoint, is refused
-//!   and never signalled;
-//! - only a sidecar process spawned by this supervisor is terminated;
-//! - an owned node that exits or becomes unhealthy is restarted with bounded
-//!   backoff.
+//! Unlike the local node supervisor, this supervisor never adopts an existing
+//! gateway. Gateway `/healthz` intentionally contains no credential identity,
+//! so an existing process cannot be proven to use this Imp instance's configured
+//! pairing-token digest.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -24,7 +18,7 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
-use crate::tunnel::{classify_local_port, LocalPortState};
+use crate::tunnel::{probe_gateway_healthz, probe_open};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(150);
@@ -34,66 +28,84 @@ const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NodeDiagnostic {
-    /// Starting an owned bundled node and waiting for `/healthz`.
+pub enum GatewayDiagnostic {
+    /// Producer-side remote WSS is not active.
+    Inactive,
+    /// Starting the bundled gateway and waiting for `/healthz`.
     Starting,
-    /// The bundled node started by this Imp process is healthy.
+    /// The gateway child owned by this Imp process is healthy.
     Owned,
-    /// Something other than a healthy Imp node owns the loopback port.
+    /// Something already owns the configured loopback gateway port.
     LocalPortUnavailable,
-    /// The bundled sidecar could not start or become healthy.
+    /// The bundled gateway could not start or become healthy.
     SpawnUnavailable,
-    /// The owned node exited or supervision has stopped.
+    /// The owned gateway exited or supervision has stopped.
     Down,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct NodeStatus {
-    pub diagnostic: NodeDiagnostic,
+pub struct GatewayStatus {
+    pub diagnostic: GatewayDiagnostic,
 }
 
-trait OwnedNode: Send {
+trait OwnedGateway: Send {
     fn terminated(&self) -> bool;
     fn kill(self: Box<Self>) -> Result<(), String>;
 }
 
-struct SidecarNode {
+struct SidecarGateway {
     child: CommandChild,
     terminated: Arc<AtomicBool>,
 }
 
-impl OwnedNode for SidecarNode {
+impl OwnedGateway for SidecarGateway {
     fn terminated(&self) -> bool {
         self.terminated.load(Ordering::SeqCst)
     }
 
     fn kill(self: Box<Self>) -> Result<(), String> {
-        let SidecarNode { child, .. } = *self;
+        let SidecarGateway { child, .. } = *self;
         child
             .kill()
-            .map_err(|error| format!("failed to stop bundled Imp node: {error}"))
+            .map_err(|error| format!("failed to stop bundled Imp gateway: {error}"))
     }
 }
 
-type SpawnNode = Arc<dyn Fn() -> Result<Box<dyn OwnedNode>, String> + Send + Sync>;
+type SpawnGateway = Arc<dyn Fn() -> Result<Box<dyn OwnedGateway>, String> + Send + Sync>;
 
-pub struct NodeSupervisor {
-    status: Mutex<NodeStatus>,
-    child: Mutex<Option<Box<dyn OwnedNode>>>,
+pub struct GatewaySupervisor {
+    status: Mutex<GatewayStatus>,
+    child: Mutex<Option<Box<dyn OwnedGateway>>>,
     stop: Arc<AtomicBool>,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
-impl NodeSupervisor {
-    pub fn local(app: AppHandle, local_port: u16) -> Arc<Self> {
-        let spawn = sidecar_spawner(app, local_port);
-        Self::with_spawner(local_port, spawn)
+impl GatewaySupervisor {
+    pub fn inactive() -> Arc<Self> {
+        Arc::new(Self {
+            status: Mutex::new(GatewayStatus {
+                diagnostic: GatewayDiagnostic::Inactive,
+            }),
+            child: Mutex::new(None),
+            stop: Arc::new(AtomicBool::new(false)),
+            worker: Mutex::new(None),
+        })
     }
 
-    fn with_spawner(local_port: u16, spawn: SpawnNode) -> Arc<Self> {
+    pub fn local(
+        app: AppHandle,
+        gateway_port: u16,
+        relay_port: u16,
+        pairing_token_sha256: String,
+    ) -> Arc<Self> {
+        let spawn = sidecar_spawner(app, gateway_port, relay_port, pairing_token_sha256);
+        Self::with_spawner(gateway_port, spawn)
+    }
+
+    fn with_spawner(gateway_port: u16, spawn: SpawnGateway) -> Arc<Self> {
         let supervisor = Arc::new(Self {
-            status: Mutex::new(NodeStatus {
-                diagnostic: NodeDiagnostic::Starting,
+            status: Mutex::new(GatewayStatus {
+                diagnostic: GatewayDiagnostic::Starting,
             }),
             child: Mutex::new(None),
             stop: Arc::new(AtomicBool::new(false)),
@@ -102,85 +114,93 @@ impl NodeSupervisor {
 
         let worker_ref = Arc::clone(&supervisor);
         let stop = Arc::clone(&supervisor.stop);
-        let handle = thread::spawn(move || worker_ref.run(local_port, spawn, stop));
+        let handle = thread::spawn(move || worker_ref.run(gateway_port, spawn, stop));
         *supervisor.worker.lock() = Some(handle);
 
         supervisor
     }
 
-    pub fn status(&self) -> NodeStatus {
+    pub fn status(&self) -> GatewayStatus {
         self.status.lock().clone()
     }
 
-    /// Stops only the sidecar this supervisor owns. A pre-existing listener
-    /// has no child handle here and therefore cannot be signalled.
+    /// Stops only a gateway child this supervisor owns.
+    ///
+    /// A listener already present on the gateway port is never owned and is
+    /// therefore never signalled.
     pub fn shutdown(&self) {
         self.stop.store(true, Ordering::SeqCst);
         self.kill_owned();
 
         if let Some(handle) = self.worker.lock().take() {
             let _ = handle.join();
-            self.set_diagnostic(NodeDiagnostic::Down);
+            self.set_diagnostic(GatewayDiagnostic::Down);
         }
     }
 
-    fn set_diagnostic(&self, diagnostic: NodeDiagnostic) {
+    fn set_diagnostic(&self, diagnostic: GatewayDiagnostic) {
         self.status.lock().diagnostic = diagnostic;
     }
 
-    fn run(self: Arc<Self>, local_port: u16, spawn: SpawnNode, stop: Arc<AtomicBool>) {
+    fn run(self: Arc<Self>, gateway_port: u16, spawn: SpawnGateway, stop: Arc<AtomicBool>) {
         let mut backoff = INITIAL_BACKOFF;
 
         while !stop.load(Ordering::SeqCst) {
-            match classify_local_port(local_port) {
-                LocalPortState::RelayEndpoint | LocalPortState::Foreign => {
-                    self.set_diagnostic(NodeDiagnostic::LocalPortUnavailable);
-                    eprintln!("imp: local node port 127.0.0.1:{local_port} is unavailable");
-                    sleep_unless_stopped(PORT_WATCH_INTERVAL, &stop);
-                }
-                LocalPortState::Free => {
-                    self.set_diagnostic(NodeDiagnostic::Starting);
-                    eprintln!("imp: starting local Imp node on 127.0.0.1:{local_port}");
+            // Deliberately do not identify or adopt an existing gateway.
+            // Its health response cannot prove which pairing credential it owns.
+            if probe_open(gateway_port) {
+                self.set_diagnostic(GatewayDiagnostic::LocalPortUnavailable);
+                self.wait_for_port_free(gateway_port, &stop);
+                backoff = INITIAL_BACKOFF;
+                continue;
+            }
 
-                    match spawn() {
-                        Ok(child) => {
-                            *self.child.lock() = Some(child);
+            self.set_diagnostic(GatewayDiagnostic::Starting);
+            eprintln!("imp: starting local authenticated gateway on 127.0.0.1:{gateway_port}");
 
-                            if self.wait_for_owned_ready(local_port, &stop) {
-                                self.set_diagnostic(NodeDiagnostic::Owned);
-                                eprintln!("imp: local Imp node is ready");
-                                backoff = INITIAL_BACKOFF;
+            match spawn() {
+                Ok(child) => {
+                    *self.child.lock() = Some(child);
 
-                                if self.monitor_owned(local_port, &stop) {
-                                    return;
-                                }
+                    if self.wait_for_owned_ready(gateway_port, &stop) {
+                        self.set_diagnostic(GatewayDiagnostic::Owned);
+                        eprintln!("imp: local authenticated gateway is ready");
+                        backoff = INITIAL_BACKOFF;
 
-                                self.set_diagnostic(NodeDiagnostic::Down);
-                            } else if stop.load(Ordering::SeqCst) {
-                                return;
-                            } else {
-                                self.set_diagnostic(NodeDiagnostic::SpawnUnavailable);
-                            }
+                        if self.monitor_owned(gateway_port, &stop) {
+                            return;
                         }
-                        Err(error) => {
-                            self.set_diagnostic(NodeDiagnostic::SpawnUnavailable);
-                            eprintln!("imp: local Imp node failed to start: {error}");
-                        }
-                    }
 
-                    if stop.load(Ordering::SeqCst) {
+                        self.set_diagnostic(GatewayDiagnostic::Down);
+                    } else if stop.load(Ordering::SeqCst) {
                         return;
+                    } else {
+                        self.set_diagnostic(GatewayDiagnostic::SpawnUnavailable);
                     }
-
-                    eprintln!("imp: retrying local Imp node in {backoff:?}");
-                    sleep_unless_stopped(backoff, &stop);
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
+                Err(error) => {
+                    self.set_diagnostic(GatewayDiagnostic::SpawnUnavailable);
+                    eprintln!("imp: local authenticated gateway failed to start: {error}");
                 }
             }
+
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+
+            eprintln!("imp: retrying local authenticated gateway in {backoff:?}");
+            sleep_unless_stopped(backoff, &stop);
+            backoff = (backoff * 2).min(MAX_BACKOFF);
         }
     }
 
-    fn wait_for_owned_ready(&self, local_port: u16, stop: &AtomicBool) -> bool {
+    fn wait_for_port_free(&self, gateway_port: u16, stop: &AtomicBool) {
+        while !stop.load(Ordering::SeqCst) && probe_open(gateway_port) {
+            sleep_unless_stopped(PORT_WATCH_INTERVAL, stop);
+        }
+    }
+
+    fn wait_for_owned_ready(&self, gateway_port: u16, stop: &AtomicBool) -> bool {
         let deadline = Instant::now() + READY_TIMEOUT;
 
         while Instant::now() < deadline {
@@ -194,16 +214,11 @@ impl NodeSupervisor {
                 return false;
             }
 
-            match classify_local_port(local_port) {
-                LocalPortState::RelayEndpoint => return true,
-                LocalPortState::Foreign | LocalPortState::Free => {
-                    // A freshly spawned relay can begin accepting TCP before
-                    // /healthz is ready to answer. Do not mistake that brief
-                    // startup window for a foreign listener and kill our own
-                    // child. If another process actually won the bind race,
-                    // the sidecar will normally exit; otherwise the readiness
-                    // deadline below remains the upper bound.
-                }
+            // Like the node, the frozen gateway may accept TCP briefly before
+            // its HTTP health endpoint is ready. Keep waiting inside the
+            // bounded readiness window instead of killing it immediately.
+            if probe_gateway_healthz(gateway_port) {
+                return true;
             }
 
             sleep_unless_stopped(POLL_INTERVAL, stop);
@@ -213,9 +228,8 @@ impl NodeSupervisor {
         false
     }
 
-    /// Returns true only when shutdown requested termination. Every other
-    /// return means the owned node needs another supervision cycle.
-    fn monitor_owned(&self, local_port: u16, stop: &AtomicBool) -> bool {
+    /// Returns true only when application shutdown requested termination.
+    fn monitor_owned(&self, gateway_port: u16, stop: &AtomicBool) -> bool {
         loop {
             if stop.load(Ordering::SeqCst) {
                 return true;
@@ -223,12 +237,12 @@ impl NodeSupervisor {
 
             if self.owned_terminated() {
                 self.clear_owned();
-                eprintln!("imp: local Imp node exited");
+                eprintln!("imp: local authenticated gateway exited");
                 return false;
             }
 
-            if classify_local_port(local_port) != LocalPortState::RelayEndpoint {
-                eprintln!("imp: local Imp node became unhealthy");
+            if !probe_gateway_healthz(gateway_port) {
+                eprintln!("imp: local authenticated gateway became unhealthy");
                 self.kill_owned();
                 return false;
             }
@@ -257,45 +271,53 @@ impl NodeSupervisor {
     }
 }
 
-fn sidecar_spawner(app: AppHandle, local_port: u16) -> SpawnNode {
+fn sidecar_spawner(
+    app: AppHandle,
+    gateway_port: u16,
+    relay_port: u16,
+    pairing_token_sha256: String,
+) -> SpawnGateway {
     Arc::new(move || {
         let command = app
             .shell()
             .sidecar("imp-node")
-            .map_err(|error| format!("failed to resolve bundled Imp node: {error}"))?
+            .map_err(|error| format!("failed to resolve bundled Imp gateway: {error}"))?
+            .arg("gateway")
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--port")
-            .arg(local_port.to_string());
+            .arg(gateway_port.to_string())
+            .arg("--relay-url")
+            .arg(format!("ws://127.0.0.1:{relay_port}"))
+            .arg("--token-sha256")
+            .arg(pairing_token_sha256.clone());
 
         let (mut events, child) = command
             .spawn()
-            .map_err(|error| format!("failed to spawn bundled Imp node: {error}"))?;
+            .map_err(|error| format!("failed to spawn bundled Imp gateway: {error}"))?;
 
         let terminated = Arc::new(AtomicBool::new(false));
         let event_terminated = Arc::clone(&terminated);
 
-        // Drain the sidecar pipes even though supervision uses `/healthz`.
-        // This prevents a noisy child from ever blocking on a full pipe.
         tauri::async_runtime::spawn(async move {
             while let Some(event) = events.recv().await {
                 match event {
                     CommandEvent::Stdout(bytes) => {
                         for line in String::from_utf8_lossy(&bytes).lines() {
-                            eprintln!("imp: node: {line}");
+                            eprintln!("imp: gateway: {line}");
                         }
                     }
                     CommandEvent::Stderr(bytes) => {
                         for line in String::from_utf8_lossy(&bytes).lines() {
-                            eprintln!("imp: node: {line}");
+                            eprintln!("imp: gateway: {line}");
                         }
                     }
                     CommandEvent::Error(error) => {
-                        eprintln!("imp: node process event error: {error}");
+                        eprintln!("imp: gateway process event error: {error}");
                     }
                     CommandEvent::Terminated(payload) => {
                         eprintln!(
-                            "imp: node process terminated (code={:?}, signal={:?})",
+                            "imp: gateway process terminated (code={:?}, signal={:?})",
                             payload.code, payload.signal
                         );
                         break;
@@ -307,7 +329,7 @@ fn sidecar_spawner(app: AppHandle, local_port: u16) -> SpawnNode {
             event_terminated.store(true, Ordering::SeqCst);
         });
 
-        Ok(Box::new(SidecarNode { child, terminated }) as Box<dyn OwnedNode>)
+        Ok(Box::new(SidecarGateway { child, terminated }) as Box<dyn OwnedGateway>)
     })
 }
 
@@ -331,13 +353,8 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::AtomicUsize;
 
-    const HEALTH_RESPONSE: &str = concat!(
-        "HTTP/1.1 200 OK\r\n",
-        "Connection: close\r\n",
-        "\r\n",
-        "{\"feed\":\"down\",\"producer_count\":0,\"has_snapshot\":false,\"seq\":null}"
-    );
-
+    const GATEWAY_HEALTH_RESPONSE: &str =
+        "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
     const FOREIGN_RESPONSE: &str = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nnope";
 
     struct TestListener {
@@ -351,6 +368,7 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
             let port = listener.local_addr().unwrap().port();
+
             let stop = Arc::new(AtomicBool::new(false));
             let worker_stop = Arc::clone(&stop);
 
@@ -379,7 +397,6 @@ mod tests {
 
         fn stop(&mut self) {
             self.stop.store(true, Ordering::SeqCst);
-
             if let Some(worker) = self.worker.take() {
                 worker.join().unwrap();
             }
@@ -392,13 +409,14 @@ mod tests {
         }
     }
 
-    struct FakeNode {
+    struct FakeGateway {
         kills: Arc<AtomicUsize>,
+        terminated: Arc<AtomicBool>,
     }
 
-    impl OwnedNode for FakeNode {
+    impl OwnedGateway for FakeGateway {
         fn terminated(&self) -> bool {
-            false
+            self.terminated.load(Ordering::SeqCst)
         }
 
         fn kill(self: Box<Self>) -> Result<(), String> {
@@ -407,12 +425,13 @@ mod tests {
         }
     }
 
-    fn fake_spawner(spawns: Arc<AtomicUsize>, kills: Arc<AtomicUsize>) -> SpawnNode {
+    fn fake_spawner(spawns: Arc<AtomicUsize>, kills: Arc<AtomicUsize>) -> SpawnGateway {
         Arc::new(move || {
             spawns.fetch_add(1, Ordering::SeqCst);
-            Ok(Box::new(FakeNode {
+            Ok(Box::new(FakeGateway {
                 kills: Arc::clone(&kills),
-            }) as Box<dyn OwnedNode>)
+                terminated: Arc::new(AtomicBool::new(false)),
+            }) as Box<dyn OwnedGateway>)
         })
     }
 
@@ -423,7 +442,6 @@ mod tests {
             if predicate() {
                 return true;
             }
-
             thread::sleep(Duration::from_millis(20));
         }
 
@@ -431,53 +449,64 @@ mod tests {
     }
 
     #[test]
-    fn local_node_refuses_an_existing_relay_without_spawning_or_killing_it() {
-        let node = TestListener::start(HEALTH_RESPONSE);
-        let spawns = Arc::new(AtomicUsize::new(0));
-        let kills = Arc::new(AtomicUsize::new(0));
+    fn inactive_supervisor_owns_nothing() {
+        let supervisor = GatewaySupervisor::inactive();
 
-        let supervisor = NodeSupervisor::with_spawner(
-            node.port,
-            fake_spawner(Arc::clone(&spawns), Arc::clone(&kills)),
-        );
-
-        assert!(wait_until(|| {
-            supervisor.status().diagnostic == NodeDiagnostic::LocalPortUnavailable
-        }));
-        assert_eq!(spawns.load(Ordering::SeqCst), 0);
+        assert_eq!(supervisor.status().diagnostic, GatewayDiagnostic::Inactive);
+        assert!(supervisor.child.lock().is_none());
+        assert!(supervisor.worker.lock().is_none());
 
         supervisor.shutdown();
 
-        assert_eq!(kills.load(Ordering::SeqCst), 0);
-        assert!(
-            TcpStream::connect(("127.0.0.1", node.port)).is_ok(),
-            "shutdown must leave the pre-existing relay running"
-        );
+        assert_eq!(supervisor.status().diagnostic, GatewayDiagnostic::Inactive);
     }
 
     #[test]
-    fn local_mode_refuses_a_foreign_listener_without_spawning() {
-        let foreign = TestListener::start(FOREIGN_RESPONSE);
+    fn existing_foreign_listener_is_never_spawned_over_or_killed() {
+        let listener = TestListener::start(FOREIGN_RESPONSE);
         let spawns = Arc::new(AtomicUsize::new(0));
         let kills = Arc::new(AtomicUsize::new(0));
 
-        let supervisor = NodeSupervisor::with_spawner(
-            foreign.port,
+        let supervisor = GatewaySupervisor::with_spawner(
+            listener.port,
             fake_spawner(Arc::clone(&spawns), Arc::clone(&kills)),
         );
 
         assert!(wait_until(|| {
-            supervisor.status().diagnostic == NodeDiagnostic::LocalPortUnavailable
+            supervisor.status().diagnostic == GatewayDiagnostic::LocalPortUnavailable
         }));
 
         supervisor.shutdown();
 
         assert_eq!(spawns.load(Ordering::SeqCst), 0);
         assert_eq!(kills.load(Ordering::SeqCst), 0);
+        assert!(TcpStream::connect(("127.0.0.1", listener.port)).is_ok());
     }
 
     #[test]
-    fn local_mode_spawns_on_a_free_port_and_shutdown_kills_only_its_child() {
+    fn existing_valid_gateway_is_still_never_adopted() {
+        let listener = TestListener::start(GATEWAY_HEALTH_RESPONSE);
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let kills = Arc::new(AtomicUsize::new(0));
+
+        let supervisor = GatewaySupervisor::with_spawner(
+            listener.port,
+            fake_spawner(Arc::clone(&spawns), Arc::clone(&kills)),
+        );
+
+        assert!(wait_until(|| {
+            supervisor.status().diagnostic == GatewayDiagnostic::LocalPortUnavailable
+        }));
+
+        supervisor.shutdown();
+
+        assert_eq!(spawns.load(Ordering::SeqCst), 0);
+        assert_eq!(kills.load(Ordering::SeqCst), 0);
+        assert!(probe_gateway_healthz(listener.port));
+    }
+
+    #[test]
+    fn free_port_spawns_and_shutdown_kills_only_owned_child() {
         let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = reservation.local_addr().unwrap().port();
         drop(reservation);
@@ -485,7 +514,7 @@ mod tests {
         let spawns = Arc::new(AtomicUsize::new(0));
         let kills = Arc::new(AtomicUsize::new(0));
 
-        let supervisor = NodeSupervisor::with_spawner(
+        let supervisor = GatewaySupervisor::with_spawner(
             port,
             fake_spawner(Arc::clone(&spawns), Arc::clone(&kills)),
         );
@@ -499,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn owned_startup_tolerates_transient_non_health_response() {
+    fn owned_startup_tolerates_tcp_before_gateway_health() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -517,14 +546,10 @@ mod tests {
                         let _ = stream.read(&mut [0u8; 1024]);
 
                         let request = worker_requests.fetch_add(1, Ordering::SeqCst);
-
-                        // The first health probe sees a TCP listener before
-                        // the relay health endpoint is fully ready. The
-                        // classifier will then also perform a bare TCP probe.
                         let response = if request == 0 {
                             FOREIGN_RESPONSE
                         } else {
-                            HEALTH_RESPONSE
+                            GATEWAY_HEALTH_RESPONSE
                         };
 
                         let _ = stream.write_all(response.as_bytes());
@@ -538,18 +563,12 @@ mod tests {
         });
 
         let kills = Arc::new(AtomicUsize::new(0));
-        let supervisor = Arc::new(NodeSupervisor {
-            status: Mutex::new(NodeStatus {
-                diagnostic: NodeDiagnostic::Starting,
-            }),
-            child: Mutex::new(None),
-            stop: Arc::new(AtomicBool::new(false)),
-            worker: Mutex::new(None),
-        });
+        let supervisor = GatewaySupervisor::inactive();
 
-        *supervisor.child.lock() = Some(Box::new(FakeNode {
+        *supervisor.child.lock() = Some(Box::new(FakeGateway {
             kills: Arc::clone(&kills),
-        }) as Box<dyn OwnedNode>);
+            terminated: Arc::new(AtomicBool::new(false)),
+        }) as Box<dyn OwnedGateway>);
 
         let ready = supervisor.wait_for_owned_ready(port, &AtomicBool::new(false));
 
@@ -558,39 +577,23 @@ mod tests {
 
         assert!(
             ready,
-            "a transient pre-health listener must become ready without restart"
+            "TCP acceptance before /healthz readiness must not cause restart"
         );
-        assert_eq!(
-            kills.load(Ordering::SeqCst),
-            0,
-            "the owned node must not be killed during its health startup window"
-        );
+        assert_eq!(kills.load(Ordering::SeqCst), 0);
     }
 
     #[test]
-    fn local_node_starts_after_an_existing_relay_disappears() {
-        let mut node = TestListener::start(HEALTH_RESPONSE);
-        let spawns = Arc::new(AtomicUsize::new(0));
+    fn unhealthy_owned_gateway_is_killed_for_restart() {
+        let listener = TestListener::start(FOREIGN_RESPONSE);
         let kills = Arc::new(AtomicUsize::new(0));
+        let supervisor = GatewaySupervisor::inactive();
 
-        let supervisor = NodeSupervisor::with_spawner(
-            node.port,
-            fake_spawner(Arc::clone(&spawns), Arc::clone(&kills)),
-        );
+        *supervisor.child.lock() = Some(Box::new(FakeGateway {
+            kills: Arc::clone(&kills),
+            terminated: Arc::new(AtomicBool::new(false)),
+        }) as Box<dyn OwnedGateway>);
 
-        assert!(wait_until(|| {
-            supervisor.status().diagnostic == NodeDiagnostic::LocalPortUnavailable
-        }));
-
-        node.stop();
-
-        assert!(
-            wait_until(|| spawns.load(Ordering::SeqCst) >= 1),
-            "the bundled node should be started after the adopted endpoint disappears"
-        );
-
-        supervisor.shutdown();
-
+        assert!(!supervisor.monitor_owned(listener.port, &AtomicBool::new(false)));
         assert_eq!(kills.load(Ordering::SeqCst), 1);
     }
 }

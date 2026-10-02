@@ -11,6 +11,22 @@ describe('desktop runtime configuration', () => {
     expect(actionUrlForStateUrl('ws://127.0.0.1:8787/custom')).toBe('ws://127.0.0.1:8787/action');
   });
 
+  it('uses the native loopback endpoint for SSH-backed transports', () => {
+    expect(
+      relayConnectionFromNative(
+        {
+          mode: 'local',
+          stateUrl: 'ws://127.0.0.1:8789/state',
+          authenticationToken: null,
+        },
+        'ws://127.0.0.1:8787/state',
+      ),
+    ).toEqual({
+      mode: 'local',
+      stateUrl: 'ws://127.0.0.1:8789/state',
+    });
+  });
+
   it('turns native Direct-WSS config into authenticated relay options', () => {
     expect(
       relayConnectionFromNative({

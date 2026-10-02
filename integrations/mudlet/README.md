@@ -6,6 +6,30 @@ Mudlet is a local MUD-client adapter. It does not own remote transport.
 MUD <-> Mudlet <-> Lua adapter <-> local helper <-> local Imp node
 ```
 
+## Install on Windows
+
+The Windows desktop installer carries both the shared Mudlet helper/runtime and
+the small per-profile `Imp.mpackage`.
+
+Launch Imp once after installation. The desktop provisions the package at the
+stable path:
+
+```text
+%LOCALAPPDATA%\Imp\mudlet\Imp.mpackage
+```
+
+Use Mudlet's package manager to install that file once in each profile that
+should publish to Imp. Imp does not modify Mudlet profiles automatically.
+
+The package starts the desktop-provisioned helper from Imp's versioned local
+runtime. The helper always talks to the same-host Imp node on
+`127.0.0.1:8787`; the Mudlet package never owns SSH, TLS, pairing credentials,
+or other remote transport.
+
+When a later Imp version carries an updated `Imp.mpackage`, launching that
+desktop version refreshes the stable package file above. Reinstall that file in
+the relevant Mudlet profiles when the package itself changes.
+
 The Lua side uses Mudlet's `spawn()` RPC facility to communicate with the helper
 over newline-delimited JSON.
 

@@ -27,7 +27,8 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 use parking_lot::Mutex;
 use serde::Serialize;
 
-pub const LOCAL_PORT: u16 = 8787;
+pub const NODE_PORT: u16 = 8787;
+pub const SSH_FORWARD_PORT: u16 = 8789;
 const CONNECT_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// An adopted endpoint is normally reached through an SSH forward, so its
 /// `/healthz` round trip pays real network latency while the local connect
@@ -245,9 +246,7 @@ impl TunnelSupervisor {
             match state {
                 LocalPortState::RelayEndpoint => {
                     if changed {
-                        eprintln!(
-                            "imp: using existing Imp relay on 127.0.0.1:{local_port}"
-                        );
+                        eprintln!("imp: using existing Imp relay on 127.0.0.1:{local_port}");
                     }
                     self.set_diagnostic(TunnelDiagnostic::ExternalPortInUse);
                 }
@@ -324,54 +323,70 @@ pub(crate) fn classify_local_port(local_port: u16) -> LocalPortState {
 }
 
 /// True if something already accepts connections on the local port.
-fn probe_open(local_port: u16) -> bool {
+pub(crate) fn probe_open(local_port: u16) -> bool {
     TcpStream::connect_timeout(&local_addr(local_port), CONNECT_PROBE_TIMEOUT).is_ok()
 }
 
-/// Best-effort check that an already-open local port looks like an Imp
-/// relay rather than an unrelated service. A bare TCP connect only proves
-/// *something* is listening; this reads relay's `/healthz` framing shape
-/// without depending on the WebSocket/JSON protocol layer.
-fn probe_relay_healthz(local_port: u16) -> bool {
+/// Best-effort bounded HTTP/JSON probe of one loopback `/healthz` endpoint.
+///
+/// The service-specific probes below validate the returned JSON shape. Keeping
+/// transport/framing here preserves the existing segmented-response handling
+/// for both relay and gateway health checks.
+fn probe_healthz_json(local_port: u16) -> Option<serde_json::Value> {
     use std::io::{Read, Write};
+
     let Ok(mut stream) = TcpStream::connect_timeout(&local_addr(local_port), CONNECT_PROBE_TIMEOUT)
     else {
-        return false;
+        return None;
     };
+
     let deadline = Instant::now() + HEALTH_RESPONSE_TIMEOUT;
     let request = format!(
         "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1:{local_port}\r\nConnection: close\r\n\r\n"
     );
+
     if stream.write_all(request.as_bytes()).is_err() {
-        return false;
+        return None;
     }
-    // Reads to EOF within one overall deadline rather than giving up on the
-    // first short read: a tunnelled relay may answer in several segments.
+
+    // Read to EOF within one overall deadline rather than giving up on the
+    // first short read: a tunnelled endpoint may answer in several segments.
     let mut response = Vec::new();
     let mut chunk = [0u8; 512];
     while response.len() < HEALTH_RESPONSE_BYTES {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             break;
         };
+
         if stream.set_read_timeout(Some(remaining)).is_err() {
-            return false;
+            return None;
         }
+
         match stream.read(&mut chunk) {
             Ok(0) | Err(_) => break,
             Ok(read) => response.extend_from_slice(&chunk[..read]),
         }
     }
-    let Some(body_start) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        return false;
-    };
+
+    let body_start = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")?;
+
     let headers = &response[..body_start];
     if !(headers.starts_with(b"HTTP/1.1 200") || headers.starts_with(b"HTTP/1.0 200")) {
-        return false;
+        return None;
     }
-    let Ok(health) = serde_json::from_slice::<serde_json::Value>(&response[body_start + 4..])
-    else {
+
+    serde_json::from_slice::<serde_json::Value>(&response[body_start + 4..]).ok()
+}
+
+/// True only when the local `/healthz` response has the established Imp relay
+/// health shape.
+pub(crate) fn probe_relay_healthz(local_port: u16) -> bool {
+    let Some(health) = probe_healthz_json(local_port) else {
         return false;
     };
+
     matches!(
         health.get("feed").and_then(serde_json::Value::as_str),
         Some("down" | "stale" | "live")
@@ -388,6 +403,23 @@ fn probe_relay_healthz(local_port: u16) -> bool {
             .is_some_and(|seq| seq.is_null() || seq.as_u64().is_some())
 }
 
+/// True only when the local `/healthz` response has the deliberately minimal
+/// authenticated-gateway shape.
+///
+/// Gateway health contains no credential or relay information, so this proves
+/// service identity only. It must never be used to authorize adoption of an
+/// already-running gateway process.
+pub(crate) fn probe_gateway_healthz(local_port: u16) -> bool {
+    let Some(health) = probe_healthz_json(local_port) else {
+        return false;
+    };
+    let Some(object) = health.as_object() else {
+        return false;
+    };
+
+    object.len() == 1 && object.get("status").and_then(serde_json::Value::as_str) == Some("ok")
+}
+
 fn ssh_command(ssh_target: &str, local_port: u16) -> Command {
     let mut command = Command::new("ssh");
     command
@@ -402,7 +434,7 @@ fn ssh_command(ssh_target: &str, local_port: u16) -> Command {
         .arg("-o")
         .arg("ServerAliveCountMax=3")
         .arg("-L")
-        .arg(format!("127.0.0.1:{local_port}:127.0.0.1:8787"))
+        .arg(format!("127.0.0.1:{local_port}:127.0.0.1:{NODE_PORT}"))
         .arg("--")
         .arg(ssh_target)
         .stdin(Stdio::null())
@@ -563,6 +595,11 @@ mod tests {
     const RELAY_HEALTHZ_HEAD: &str = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
     const STALE_RELAY_BODY: &str =
         "{\"feed\":\"stale\",\"producer_count\":1,\"has_snapshot\":true,\"seq\":7}";
+    const GATEWAY_HEALTHZ: &str = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
+    const GATEWAY_HEALTHZ_HEAD: &str = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
+    const GATEWAY_HEALTHZ_BODY: &str = "{\"status\":\"ok\"}";
+    const GENERIC_STATUS_OK: &str =
+        "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"status\":\"ok\",\"extra\":true}";
     const NOT_A_RELAY: &str = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nnope";
     /// Long enough that headers and body cannot land in one read.
     const SEGMENT_GAP: Duration = Duration::from_millis(150);
@@ -745,6 +782,38 @@ mod tests {
             classify_local_port(relay.port),
             LocalPortState::RelayEndpoint,
             "headers and body in separate reads, and a stale feed, are both still an adoptable relay"
+        );
+    }
+
+    #[test]
+    fn gateway_health_probe_accepts_only_gateway_shape() {
+        let endpoint = ForeignListener::start(GATEWAY_HEALTHZ);
+
+        assert!(probe_gateway_healthz(endpoint.port));
+        assert!(!probe_relay_healthz(endpoint.port));
+
+        endpoint.reply(Reply::Whole(RELAY_HEALTHZ));
+        assert!(!probe_gateway_healthz(endpoint.port));
+        assert!(probe_relay_healthz(endpoint.port));
+
+        endpoint.reply(Reply::Whole(GENERIC_STATUS_OK));
+        assert!(
+            !probe_gateway_healthz(endpoint.port),
+            "a generic service returning status=ok must not identify as the Imp gateway"
+        );
+
+        endpoint.reply(Reply::Whole(NOT_A_RELAY));
+        assert!(!probe_gateway_healthz(endpoint.port));
+    }
+
+    #[test]
+    fn segmented_gateway_health_response_is_accepted() {
+        let endpoint = ForeignListener::start(GATEWAY_HEALTHZ);
+        endpoint.reply(Reply::Segmented(GATEWAY_HEALTHZ_HEAD, GATEWAY_HEALTHZ_BODY));
+
+        assert!(
+            probe_gateway_healthz(endpoint.port),
+            "gateway health must tolerate headers and body arriving separately"
         );
     }
 
@@ -948,7 +1017,7 @@ mod tests {
 
     #[test]
     fn managed_mode_rejects_an_empty_target_without_spawning() {
-        let supervisor = TunnelSupervisor::managed("  ".into(), LOCAL_PORT);
+        let supervisor = TunnelSupervisor::managed("  ".into(), SSH_FORWARD_PORT);
 
         assert_eq!(
             supervisor.status().diagnostic,

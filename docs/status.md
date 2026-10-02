@@ -538,4 +538,85 @@ the context marker and action consumer before actions were accepted again.
 The descriptive `server-install-bootstrap` milestone tag records the completed
 slice independently of the canonical `v0.1.0` release.
 
+Slice 16, `mudlet-local-integration`, is complete.
+
+The desktop now owns a packaged same-host Imp node independently of the HUD's
+selected consumer transport. The existing Python relay is bundled as an onedir
+`imp-node` sidecar, and the same executable/runtime can run either the relay or
+the authenticated gateway.
+
+The loopback roles are intentionally separate:
+
+```text
+127.0.0.1:8787  same-host producer node for Mudlet/TinyFugue adapters
+127.0.0.1:8788  optional authenticated gateway for producer-side WSS
+127.0.0.1:8789  SSH consumer endpoint for Managed/External desktop transport
+```
+
+The local node is supervised in every desktop connection mode. It no longer
+adopts an existing relay-shaped endpoint: any pre-existing listener on `8787`
+is left untouched and reported unavailable. This prevents an old/manual SSH
+forward from being mistaken for the same-host producer node. Managed SSH may
+still adopt a valid existing relay on `8789`, where remote consumption is the
+intended role.
+
+Local TinyFugue acceptance used the real TinyFugue integration, local
+`imp-feed`, and the desktop-owned node. Injected GMCP produced live HUD state
+and trusted actions sent through the local node reached TinyFugue's pinned send
+path.
+
+Local Mudlet acceptance covered real GMCP state, profile switching, foreground
+ownership, Alt-Tab behavior, and trusted actions. Exactly one selected Mudlet
+profile remained the producer, and a real `look` command sent through Imp
+reached Mudlet and the MUD.
+
+Remote Mudlet transport was live-verified over both supported paths. For SSH, a
+reverse OpenSSH tunnel exposed the Windows local node on VPS loopback; a remote
+client read Tesla's retained state and sent a trusted `look` that returned
+`forwarded` and reached the MUD. For authenticated WSS, the VPS gateway was
+temporarily stopped and its loopback `8788` replaced by a reverse tunnel to the
+Windows desktop-owned gateway. Existing Caddy TLS termination then exposed that
+gateway through the established public endpoint. Public `/healthz` succeeded,
+`/ingest` remained `404`, authenticated WSS returned Tesla's exact state/context,
+and a real `look` traversed WSS -> gateway -> local relay -> Mudlet -> MUD. The
+temporary reverse tunnel was removed afterwards and the normal VPS
+`imp-gateway.service` was restored and verified healthy.
+
+The desktop transport separation was then live-verified on Windows with Mudlet
+left connected while the HUD was switched to Managed SSH. `imp-node.exe`
+continued to own `127.0.0.1:8787`, while the desktop-owned `ssh.exe` separately
+owned `127.0.0.1:8789` with:
+
+```text
+-L 127.0.0.1:8789:127.0.0.1:8787
+```
+
+The local and remote `/healthz` responses carried different retained sequence
+numbers, proving they were distinct nodes. The HUD consumed the VPS node through
+`8789`, and trusted `look` delivery to the remote TinyFugue/MUD path still
+worked.
+
+During that final remote TinyFugue acceptance, the first reconnect again
+produced state without authoritative character identity/vitals while trusted
+actions still worked; a second reconnect restored the normal name and vitals.
+That matches the separately tracked TinyFugue character-identity reacquisition
+defect and is not a transport failure.
+
+Mudlet release distribution is also complete. The release workflow builds
+`Imp.mpackage` before the Windows job, downloads it into the desktop Mudlet
+resources, and requires it when building the frozen desktop helper. On launch,
+the installed desktop provisions both its versioned copy and the stable
+user-facing path:
+
+```text
+%LOCALAPPDATA%\Imp\mudlet\Imp.mpackage
+```
+
+The user installs that small package once per Mudlet profile through Mudlet's
+package manager; the shared native helper/runtime remains desktop-managed. Imp
+does not modify Mudlet profiles automatically.
+
+The temporary desktop-side WSS credential used for acceptance was removed after
+testing and `remote-access.json` returned to disabled state.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).

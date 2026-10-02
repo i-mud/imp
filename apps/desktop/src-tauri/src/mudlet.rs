@@ -7,6 +7,7 @@ use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 const RESOURCE_DIR: &str = "mudlet";
 const RUNTIME_DIR: &str = "imp-mudlet-runtime";
+const PACKAGE_NAME: &str = "Imp.mpackage";
 const CURRENT_FILE: &str = "current.txt";
 
 #[cfg(target_os = "windows")]
@@ -51,10 +52,14 @@ fn provision_from(source: &Path, root: &Path, version: &str) -> io::Result<PathB
 
     let versions = root.join("versions");
     let destination = versions.join(version);
+    let package_required = source.join(PACKAGE_NAME).is_file();
 
     fs::create_dir_all(&versions)?;
 
-    if !bundle_complete(&destination) {
+    let destination_complete = bundle_complete(&destination)
+        && (!package_required || destination.join(PACKAGE_NAME).is_file());
+
+    if !destination_complete {
         if destination.exists() {
             fs::remove_dir_all(&destination)?;
         }
@@ -73,10 +78,12 @@ fn provision_from(source: &Path, root: &Path, version: &str) -> io::Result<PathB
         }
     }
 
-    fs::write(
-        root.join(CURRENT_FILE),
-        format!("versions/{version}\n"),
-    )?;
+    let package = destination.join(PACKAGE_NAME);
+    if package.is_file() {
+        fs::copy(&package, root.join(PACKAGE_NAME))?;
+    }
+
+    fs::write(root.join(CURRENT_FILE), format!("versions/{version}\n"))?;
 
     Ok(destination)
 }
@@ -121,10 +128,8 @@ mod tests {
             .unwrap()
             .as_nanos();
 
-        let path = std::env::temp_dir().join(format!(
-            "imp-mudlet-{name}-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("imp-mudlet-{name}-{}-{nonce}", std::process::id()));
 
         fs::create_dir_all(&path).unwrap();
         path
@@ -134,6 +139,7 @@ mod tests {
         fs::create_dir_all(path.join(RUNTIME_DIR)).unwrap();
         fs::write(path.join(HELPER_NAME), b"helper").unwrap();
         fs::write(path.join(RUNTIME_DIR).join("marker.txt"), marker).unwrap();
+        fs::write(path.join(PACKAGE_NAME), format!("package-{marker}")).unwrap();
     }
 
     #[test]
@@ -150,6 +156,38 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.join(CURRENT_FILE)).unwrap(),
             "versions/0.1.0\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PACKAGE_NAME)).unwrap(),
+            "package-v1"
+        );
+
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn same_version_repairs_install_missing_package() {
+        let temp = temp_root("repair-package");
+        let source = temp.join("source");
+        let root = temp.join("install");
+
+        make_bundle(&source, "v1");
+
+        let destination = provision_from(&source, &root, "0.1.0").unwrap();
+
+        fs::remove_file(destination.join(PACKAGE_NAME)).unwrap();
+        fs::remove_file(root.join(PACKAGE_NAME)).unwrap();
+
+        let repaired = provision_from(&source, &root, "0.1.0").unwrap();
+
+        assert_eq!(repaired, destination);
+        assert_eq!(
+            fs::read_to_string(destination.join(PACKAGE_NAME)).unwrap(),
+            "package-v1"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PACKAGE_NAME)).unwrap(),
+            "package-v1"
         );
 
         fs::remove_dir_all(temp).unwrap();
@@ -178,6 +216,14 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.join(CURRENT_FILE)).unwrap(),
             "versions/0.2.0\n"
+        );
+        assert_eq!(
+            fs::read_to_string(first.join(PACKAGE_NAME)).unwrap(),
+            "package-v1"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PACKAGE_NAME)).unwrap(),
+            "package-v2"
         );
 
         fs::remove_dir_all(temp).unwrap();

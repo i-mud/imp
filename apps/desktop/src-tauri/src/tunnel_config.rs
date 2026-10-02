@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use url::Url;
 
+use crate::tunnel::SSH_FORWARD_PORT;
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -167,13 +169,16 @@ impl ConnectionConfigStore {
 impl TunnelConfig {
     pub fn runtime_connection_config(&self) -> RuntimeConnectionConfig {
         match self.mode {
-            TunnelMode::External | TunnelMode::Local | TunnelMode::Managed => {
-                RuntimeConnectionConfig {
-                    mode: RuntimeConnectionMode::Local,
-                    state_url: None,
-                    authentication_token: None,
-                }
-            }
+            TunnelMode::Local => RuntimeConnectionConfig {
+                mode: RuntimeConnectionMode::Local,
+                state_url: None,
+                authentication_token: None,
+            },
+            TunnelMode::External | TunnelMode::Managed => RuntimeConnectionConfig {
+                mode: RuntimeConnectionMode::Local,
+                state_url: Some(format!("ws://127.0.0.1:{SSH_FORWARD_PORT}/state")),
+                authentication_token: None,
+            },
             TunnelMode::Direct => RuntimeConnectionConfig {
                 mode: RuntimeConnectionMode::Direct,
                 state_url: Some(self.remote_url.clone()),
@@ -579,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn local_runtime_config_exposes_no_ssh_or_auth_material() {
+    fn managed_runtime_config_exposes_forward_without_ssh_or_auth_material() {
         let config = TunnelConfig {
             mode: TunnelMode::Managed,
             ssh_target: "avatar".into(),
@@ -591,7 +596,10 @@ mod tests {
         let json = serde_json::to_value(runtime).unwrap();
 
         assert_eq!(json["mode"], "local");
-        assert_eq!(json["stateUrl"], serde_json::Value::Null);
+        assert_eq!(
+            json["stateUrl"],
+            format!("ws://127.0.0.1:{SSH_FORWARD_PORT}/state")
+        );
         assert_eq!(json["authenticationToken"], serde_json::Value::Null);
         assert!(!json.to_string().contains("avatar"));
     }

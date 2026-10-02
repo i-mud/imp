@@ -83,9 +83,37 @@ jobs:
             exit 1
           fi
 
+  mudlet-package:
+    name: Mudlet package
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Build Mudlet package
+        run: python scripts/build-mudlet-package.py --package-only
+
+      - name: Upload Mudlet package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Imp-mudlet-package
+          path: dist/mudlet/Imp.mpackage
+          if-no-files-found: error
+          retention-days: 14
+
   windows:
     name: Windows x64 NSIS
-    needs: verify
+    needs: [verify, mudlet-package]
     runs-on: windows-latest
 
     steps:
@@ -127,8 +155,14 @@ jobs:
       - name: Build desktop node sidecar
         run: python scripts/build-desktop-node.py
 
+      - name: Download Mudlet package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Imp-mudlet-package
+          path: apps/desktop/src-tauri/resources/mudlet
+
       - name: Build Mudlet desktop helper
-        run: python scripts/build-mudlet-package.py --desktop-resource
+        run: python scripts/build-mudlet-package.py --desktop-resource --require-package
 
       - name: Verify release version
         env:

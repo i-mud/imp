@@ -20,8 +20,7 @@ interface TunnelStatus {
   readonly diagnostic: TunnelDiagnostic;
 }
 
-type NodeDiagnostic =
-  'inactive' | 'starting' | 'owned' | 'adopted' | 'local_port_unavailable' | 'spawn_unavailable' | 'down';
+type NodeDiagnostic = 'starting' | 'owned' | 'local_port_unavailable' | 'spawn_unavailable' | 'down';
 
 interface NodeStatus {
   readonly diagnostic: NodeDiagnostic;
@@ -30,7 +29,7 @@ interface NodeStatus {
 export type RuntimeConnectionConfig =
   | {
       readonly mode: 'local';
-      readonly stateUrl: null;
+      readonly stateUrl: string | null;
       readonly authenticationToken: null;
     }
   | {
@@ -124,21 +123,31 @@ export async function saveConnectionSettings(update: ConnectionSettingsUpdate): 
 }
 
 /**
- * Starts polling the managed tunnel's status if Tauri is present; a no-op
- * under the browser/mock dev loop, where there is no tunnel to ask about.
+ * Starts polling the supervisor for the endpoint the HUD actually consumes.
+ *
+ * The same-host node is always supervised, but it is relevant to HUD
+ * connectivity only in Local mode. Managed and External modes consume the
+ * separate SSH endpoint instead.
+ *
  * Returns a synchronous accessor for `RelaySourceOptions.diagnosticDetail`.
  */
-export function watchTunnelDiagnostics(): () => string | null {
+export function watchConnectionDiagnostics(source: 'node' | 'tunnel'): () => string | null {
   if (!isTauriRuntime()) return () => null;
 
   let lastKnownDetail: string | null = null;
   const pollOnce = (): void => {
-    Promise.all([invoke<TunnelStatus>('tunnel_status'), invoke<NodeStatus>('node_status')])
-      .then(([tunnelStatus, nodeStatus]) => {
-        lastKnownDetail =
-          nodeStatus.diagnostic === 'inactive'
-            ? (DETAIL_BY_DIAGNOSTIC[tunnelStatus.diagnostic] ?? null)
-            : (DETAIL_BY_NODE_DIAGNOSTIC[nodeStatus.diagnostic] ?? null);
+    const request =
+      source === 'node'
+        ? invoke<NodeStatus>('node_status').then(
+            (status) => DETAIL_BY_NODE_DIAGNOSTIC[status.diagnostic] ?? null,
+          )
+        : invoke<TunnelStatus>('tunnel_status').then(
+            (status) => DETAIL_BY_DIAGNOSTIC[status.diagnostic] ?? null,
+          );
+
+    request
+      .then((detail) => {
+        lastKnownDetail = detail;
       })
       .catch(() => {
         lastKnownDetail = null;
