@@ -10,6 +10,24 @@ public release versions.
 
 No changes yet.
 
+## [0.2.0] - 2026-10-02
+
+### Bug Fixes
+
+- bound Mudlet action acknowledgement ([69ced20](https://github.com/i-mud/imp/commit/69ced2038073af5fbc642a0aacf938232308f408))
+- bundle shared adapter runtime ([7aca2b0](https://github.com/i-mud/imp/commit/7aca2b0b1d6943b6847928d0bcb0b69b21e68e4b))
+- tolerate local node startup health race ([98159af](https://github.com/i-mud/imp/commit/98159af50915605609cda4720e01f1844ed288a6))
+
+### Features
+
+- add local connection mode ([4e94d60](https://github.com/i-mud/imp/commit/4e94d604bba2373bb761349ad8768b0af1a27dae))
+- add Mudlet adapter lifecycle ([6767346](https://github.com/i-mud/imp/commit/6767346b58c4c21ba2f2de32ad2b09f37f45e9b4))
+- add trusted Mudlet actions ([a00163c](https://github.com/i-mud/imp/commit/a00163c33a6ab279592846edf3c9e35621335b89))
+- complete client-neutral local node transport ([a2a8318](https://github.com/i-mud/imp/commit/a2a8318cb9dd45d2848ff90af6ceeb8a635438dd))
+- provision Mudlet helper from desktop ([7a96656](https://github.com/i-mud/imp/commit/7a96656f2576f3a0f8b3f98f5cdac1ad77d21bb5))
+- publish Mudlet state to local node ([5d9e072](https://github.com/i-mud/imp/commit/5d9e0728a8357f0ace75791753b19edabca1dd35))
+- supervise local Imp node ([21decf7](https://github.com/i-mud/imp/commit/21decf739453fba091776ca6df32162b6766c5dc))
+
 ## [0.1.0] - 2026-09-29
 
 First alpha release of Imp — Interactive MUD Peripheral.
