@@ -47,3 +47,10 @@ records*.jsonl
 .idea/
 .DS_Store
 Thumbs.db
+
+# Regenerable Tauri sidecar binaries
+apps/desktop/src-tauri/binaries/
+
+# Generated desktop Mudlet helper resources.
+apps/desktop/src-tauri/resources/mudlet/*
+!apps/desktop/src-tauri/resources/mudlet/.gitkeep

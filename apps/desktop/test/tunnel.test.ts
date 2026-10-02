@@ -6,7 +6,11 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke,
 }));
 
-import { loadConnectionSettings, saveConnectionSettings, watchTunnelDiagnostics } from '../src/lib/tunnel.ts';
+import {
+  loadConnectionSettings,
+  saveConnectionSettings,
+  watchConnectionDiagnostics,
+} from '../src/lib/tunnel.ts';
 
 function setTauriRuntime(enabled: boolean): void {
   if (enabled) {
@@ -22,16 +26,57 @@ function setTauriRuntime(enabled: boolean): void {
 afterEach(() => {
   setTauriRuntime(false);
   invoke.mockReset();
+  vi.useRealTimers();
 });
 
-describe('watchTunnelDiagnostics', () => {
+describe('watchConnectionDiagnostics', () => {
   it('is a no-op outside Tauri: no polling, always null', () => {
     expect('__TAURI_INTERNALS__' in globalThis).toBe(false);
 
-    const detail = watchTunnelDiagnostics();
+    const detail = watchConnectionDiagnostics('node');
 
     expect(detail()).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('polls tunnel diagnostics for an SSH-backed consumer endpoint', async () => {
+    vi.useFakeTimers();
+    setTauriRuntime(true);
+
+    invoke.mockImplementation((command: string) => {
+      if (command === 'tunnel_status') {
+        return Promise.resolve({ diagnostic: 'reconnecting' });
+      }
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+
+    const detail = watchConnectionDiagnostics('tunnel');
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(detail()).toBe('Establishing SSH tunnel…');
+    expect(invoke).toHaveBeenCalledWith('tunnel_status');
+    expect(invoke).not.toHaveBeenCalledWith('node_status');
+  });
+
+  it('polls local-node diagnostics for a Local consumer endpoint', async () => {
+    vi.useFakeTimers();
+    setTauriRuntime(true);
+
+    invoke.mockImplementation((command: string) => {
+      if (command === 'node_status') {
+        return Promise.resolve({ diagnostic: 'starting' });
+      }
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+
+    const detail = watchConnectionDiagnostics('node');
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(detail()).toBe('Starting local Imp node…');
+    expect(invoke).toHaveBeenCalledWith('node_status');
+    expect(invoke).not.toHaveBeenCalledWith('tunnel_status');
   });
 });
 

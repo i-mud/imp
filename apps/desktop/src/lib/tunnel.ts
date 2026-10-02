@@ -20,10 +20,16 @@ interface TunnelStatus {
   readonly diagnostic: TunnelDiagnostic;
 }
 
+type NodeDiagnostic = 'starting' | 'owned' | 'local_port_unavailable' | 'spawn_unavailable' | 'down';
+
+interface NodeStatus {
+  readonly diagnostic: NodeDiagnostic;
+}
+
 export type RuntimeConnectionConfig =
   | {
       readonly mode: 'local';
-      readonly stateUrl: null;
+      readonly stateUrl: string | null;
       readonly authenticationToken: null;
     }
   | {
@@ -32,7 +38,7 @@ export type RuntimeConnectionConfig =
       readonly authenticationToken: string;
     };
 
-export type ConnectionMode = 'external' | 'managed' | 'direct';
+export type ConnectionMode = 'external' | 'local' | 'managed' | 'direct';
 
 export interface ConnectionSettings {
   readonly mode: ConnectionMode;
@@ -59,6 +65,13 @@ const DETAIL_BY_DIAGNOSTIC: Partial<Record<TunnelDiagnostic, string>> = {
   local_port_unavailable: 'Local forwarded port is unavailable.',
   ssh_unavailable: 'SSH tunnel unavailable.',
   reconnecting: 'Establishing SSH tunnel…',
+};
+
+const DETAIL_BY_NODE_DIAGNOSTIC: Partial<Record<NodeDiagnostic, string>> = {
+  starting: 'Starting local Imp node…',
+  local_port_unavailable: 'Local Imp node port is unavailable.',
+  spawn_unavailable: 'Local Imp node could not start.',
+  down: 'Local Imp node is down.',
 };
 
 function isTauriRuntime(): boolean {
@@ -110,18 +123,31 @@ export async function saveConnectionSettings(update: ConnectionSettingsUpdate): 
 }
 
 /**
- * Starts polling the managed tunnel's status if Tauri is present; a no-op
- * under the browser/mock dev loop, where there is no tunnel to ask about.
+ * Starts polling the supervisor for the endpoint the HUD actually consumes.
+ *
+ * The same-host node is always supervised, but it is relevant to HUD
+ * connectivity only in Local mode. Managed and External modes consume the
+ * separate SSH endpoint instead.
+ *
  * Returns a synchronous accessor for `RelaySourceOptions.diagnosticDetail`.
  */
-export function watchTunnelDiagnostics(): () => string | null {
+export function watchConnectionDiagnostics(source: 'node' | 'tunnel'): () => string | null {
   if (!isTauriRuntime()) return () => null;
 
   let lastKnownDetail: string | null = null;
   const pollOnce = (): void => {
-    invoke<TunnelStatus>('tunnel_status')
-      .then((status) => {
-        lastKnownDetail = DETAIL_BY_DIAGNOSTIC[status.diagnostic] ?? null;
+    const request =
+      source === 'node'
+        ? invoke<NodeStatus>('node_status').then(
+            (status) => DETAIL_BY_NODE_DIAGNOSTIC[status.diagnostic] ?? null,
+          )
+        : invoke<TunnelStatus>('tunnel_status').then(
+            (status) => DETAIL_BY_DIAGNOSTIC[status.diagnostic] ?? null,
+          );
+
+    request
+      .then((detail) => {
+        lastKnownDetail = detail;
       })
       .catch(() => {
         lastKnownDetail = null;

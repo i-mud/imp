@@ -4,15 +4,14 @@ import asyncio
 import json
 from typing import cast
 
+import imp_adapter.publisher as publisher_module
 import pytest
+from imp_adapter.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
 from imp_relay.protocol import Character, GameState, StateContext, Target, Vital
 from imp_relay.server import RelayServer
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.asyncio.server import ServerConnection, serve
-
-import imp_tf.publisher as publisher_module
-from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
 
 CONTEXT = StateContext("session1", 1, 1)
 OTHER_CONTEXT = StateContext("session1", 2, 2)

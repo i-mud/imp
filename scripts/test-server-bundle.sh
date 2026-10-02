@@ -123,6 +123,7 @@ expected_imp = sys.argv[1]
 expected_websockets = sys.argv[2]
 
 assert version("imp-relay") == expected_imp
+assert version("imp-adapter") == expected_imp
 assert version("imp-tinyfugue") == expected_imp
 assert version("websockets") == expected_websockets
 

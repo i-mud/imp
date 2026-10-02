@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Final
 
+from imp_adapter.records import MAX_EPOCH_MS, MAX_RECORD_CHARS, Record, parse_record
 from imp_relay.protocol import LIMITS, StateContext
-
-from imp_tf.records import MAX_EPOCH_MS, MAX_RECORD_CHARS, Record, parse_record
 
 MAX_EVENT_CHARS: Final = MAX_RECORD_CHARS + 512
 _SESSION = re.compile(r"^[A-Za-z0-9_]{1,128}$")

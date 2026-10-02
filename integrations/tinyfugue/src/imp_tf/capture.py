@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from imp_adapter.records import ParseResult
+
 from imp_tf.events import GmcpEvent, parse_tf_event
-from imp_tf.records import ParseResult
 
 LOGGER = logging.getLogger(__name__)
 

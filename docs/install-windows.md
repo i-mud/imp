@@ -56,11 +56,11 @@ External mode leaves SSH lifecycle entirely to the operator.
 Start the forward yourself:
 
 ```text
-ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
+ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
 ```
 
 Then leave Imp in **External** connection mode. Imp connects to the
-forwarded relay at `127.0.0.1:8787`.
+forwarded relay at `127.0.0.1:8789`.
 
 ## Direct WSS
 
@@ -77,6 +77,34 @@ In **Settings -> Connection**:
 
 Gateway deployment and pairing-token setup are documented in
 [`../deploy/README.md`](../deploy/README.md).
+
+## Mudlet integration
+
+Launch Imp once after installing or updating the Windows desktop application.
+Imp provisions the Mudlet package at:
+
+```text
+%LOCALAPPDATA%\Imp\mudlet\Imp.mpackage
+```
+
+For each Mudlet profile that should publish to Imp, use Mudlet's package
+manager to install that `Imp.mpackage` once. Imp deliberately does not modify
+Mudlet profiles automatically.
+
+The desktop owns the shared helper/runtime. Mudlet and its helper communicate
+only with the same-host Imp node on `127.0.0.1:8787`; they do not own SSH, WSS,
+pairing credentials, or other remote transport.
+
+The desktop transport ports have distinct roles:
+
+```text
+127.0.0.1:8787  same-host Imp node used by MUD-client adapters
+127.0.0.1:8788  optional authenticated gateway
+127.0.0.1:8789  SSH consumer endpoint used by Managed or External SSH
+```
+
+This means a local Mudlet profile can remain connected to the local node while
+the same Imp HUD consumes a different remote node through Managed SSH.
 
 ## Verify the installation
 
@@ -100,7 +128,7 @@ For `v0.1.0`:
 - Windows x64 is the supported prebuilt desktop target.
 - The release is alpha quality.
 - The installer is unsigned.
-- TinyFugue is the supported MUD client integration.
+- TinyFugue and Mudlet are supported MUD-client integrations.
 - AVATAR is the currently live-verified GMCP mapping.
 - Linux and macOS remain source-build desktop targets rather than accepted
   native desktop release binaries.

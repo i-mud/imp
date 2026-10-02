@@ -10,11 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
+from imp_adapter.normalize import Normalizer
+from imp_adapter.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
+from imp_adapter.records import parse_record
 from imp_relay.protocol import GameState, decode_game_state
-
-from imp_tf.normalize import Normalizer
-from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
-from imp_tf.records import parse_record
 
 
 class StatePublisher(Protocol):

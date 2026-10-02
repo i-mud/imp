@@ -223,6 +223,45 @@ shutdown on the pinned TinyFugue build. Separate native UI acceptance sent a
 real `look` action through the relay and TinyFugue path to the MUD. The precise
 scope of that evidence remains recorded in `docs/status.md`.
 
+### Slice 16 desktop-local node transport verification — 2026-10-02
+
+Windows-native acceptance verified the desktop-local node as a producer-neutral
+transport boundary:
+
+- The desktop-owned same-host node remained on `127.0.0.1:8787` regardless of
+  whether the HUD consumed Local, Managed SSH, or Direct WSS transport.
+- A pre-existing listener on the local-node port is refused rather than adopted,
+  so an old SSH forward cannot masquerade as the adapter's same-host node.
+- Managed and External SSH consume through the separate loopback endpoint
+  `127.0.0.1:8789`, forwarding to remote relay port `8787`.
+- With producer-side WSS enabled, the same desktop also owned an authenticated
+  gateway on `127.0.0.1:8788`.
+- The packaged node and gateway used the same frozen `imp-node`
+  executable/runtime and returned their distinct expected `/healthz` shapes.
+- The gateway rejected a wrong pairing token with WebSocket close code `1008`,
+  authenticated before relay access, preserved exact protocol-v2 state/context,
+  and routed trusted actions through the relay broker.
+- Local TinyFugue and local Mudlet both produced state and completed trusted
+  action delivery through the desktop-owned node.
+- A reverse OpenSSH tunnel to the VPS carried Mudlet-backed state and a real
+  trusted `look` action from a remote client through the local node.
+- For public-WSS acceptance, the established VPS Caddy TLS edge was temporarily
+  connected by reverse SSH to the Windows desktop-owned gateway. `/healthz`
+  succeeded publicly, `/ingest` remained `404`, Mudlet-backed state arrived over
+  WSS, and a real `look` action traversed the full path to the MUD.
+- The temporary tunnel was removed afterwards and the normal VPS
+  `imp-gateway.service` was restored on loopback `8788` and verified healthy.
+- Final simultaneous acceptance left Mudlet attached to the local node while
+  the HUD ran in Managed mode. Windows showed `imp-node.exe` listening on
+  `8787` and the Imp-owned `ssh.exe` listening on `8789` with
+  `-L 127.0.0.1:8789:127.0.0.1:8787`. The two health endpoints exposed
+  different retained sequence numbers, and the remote TinyFugue trusted-action
+  path still delivered `look`.
+
+This evidence verifies that MUD-client adapters remain attached to a same-host
+node while SSH and authenticated WSS remain independent node-to-UI transport
+choices.
+
 The deterministic gate and the live evidence prove different things, and neither
 substitutes for the other. The gate proves unit-level invariants: that a
 restarted feed does not publish a retained checkpoint without fresh input, and

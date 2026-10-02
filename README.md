@@ -182,11 +182,11 @@ Imp does not store your SSH password or private key.
 Use this when you want to manage the SSH process yourself:
 
 ```bash
-ssh -N -L 8787:127.0.0.1:8787 <user>@<vps>
+ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
 ```
 
 Leave Imp in **External** connection mode. It connects to the forwarded relay at
-`127.0.0.1:8787`.
+`127.0.0.1:8789`.
 
 ### Direct WSS — advanced
 

@@ -36,7 +36,7 @@ there is no second listener and no HTTP framework.
 
 Fed by:
 
-- `integrations/tinyfugue/src/imp_tf/publisher.py`
+- `integrations/common/src/imp_adapter/publisher.py`
 
 Read by:
 

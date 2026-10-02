@@ -9,6 +9,7 @@ description = "Imp adapter for TinyFugue GMCP records"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "imp-adapter",
   "imp-relay",
   "websockets",
 ]
@@ -23,6 +24,7 @@ imp-action-consumer = "imp_tf.action_consumer:main"
 packages = ["src/imp_tf"]
 
 [tool.uv.sources]
+imp-adapter = { path = "../common", editable = true }
 imp-relay = { path = "../../services/relay", editable = true }
 
 [dependency-groups]

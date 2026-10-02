@@ -11,8 +11,8 @@ payload. Imp treats all of it as adversarial input.
 | Boundary                    | Enforced by                                                |
 | --------------------------- | ---------------------------------------------------------- |
 | versioned TF spool event    | `integrations/tinyfugue/src/imp_tf/events.py`              |
-| offline adapter record      | `integrations/tinyfugue/src/imp_tf/records.py`             |
-| GMCP -> normalized state    | `integrations/tinyfugue/src/imp_tf/normalize.py`           |
+| offline adapter record      | `integrations/common/src/imp_adapter/records.py`           |
+| GMCP -> normalized state    | `integrations/common/src/imp_adapter/normalize.py`         |
 | producer output             | `publisher.py`, via protocol encoders before sending       |
 | relay ingest/action/helper  | `services/relay/src/imp_relay/protocol.py`                 |
 | HUD state and action result | `packages/protocol/src/decode.ts`                          |
@@ -186,7 +186,7 @@ A bound is defined in **three** places, and all three must move together:
 
 1. `packages/protocol/src/limits.ts` - `LIMITS`, the TypeScript decoder's source
 2. `services/relay/src/imp_relay/protocol.py` - the Python `LIMITS`
-3. `integrations/tinyfugue/src/imp_tf/normalize.py` - the normalizer's own
+3. `integrations/common/src/imp_adapter/normalize.py` - the normalizer's own
    truncation bound, which must not exceed the protocol's or it will emit state
    the relay rejects
 

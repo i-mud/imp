@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from imp_tf.records import MAX_RECORD_CHARS
+from imp_adapter.records import MAX_RECORD_CHARS
 
 LOGGER = logging.getLogger(__name__)
 

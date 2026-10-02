@@ -15,14 +15,14 @@ from functools import partial
 from pathlib import Path
 from typing import Protocol
 
+from imp_adapter.normalize import Normalizer
+from imp_adapter.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
+from imp_adapter.records import JsonValue, Record
 from imp_relay.protocol import GameState, StateContext, decode_game_state
 
 from imp_tf.context import write_context_marker
 from imp_tf.diagnostics import DiagnosticCapture
 from imp_tf.events import GmcpEvent, ResetEvent, SelectEvent, TextEvent, parse_tf_event
-from imp_tf.normalize import Normalizer
-from imp_tf.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
-from imp_tf.records import JsonValue, Record
 from imp_tf.spool import ProducerAlreadyRunning, RuntimeLayout, SpoolReader, acquire_producer_lock
 
 LOGGER = logging.getLogger(__name__)

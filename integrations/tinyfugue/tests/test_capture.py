@@ -3,9 +3,10 @@ from __future__ import annotations
 from io import StringIO
 from pathlib import Path
 
+from imp_adapter.records import MAX_RECORD_CHARS
+
 from imp_tf.capture import convert_lines, encode_record, parse_raw_gmcp
 from imp_tf.events import GmcpEvent, ResetEvent, SelectEvent, TextEvent, decode_tf_token, parse_tf_event
-from imp_tf.records import MAX_RECORD_CHARS
 
 
 def test_versioned_gmcp_event_becomes_adapter_record() -> None:

@@ -1,0 +1,1 @@
+"""Mudlet adapter for Imp."""

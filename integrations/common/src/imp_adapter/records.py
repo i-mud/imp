@@ -1,4 +1,4 @@
-"""Fail-closed parsing for newline-delimited TinyFugue adapter records."""
+"""Fail-closed parsing for newline-delimited GMCP adapter records."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, J
 
 @dataclass(frozen=True)
 class Record:
-    """One TF-emitted GMCP record, after envelope validation."""
+    """One client-emitted GMCP record, after envelope validation."""
 
     at: int
     package: str

@@ -25,6 +25,7 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-window-state = "2"
 url = "2"
+tauri-plugin-shell = "=2.3.6"
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"

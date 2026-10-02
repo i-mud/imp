@@ -1,15 +1,18 @@
-"""Single-flight action forwarding to the active TinyFugue consumer."""
+"""Single-flight action forwarding to the active local client consumer."""
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Final
 from uuid import uuid4
 
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
 
 from .protocol import ActionStatus, ConsumerStatus, StateContext, encode_dispatch
+
+DEFAULT_ACTION_RESULT_TIMEOUT: Final = 5.0
 
 
 @dataclass(frozen=True)
@@ -21,7 +24,10 @@ class ConsumerRegistration:
 class ActionBroker:
     """Owns the one eligible consumer and the one permitted in-flight action."""
 
-    def __init__(self, result_timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        result_timeout: float = DEFAULT_ACTION_RESULT_TIMEOUT,
+    ) -> None:
         self._result_timeout = result_timeout
         self._consumer: ConsumerRegistration | None = None
         self._inflight_id: str | None = None
@@ -65,7 +71,7 @@ class ActionBroker:
         if context != active_context:
             return "rejected", "context is not active"
         if consumer is None or consumer.context != context:
-            return "rejected", "no matching TinyFugue consumer"
+            return "rejected", "no matching local action consumer"
         if self._inflight_result is not None:
             return "rejected", "another action is in flight"
 

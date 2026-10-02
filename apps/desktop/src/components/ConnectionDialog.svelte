@@ -62,6 +62,8 @@
 
     if (mode === 'external') {
       update = { mode: 'external' };
+    } else if (mode === 'local') {
+      update = { mode: 'local' };
     } else if (mode === 'managed') {
       update = {
         mode: 'managed',
@@ -102,7 +104,7 @@
   <header class="dialog-titlebar" data-tauri-drag-region>
     <div class="dialog-title" data-tauri-drag-region>
       <h2 id="connection-dialog-title">Connection</h2>
-      <p>Choose how Imp reaches the VPS. Changes take effect after restart.</p>
+      <p>Choose how Imp reaches an Imp node. Changes take effect after restart.</p>
     </div>
 
     <button
@@ -140,6 +142,14 @@
               onclick={() => chooseMode('external')}>External</button
             >
             <button
+              class:selected={mode === 'local'}
+              type="button"
+              role="radio"
+              aria-checked={mode === 'local'}
+              disabled={saving}
+              onclick={() => chooseMode('local')}>Local</button
+            >
+            <button
               class:selected={mode === 'managed'}
               type="button"
               role="radio"
@@ -160,7 +170,13 @@
 
         {#if mode === 'external'}
           <p class="mode-help">
-            Imp expects an existing local forward to the loopback relay and owns no SSH process.
+            Imp expects an existing local endpoint, such as a manually managed SSH forward, and owns no
+            connection process.
+          </p>
+        {:else if mode === 'local'}
+          <p class="mode-help">
+            Imp runs or adopts a loopback Imp node on this computer for a local MUD client such as Mudlet or
+            TinyFugue.
           </p>
         {:else if mode === 'managed'}
           <label>

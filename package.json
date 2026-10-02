@@ -31,11 +31,15 @@
     "tf:test": "uv run --directory integrations/tinyfugue pytest",
     "tf:lint": "uv run --directory integrations/tinyfugue ruff check . && uv run --directory integrations/tinyfugue ruff format --check . && uv run --directory integrations/tinyfugue mypy src tests",
     "test:e2e": "uv run --project services/relay python tests/e2e/relay_roundtrip.py",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run relay:lint && npm run relay:test && npm run adapter:lint && npm run adapter:test && npm run mudlet:lint && npm run mudlet:test && npm run tf:lint && npm run tf:test && npm run test:e2e && npm run build",
     "release:check-version": "node scripts/check-version.mjs",
     "release:next": "semantic-release --dry-run --no-ci",
     "commitlint": "commitlint --verbose",
-    "release:ci": "node scripts/run-semantic-release.mjs"
+    "release:ci": "node scripts/run-semantic-release.mjs",
+    "adapter:lint": "uv run --directory integrations/common ruff check . && uv run --directory integrations/common ruff format --check . && uv run --directory integrations/common mypy src tests",
+    "adapter:test": "uv run --directory integrations/common pytest",
+    "mudlet:lint": "uv run --directory integrations/mudlet ruff check . && uv run --directory integrations/mudlet ruff format --check . && uv run --directory integrations/mudlet mypy src tests",
+    "mudlet:test": "uv run --directory integrations/mudlet pytest"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.3",
