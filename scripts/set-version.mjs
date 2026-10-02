@@ -134,8 +134,18 @@ setLockPackageVersion('apps/desktop/src-tauri/Cargo.lock', 'imp-desktop');
 setTomlSectionVersion('services/relay/pyproject.toml', 'project');
 setLockPackageVersion('services/relay/uv.lock', 'imp-relay');
 
+setTomlSectionVersion('integrations/common/pyproject.toml', 'project');
+setLockPackageVersion('integrations/common/uv.lock', 'imp-adapter');
+setLockPackageVersion('integrations/common/uv.lock', 'imp-relay');
+
+setTomlSectionVersion('integrations/mudlet/pyproject.toml', 'project');
+setLockPackageVersion('integrations/mudlet/uv.lock', 'imp-mudlet');
+setLockPackageVersion('integrations/mudlet/uv.lock', 'imp-adapter');
+setLockPackageVersion('integrations/mudlet/uv.lock', 'imp-relay');
+
 setTomlSectionVersion('integrations/tinyfugue/pyproject.toml', 'project');
 setLockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-tinyfugue');
+setLockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-adapter');
 setLockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-relay');
 
 output(`set-version: updated Imp release version to ${version}`);

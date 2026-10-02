@@ -21,6 +21,10 @@ const releaseFiles = [
   'apps/desktop/src-tauri/Cargo.lock',
   'services/relay/pyproject.toml',
   'services/relay/uv.lock',
+  'integrations/common/pyproject.toml',
+  'integrations/common/uv.lock',
+  'integrations/mudlet/pyproject.toml',
+  'integrations/mudlet/uv.lock',
   'integrations/tinyfugue/pyproject.toml',
   'integrations/tinyfugue/uv.lock',
 ];

@@ -93,6 +93,19 @@ const checks = [
   ],
   ['services/relay/pyproject.toml', tomlSectionVersion('services/relay/pyproject.toml', 'project')],
   ['services/relay/uv.lock imp-relay', lockPackageVersion('services/relay/uv.lock', 'imp-relay')],
+  ['integrations/common/pyproject.toml', tomlSectionVersion('integrations/common/pyproject.toml', 'project')],
+  [
+    'integrations/common/uv.lock imp-adapter',
+    lockPackageVersion('integrations/common/uv.lock', 'imp-adapter'),
+  ],
+  ['integrations/common/uv.lock imp-relay', lockPackageVersion('integrations/common/uv.lock', 'imp-relay')],
+  ['integrations/mudlet/pyproject.toml', tomlSectionVersion('integrations/mudlet/pyproject.toml', 'project')],
+  ['integrations/mudlet/uv.lock imp-mudlet', lockPackageVersion('integrations/mudlet/uv.lock', 'imp-mudlet')],
+  [
+    'integrations/mudlet/uv.lock imp-adapter',
+    lockPackageVersion('integrations/mudlet/uv.lock', 'imp-adapter'),
+  ],
+  ['integrations/mudlet/uv.lock imp-relay', lockPackageVersion('integrations/mudlet/uv.lock', 'imp-relay')],
   [
     'integrations/tinyfugue/pyproject.toml',
     tomlSectionVersion('integrations/tinyfugue/pyproject.toml', 'project'),
@@ -100,6 +113,10 @@ const checks = [
   [
     'integrations/tinyfugue/uv.lock imp-tinyfugue',
     lockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-tinyfugue'),
+  ],
+  [
+    'integrations/tinyfugue/uv.lock imp-adapter',
+    lockPackageVersion('integrations/tinyfugue/uv.lock', 'imp-adapter'),
   ],
   [
     'integrations/tinyfugue/uv.lock imp-relay',
