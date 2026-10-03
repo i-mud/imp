@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,8 +30,8 @@ class RelayState:
     """Retains only the selected TinyFugue context and its current state."""
 
     def __init__(self, stale_after: float = 10.0, clock: Callable[[], float] = time.time) -> None:
-        if stale_after <= 0:
-            raise ValueError("stale_after must be positive")
+        if not math.isfinite(stale_after) or stale_after <= 0:
+            raise ValueError("stale_after must be finite and positive")
         self._stale_after = stale_after
         self._clock = clock
         self._producer_count = 0

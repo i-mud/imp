@@ -246,12 +246,9 @@ def _read_text(value: object, path: str, max_chars: int) -> DecodeResult[str]:
 
 
 def _read_integer(value: object, path: str, minimum: int, maximum: int) -> DecodeResult[int]:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or (isinstance(value, float) and not value.is_integer())
-    ):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _fail("invalid_field", path, "expected an integer")
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
         return _fail("invalid_field", path, "expected an integer")
     if value < minimum or value > maximum:
         return _fail("invalid_field", path, f"outside {minimum}..{maximum}")
@@ -340,7 +337,7 @@ def _read_target(value: object, path: str) -> DecodeResult[Target | None]:
     if (
         isinstance(health_percent, bool)
         or not isinstance(health_percent, (int, float))
-        or not math.isfinite(health_percent)
+        or (isinstance(health_percent, float) and not math.isfinite(health_percent))
         or not 0 <= health_percent <= 100
     ):
         return _fail("invalid_field", f"{path}.healthPercent", "expected a finite number in 0..100")

@@ -8,6 +8,7 @@ from typing import Final
 
 MAX_RECORD_CHARS: Final = 16_384
 MAX_PACKAGE_CHARS: Final = 128
+MAX_PAYLOAD_DEPTH: Final = 32
 MAX_EPOCH_MS: Final = 9_007_199_254_740_991
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
@@ -49,13 +50,15 @@ def _reject_json_constant(_value: str) -> object:
     raise ValueError("non-standard JSON constant")
 
 
-def _is_json_value(value: object) -> bool:
+def _is_json_value(value: object, depth: int = 0) -> bool:
     if value is None or isinstance(value, (bool, int, float, str)):
         return True
+    if depth >= MAX_PAYLOAD_DEPTH:
+        return False
     if isinstance(value, list):
-        return all(_is_json_value(item) for item in value)
+        return all(_is_json_value(item, depth + 1) for item in value)
     if isinstance(value, dict):
-        return all(isinstance(key, str) and _is_json_value(item) for key, item in value.items())
+        return all(isinstance(key, str) and _is_json_value(item, depth + 1) for key, item in value.items())
     return False
 
 
@@ -71,7 +74,7 @@ def parse_record(line: str) -> ParseResult:
 
     try:
         parsed: object = json.loads(line, parse_constant=_reject_json_constant)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, RecursionError):
         return _invalid("invalid_json")
 
     if not isinstance(parsed, dict):

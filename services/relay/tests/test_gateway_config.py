@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from imp_relay.gateway_config import parse_gateway_args
+from imp_relay.gateway_config import GatewayConfig, parse_gateway_args
 
 TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 TOKEN_DIGEST_HEX = hashlib.sha256(TOKEN.encode("ascii")).hexdigest()
@@ -60,3 +60,28 @@ def test_gateway_config_rejects_unsafe_values(
 
     with pytest.raises(SystemExit):
         parse_gateway_args(args)
+
+
+@pytest.mark.parametrize("duration", [float("inf"), float("-inf"), float("nan"), 0.0, -1.0])
+def test_gateway_config_rejects_nonpositive_or_nonfinite_auth_timeout(duration: float) -> None:
+    with pytest.raises(ValueError):
+        GatewayConfig(
+            "127.0.0.1", 8788, "ws://127.0.0.1:8787", duration, bytes.fromhex(TOKEN_DIGEST_HEX), "INFO"
+        )
+
+
+@pytest.mark.parametrize("duration", ["inf", "-inf", "nan", "0", "-1"])
+@pytest.mark.parametrize("environment", [False, True])
+def test_gateway_config_rejects_invalid_duration_from_cli_or_environment(
+    monkeypatch: pytest.MonkeyPatch, duration: str, environment: bool
+) -> None:
+    monkeypatch.setenv("IMP_GATEWAY_TOKEN_SHA256", TOKEN_DIGEST_HEX)
+    monkeypatch.delenv("IMP_GATEWAY_AUTH_TIMEOUT", raising=False)
+    args = [f"--auth-timeout={duration}"]
+    if environment:
+        monkeypatch.setenv("IMP_GATEWAY_AUTH_TIMEOUT", duration)
+        args = []
+
+    with pytest.raises(SystemExit) as rejected:
+        parse_gateway_args(args)
+    assert rejected.value.code == 2

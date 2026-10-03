@@ -179,13 +179,18 @@ def parse_tf_event(line: str) -> EventResult:
         if separator:
             try:
                 payload: object = json.loads(payload_text, parse_constant=_reject_json_constant)
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError, RecursionError):
                 return _invalid("invalid_raw_json")
         else:
             payload = None
-        envelope = json.dumps(
-            {"at": at, "package": package, "payload": payload}, ensure_ascii=True, separators=(",", ":")
-        )
+        try:
+            envelope = json.dumps(
+                {"at": at, "package": package, "payload": payload},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+        except RecursionError:
+            return _invalid("invalid_raw_json")
         parsed = parse_record(envelope)
         if not parsed.ok or parsed.record is None:
             return _invalid(parsed.error or "invalid_raw_event")

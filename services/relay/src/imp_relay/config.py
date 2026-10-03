@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from dataclasses import dataclass
 
@@ -13,6 +14,10 @@ class RelayConfig:
     port: int
     stale_after: float
     log_level: str
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.stale_after) or self.stale_after <= 0:
+            raise ValueError("stale_after must be finite and positive")
 
 
 def parse_args(argv: list[str] | None = None) -> RelayConfig:
@@ -26,8 +31,8 @@ def parse_args(argv: list[str] | None = None) -> RelayConfig:
     parsed = parser.parse_args(argv)
     if not 0 < parsed.port <= 65_535:
         parser.error("--port must be in 1..65535")
-    if parsed.stale_after <= 0:
-        parser.error("--stale-after must be positive")
+    if not math.isfinite(parsed.stale_after) or parsed.stale_after <= 0:
+        parser.error("--stale-after must be finite and positive")
     if parsed.host not in {"127.0.0.1", "::1", "localhost"}:
         parser.error("--host must resolve to a loopback binding")
     return RelayConfig(
