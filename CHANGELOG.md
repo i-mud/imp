@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.2] - 2026-10-03
+
+### Bug Fixes
+
+- enforce atomic bounded input rejection across adapters and relay ([41687db](https://github.com/i-mud/imp/commit/41687dbc824f8d3300ee27f987798c1943ffb6fc))
+
 ## [0.2.1] - 2026-10-02
 
 ### Bug Fixes
