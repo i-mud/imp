@@ -10,6 +10,11 @@ unauthenticated, and valid for SSH transport. Statements below that describe
 SSH as the sole remote-access method are historical to this decision and are
 superseded only in that respect by ADR 0010.
 
+Topology note: the VPS/TinyFugue placement below is the original deployment
+context, not a current requirement. ADR 0011 (local client adapters) generalizes
+it to a same-host node beside any supported client. See
+[`0011-local-client-adapters-and-imp-node.md`](0011-local-client-adapters-and-imp-node.md).
+
 ## Context
 
 The relay runs on a VPS that also runs TinyFugue. The desktop HUD runs on a

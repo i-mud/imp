@@ -10,9 +10,9 @@ is the most likely bug in this area:
 - **Feed liveness** - is the MUD still feeding the relay? Owned by
   `services/relay/src/imp_relay/state.py` and reported as `status.feed`.
 
-A healthy socket with a dead feed is a real and common state: the relay is
-fine, TinyFugue is gone. The HUD must show "no data", not confidently stale
-vitals.
+A healthy socket with a dead feed is a real and common state: the node is
+reachable but its selected MUD-client producer is gone. The HUD must show
+"no data", not confidently stale vitals.
 
 ## Entry points
 
@@ -122,8 +122,10 @@ a reconnect storm when the relay returns.
 
 - `apps/desktop/test/relay-source.test.ts` - phases, backoff, `stop()`,
   diagnostic detail, and authenticated connection confirmation on `hello`
-- `apps/desktop/src-tauri/src/tunnel.rs` - port classification, argv,
-  reconnect failure and owned-child shutdown
+- `apps/desktop/src-tauri/src/node.rs` - local-node ownership and health
+  supervision
+- `apps/desktop/src-tauri/src/tunnel.rs` - SSH-consumer port classification,
+  argv, reconnect failure and owned-child shutdown
 - `apps/desktop/test/model.test.ts` - seq reset, reconnect display rule
 - `services/relay/tests/test_state.py` - feed transitions
 - `services/relay/tests/test_server.py` - hello/snapshot/status ordering,
@@ -132,13 +134,16 @@ a reconnect storm when the relay returns.
   latest-selection reassertion, null-context recovery, and reconnect ownership
 - `integrations/tinyfugue/tests/test_bridge.py` - relay-initiated producer
   close, clean handshake, and subsequent delivery
+- `integrations/mudlet/tests/test_runtime.py` - focused-profile producer and
+  action-consumer lifecycle
 - `tests/e2e/relay_roundtrip.py` - reconnect receives the retained snapshot
 
 ## Change-impact notes
 
-The SSH supervisor and authenticated gateway are intentionally outside this
-HUD state machine. Managed-SSH diagnostics may refine reconnect detail, while
-Direct WSS uses the same socket phases without an SSH diagnostic. Neither adds
+The local-node supervisor, SSH supervisor, and authenticated gateway are
+intentionally outside this HUD state machine. Local/Managed diagnostics may
+refine reconnect detail, while Direct WSS uses the same socket phases without
+a loopback transport diagnostic. Neither adds
 a `SourceEvent` kind or public HUD state. See
 `docs/architecture/objects/state-source.md`,
 `docs/architecture/objects/gateway.md`, and

@@ -41,12 +41,16 @@ the relay:
 Adapters use only the node's host-local producer and action-consumer
 boundaries. They do not own remote transport.
 
-Remote access occurs only on the consumer side of the node:
+Remote desktop consumption uses:
 
-- SSH may make a remote node's loopback state/action endpoints appear locally;
-- the authenticated gateway may expose only state/action capabilities through
-  WSS; and
-- privileged producer and action-consumer endpoints remain host-local.
+- SSH to make the remote node's loopback port appear locally; or
+- the authenticated gateway to expose only state/action capabilities through
+  WSS.
+
+Client adapters still attach on the node's own host. This is an architectural
+placement rule, not an SSH route restriction: the SSH forward carries the full
+relay port, including privileged producer and action-consumer routes, within
+the mutually trusted local-process boundary.
 
 Conceptually:
 
@@ -123,7 +127,8 @@ host-local users and processes must be mutually trusted.
 A local Mudlet or TinyFugue adapter gains no authority beyond what the existing
 host-local producer/action-consumer endpoints already grant.
 
-Remote clients never receive access to those privileged endpoints.
+Remote WSS clients never receive access to those privileged endpoints through
+the gateway. An authorized SSH forward does not enforce that route restriction.
 
 ## Consequences
 

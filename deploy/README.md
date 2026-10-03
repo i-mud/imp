@@ -6,8 +6,9 @@ session ending without root-owned Imp services. The authenticated Direct WSS
 gateway is included in the server bundle but remains disabled unless the
 operator deliberately configures Direct mode.
 
-The relay, feed-facing endpoints, and gateway all remain loopback-only. SSH may
-still expose the relay to one workstation as before. Direct WSS instead uses a
+The relay, feed-facing endpoints, and gateway all remain loopback-only. SSH
+forwards the **entire relay TCP port** to the workstation; it does not filter
+relay routes or add application authentication. Direct WSS instead uses a
 separate TLS reverse proxy in front of the authenticated gateway; the reverse
 proxy never forwards the relay itself.
 
@@ -24,7 +25,7 @@ untrusted multi-user hosts are unsupported.
 The normal server installation does **not** require an Imp source checkout,
 Node.js, npm, Rust, or `uv` on the VPS.
 
-The `v0.1.0` server bundle supports:
+The latest published server bundle (`v0.2.1`) supports:
 
 - Linux x86_64;
 - CPython 3.12;

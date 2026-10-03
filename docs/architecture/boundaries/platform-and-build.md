@@ -21,7 +21,7 @@ This boundary records durable requirements rather than a live workstation
 inventory:
 
 - the root package requires Node.js 24 or newer;
-- both Python projects require Python 3.12 or newer and use `uv`;
+- all Python projects require Python 3.12 or newer and use `uv`;
 - Linux CI runs `npm run check` with Node 24, Python 3.12, and the repository's
   pinned `uv` setup;
 - Windows CI runs the native Rust tests and builds the x64 NSIS installer with

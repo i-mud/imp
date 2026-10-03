@@ -3,6 +3,13 @@
 Status: accepted
 Date: 2026-09-27
 
+Topology note: the TinyFugue/VPS diagram below records the original deployment.
+The gateway now serves an Imp node beside either supported MUD client, including
+a desktop-owned node; authentication and route restrictions are unchanged.
+Privileged routes are unreachable through this gateway, not through an
+authorized SSH forward of the full relay port. Such a forward retains the
+relay's mutually trusted host-local process boundary.
+
 ## Context
 
 ADR 0001 deliberately keeps the Imp relay on loopback and uses SSH for
@@ -160,8 +167,8 @@ never retries it.
 ## Rationale
 
 Separating the public boundary from the relay preserves the strongest property
-of the existing architecture: producer and TinyFugue action-consumer endpoints
-are not remotely reachable at all.
+of the existing architecture: producer and action-consumer endpoints are not
+reachable through the public WSS gateway.
 
 A first WebSocket frame is used instead of a bearer token in the URL because
 URLs are routinely copied, retained, and logged. The browser/WebView WebSocket

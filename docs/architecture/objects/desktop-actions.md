@@ -5,8 +5,8 @@
 Imp stores operator-defined action buttons in the desktop renderer and
 forwards a command only after an explicit operator click or keyboard activation.
 Saved definitions are presentation-side configuration; they do not change the
-relay, TinyFugue helper, protocol, desktop transport boundary, or game-state
-model.
+Imp node, client-adapter action helper, protocol, desktop transport boundary,
+or game-state model.
 
 ## Ownership
 
@@ -85,18 +85,20 @@ Each dispatch begins with one explicit operator activation. The HUD captures the
 current `HudModel.context` synchronously and passes that exact tuple and the exact
 saved command to the injected `ActionSink`. A null context is rejected locally.
 Feed freshness does not gate actions because an otherwise healthy idle game can
-have no recent GMCP traffic; the relay and TinyFugue exact-context fences remain
-the execution authority.
+have no recent GMCP traffic. The node's exact-context broker and the selected
+client adapter's final context fence remain the execution authority.
 
 While one UI call is pending, every action button is disabled. The HUD does not
 queue, retry, batch, schedule, fan out, or automatically dispatch commands.
 Another click after a result, including `unknown`, is a new operator decision.
 
-`forwarded` is presented only as a successful write and flush into the fixed
-TinyFugue bridge. It does not prove that the final synchronous fence passed,
-`send()` reached a MUD socket, the MUD received the command, or the MUD executed
-it. `unknown` explicitly reports uncertain delivery and that Imp did not
-retry.
+`forwarded` means that the selected client adapter reached its documented
+successful local handoff. That proof is adapter-specific: TinyFugue reports it
+after writing/flushing the fixed bridge line, while Mudlet reports it after the
+exact-context recheck and a non-erroring `send(command, false)` call.
+
+Neither meaning proves that the MUD server received or executed the command.
+`unknown` explicitly reports uncertain delivery and that Imp did not retry.
 
 Persisted action definitions are reusable command templates. They are not queued
 dispatches, retained action history, stored relay payloads, retries, or reconnect
@@ -133,13 +135,19 @@ native sizing, dragging, and non-maximizable behavior. It did not re-run live
 action delivery; the earlier live action evidence remains valid and separate
 below.
 
-Live action acceptance sent `look` from the native UI through the real
-`RelayActionSink`, relay, TinyFugue helper, and MUD path. It executed exactly
-once, while the UI displayed `Forwarded to TinyFugue. Final MUD delivery is not
-confirmed.` Removing the matching TinyFugue consumer caused a later action to be
-rejected without execution. Restoring a matching consumer did not replay that
-rejected action; one fresh action then executed exactly once. No queue, retry,
-replay, reconnect resend, or duplicate invocation was observed.
+Earlier TinyFugue live action acceptance sent `look` from the native UI through
+the real `RelayActionSink`, node, TinyFugue helper, and MUD path. It executed
+exactly once. Removing the matching TinyFugue consumer caused a later action to
+be rejected without execution; restoring the consumer did not replay that
+rejected action.
+
+Slice 16 additionally live-verified Mudlet trusted actions. A real `look`
+traversed the node and Mudlet helper/Lua final hop, passed the exact-current
+context check, and reached the MUD. Remote Mudlet-backed action delivery was
+also exercised through SSH and authenticated WSS.
+
+Across both client adapters, no queue, automatic retry, replay, reconnect
+resend, or duplicate invocation was observed.
 
 Deterministic tests cover the `unknown` result semantics and its no-retry
 wording, and manual browser mock acceptance checked that presentation. No live

@@ -32,7 +32,7 @@ Outbound commands use a separate boundary:
 Implemented by:
 
 - `MockStateSource` - synthesises changing vitals locally; makes the app usable
-  with no relay and no TinyFugue
+  with no Imp node or MUD client
 - `RelayStateSource` - WebSocket client with bounded exponential backoff
 
 Selected by:
@@ -41,9 +41,10 @@ Selected by:
   is authoritative. Without it, browser/development builds default to `mock`,
   while a Tauri build identified by `TAURI_ENV_PLATFORM` defaults to `relay`.
 - In relay mode, `connection_config` supplies the native runtime transport
-  tuple. External and managed SSH modes use the local relay URL; Direct WSS
-  supplies its `wss:` state URL and transient renderer authentication token
-  from native application configuration.
+  tuple. Local mode uses the desktop-owned node on `127.0.0.1:8787`.
+  External and Managed SSH use the separate consumer endpoint on
+  `127.0.0.1:8789`. Direct WSS supplies its `wss:` state URL and transient
+  renderer authentication token from native application configuration.
 - `VITE_IMP_RELAY_URL` remains a local/custom relay override. Direct WSS
   never reads a pairing token or remote URL from a build-time `VITE_*` value.
 
@@ -62,25 +63,28 @@ Consumed by:
 
 Two requirements land on it:
 
-1. The app must be usable immediately without TinyFugue or the VPS, without the
-   UI knowing it is being fed mock data.
-2. Managed SSH diagnostics must enrich relay connection failures without
-   exposing SSH argv, PIDs, or child-process lifecycle to components.
+1. The app must be usable immediately without a MUD client or Imp node,
+   without the UI knowing it is being fed mock data.
+2. Local-node and Managed-SSH diagnostics must enrich connection failures
+   without exposing process argv, PIDs, or child-process lifecycle to
+   components.
 
-Both hold because the UI's only contract is `SourceEvent`. The Rust
-`TunnelSupervisor` is established during native setup. Renderer startup then
-loads the native connection tuple before mounting the application and
-`config.ts` constructs the matching source and action sink.
+Both hold because the UI's only contract is `SourceEvent`. Native setup
+establishes the local-node supervisor and, when configured, the SSH and gateway
+supervisors. Renderer startup then loads the native connection tuple before
+mounting the application, and `config.ts` constructs the matching source and
+action sink.
 
 The Settings UI is intentionally outside that runtime selection seam. It may
 edit what the next process will select, but it does not hot-swap a
 `StateSource`, `ActionSink`, or `TunnelSupervisor` in the current process.
 
-Local relay mode also supplies a synchronous diagnostic accessor to
-`RelayStateSource`. A relay reconnect event therefore carries the best known
-SSH transport detail when evidence exists. Direct WSS bypasses SSH diagnostics;
-its availability is represented by the same socket connection lifecycle. The
-event kind, reducer, store, and components remain unchanged.
+Loopback runtime modes also supply a synchronous diagnostic accessor to
+`RelayStateSource`. Local mode reads local-node diagnostics; Managed and
+External SSH read tunnel diagnostics for the `8789` consumer endpoint. Direct
+WSS bypasses loopback diagnostics and represents availability through the same
+socket connection lifecycle. The event kind, reducer, store, and components
+remain unchanged.
 
 The tunnel does not introduce a second top-level state machine. The public HUD
 states still derive from relay socket phase plus feed liveness. See

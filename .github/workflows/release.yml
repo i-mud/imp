@@ -20,7 +20,7 @@ permissions:
 jobs:
   verify:
     name: Verify release tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout release tag
@@ -86,7 +86,7 @@ jobs:
   mudlet-package:
     name: Mudlet package
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout release tag
@@ -187,7 +187,7 @@ jobs:
   server:
     name: Linux x86_64 server bundle
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout release tag
@@ -247,7 +247,7 @@ jobs:
   publish:
     name: Publish GitHub release
     needs: [windows, server]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
 

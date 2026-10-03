@@ -3,37 +3,41 @@
 Canonical reference for the Imp wire format. This document is authoritative
 for the _shape and rules_; the implementations are authoritative for behaviour:
 
-| Role                      | Implementation                                   |
-| ------------------------- | ------------------------------------------------ |
-| TypeScript decoder (HUD)  | `src/decode.ts`                                  |
-| Python decoder (relay/TF) | `../../services/relay/src/imp_relay/protocol.py` |
-| Conformance corpus        | `fixtures/`                                      |
+| Role                            | Implementation                                   |
+| ------------------------------- | ------------------------------------------------ |
+| TypeScript decoder (HUD)        | `src/decode.ts`                                  |
+| Python decoder (relay/adapters) | `../../services/relay/src/imp_relay/protocol.py` |
+| Conformance corpus              | `fixtures/`                                      |
 
 The format is owned by Imp and is deliberately independent of the MUD and
-of TinyFugue - see `docs/architecture/decisions/0002-imp-owned-protocol.md`.
-Version 2 is a clean break from version 1: every state update and outbound action
-is bound to an explicit TinyFugue foreground connection.
+of any specific MUD client - see
+`docs/architecture/decisions/0002-imp-owned-protocol.md`. Version 2 is a clean
+break from version 1: every state update and outbound action is bound to an
+explicit client-adapter context.
 
 ## Transport
 
-JSON text frames over WebSocket. One message per frame. A binary frame or an
-invalid message is a policy violation and closes the connection.
+JSON text frames over WebSocket. One message per frame. Binary or malformed
+frames close the connection. Unknown message types have consumer-specific
+handling described under Error codes below.
 
 | Endpoint                              | Direction                    | Messages                                                    |
 | ------------------------------------- | ---------------------------- | ----------------------------------------------------------- |
 | `ws://127.0.0.1:8787/state`           | relay -> subscriber          | `hello`, `snapshot`, `status`, `text`                       |
 | `ws://127.0.0.1:8787/ingest`          | producer -> relay            | `select`, `publish`, `text`                                 |
 | `ws://127.0.0.1:8787/action`          | requester -> relay -> result | `action`, then `action-result`                              |
-| `ws://127.0.0.1:8787/action-consumer` | TF helper <-> relay          | `consumer`, `consumer-ready`, `dispatch`, `consumer-result` |
+| `ws://127.0.0.1:8787/action-consumer` | client helper <-> relay      | `consumer`, `consumer-ready`, `dispatch`, `consumer-result` |
 | `http://127.0.0.1:8787/healthz`       | operator -> relay            | plain HTTP JSON                                             |
 
 `/state`, `/action`, and `/healthz` accept no `Origin` header or exactly
 `http://localhost:1420` or `http://tauri.localhost`. `/ingest` and
 `/action-consumer` reject every request carrying an `Origin` header. This is
 browser defense-in-depth against cross-site requests, not authentication.
-Loopback prevents remote access but does not enforce UID ownership; Imp
-provides no per-user endpoint authentication. Both VPS and workstation must be
-single-user or trust every host-local process.
+Loopback prevents direct remote network access but does not enforce UID
+ownership; Imp provides no per-user endpoint authentication. Both producer and
+consumer hosts must be single-user or trust every host-local process. SSH
+forwards the entire node port; only the authenticated WSS gateway filters
+remote access to `/state` and `/action`.
 
 ## Context
 
@@ -43,15 +47,16 @@ A non-null state context is:
 { "session": "opaque_session_123", "foreground": 4, "connection": 9 }
 ```
 
-- `session` identifies one running TinyFugue process.
-- `foreground` increases whenever TinyFugue changes the selected world.
-- `connection` increases whenever a world connection is reset or reconnected.
+- `session` identifies one client-adapter lifetime.
+- `foreground` identifies the generation of the currently authoritative
+  profile/world selection.
+- `connection` identifies the generation of the active MUD connection.
 
 The tuple is opaque downstream. Equality means exact equality of all three
 fields. The relay holds only one active context. A `select` replaces it and
 invalidates feed freshness until a matching `publish` arrives. A `select` with a
-null context means that no world is selected. A `publish` for any context other
-than the active one is ignored.
+null context means that no game connection is selected. A `publish` for any
+context other than the active one is ignored.
 
 ## Normalized state
 
@@ -117,21 +122,24 @@ subscriber.
 ## Action semantics
 
 An action is accepted only when its context equals the relay's active context
-and one helper registered for that same context. The broker permits one action
-in flight globally. It has no queue, retry, fan-out, or replay:
+and one client helper is registered for that same context. The broker permits
+one action in flight globally. It has no queue, retry, fan-out, or replay:
 
 - mismatched context, no matching helper, duplicate helper, or a busy broker is
   rejected;
-- a helper reports `forwarded` only after it writes and flushes the fixed
-  `/imp_send <session> <foreground> <connection> <world-token>
-<encoded-data>` line into TinyFugue's fixed action bridge;
-- disconnect or timeout after dispatch is `unknown`, because the relay cannot
-  prove whether that bridge write completed;
+- a helper reports `forwarded` only after its client-specific final hop has
+  accepted the dispatch according to that adapter's contract;
+- TinyFugue reports `forwarded` after writing and flushing the fixed
+  `/imp_send` bridge line, before the final synchronous TinyFugue fence;
+- Mudlet reports `forwarded` only after rechecking the exact current context and
+  calling `send(command, false)` without a Lua error;
+- disconnect or timeout after dispatch is `unknown` when the relay cannot prove
+  a terminal consumer result; and
 - an `unknown` result is never retried automatically.
 
-`forwarded` means only “successfully written into TinyFugue's fixed action
-bridge.” It does not prove that the synchronous local fence passed, `send()`
-succeeded, the MUD socket received the command, or the MUD executed it.
+`forwarded` is intentionally weaker than MUD delivery or execution. Its exact
+local proof is adapter-specific, but it never proves that the MUD server
+received or executed the command.
 
 ## Validation rules
 
@@ -158,27 +166,29 @@ and checked again at each protocol boundary.
 
 Control characters are **rejected, not stripped**. A name containing an ANSI
 escape is evidence of a normalization bug upstream, and stripping it would hide
-that. Stripping happens once, deliberately, in the TF normalizer - before the
-value ever becomes a protocol value.
+that. Stripping happens once, deliberately, in the shared normalizer - before
+the value ever becomes a protocol value.
 
 Bounds live in `src/limits.ts` (`LIMITS`).
 
 ## Error codes
 
-| Code                   | Meaning                            | Caller policy        |
-| ---------------------- | ---------------------------------- | -------------------- |
-| `frame_too_large`      | frame exceeded the pre-parse cap   | violation            |
-| `invalid_json`         | not parseable JSON                 | violation            |
-| `unsupported_protocol` | `protocol` is not `2`              | violation            |
-| `unknown_type`         | a `type` this build does not model | **ignore the frame** |
-| `invalid_field`        | a field failed its rule            | violation            |
+| Code                   | Meaning                            | Caller policy     |
+| ---------------------- | ---------------------------------- | ----------------- |
+| `frame_too_large`      | frame exceeded the pre-parse cap   | violation         |
+| `invalid_json`         | not parseable JSON                 | violation         |
+| `unsupported_protocol` | `protocol` is not `2`              | violation         |
+| `unknown_type`         | a `type` this build does not model | consumer-specific |
+| `invalid_field`        | a field failed its rule            | violation         |
 
 Errors carry a dotted `path` such as `state.character.hp.max`. The rejected
 input is never included in the error or in logs: it is attacker-controlled, and
 keeping it out of logs and terminals is the point of rejecting it.
 
-`unknown_type` is the forwards-compatibility escape hatch and is the one code a
-caller must not treat as a fault.
+`RelayStateSource` ignores `unknown_type` server frames for forwards
+compatibility. The relay rejects unknown client message types with close code
+`1008`; `RelayActionSink` treats any non-`action-result` frame, including an
+unknown type, as an `unknown` outcome and does not retry.
 
 ## Versioning
 
@@ -195,7 +205,8 @@ changing the meaning of an existing one, requires a version bump.
 2. Update `src/` and the Python decoder in lockstep.
 3. Add fixtures to `fixtures/accept/` and `fixtures/reject/` - a rejection
    fixture must pin the exact `code` and `path`.
-4. Extend the TF normalizer or event parser if the change is state-bearing.
+4. Extend the shared normalizer and any affected client-adapter boundary if
+   the change is state-bearing.
 5. Extend the HUD.
 
 `docs/architecture/objects/game-state.md` records this chain as change-impact

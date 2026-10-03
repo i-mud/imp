@@ -3,6 +3,11 @@
 Status: accepted
 Date: 2026-09-15
 
+Historical scope: the four-project count and lack of Python artifact builds
+below describe bootstrap, not today's inventory. The repository now also has
+shared-adapter and Mudlet Python projects and builds wheels/frozen runtimes for
+distribution. npm workspaces, uv, and root npm scripts remain the chosen tools.
+
 ## Context
 
 The repository holds two TypeScript packages and two Python projects. Task

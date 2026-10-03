@@ -2,24 +2,24 @@
 
 Imp uses semantic-release to publish releases automatically from `main`.
 
-The existing `v0.1.0` tag is the release baseline. Historical milestone tags
-are not part of version calculation.
+The latest published release is `v0.2.1`. Historical milestone tags are not
+part of version calculation.
 
 ## Version semantics
 
 Release impact is determined from Conventional Commits since the most recent
 `vX.Y.Z` release tag:
 
-| Commit                                      | Release impact  | Example from `0.1.0` |
+| Commit                                      | Release impact  | Example from `0.2.1` |
 | ------------------------------------------- | --------------- | -------------------- |
-| `fix:`                                      | patch           | `0.1.1`              |
-| `feat:`                                     | minor           | `0.2.0`              |
+| `fix:`                                      | patch           | `0.2.2`              |
+| `feat:`                                     | minor           | `0.3.0`              |
 | `type!:` or `BREAKING CHANGE:`              | major           | `1.0.0`              |
-| `docs:`, `test:`, `chore:`, `ci:`, `build:` | none by default | remains `0.1.0`      |
+| `docs:`, `test:`, `chore:`, `ci:`, `build:` | none by default | remains `0.2.1`      |
 
 Pre-1.0 versions follow normal SemVer increments. In particular, a normal
 `feat:` while Imp is `0.x` does **not** mean the project is ready for `1.0.0`.
-For example, `feat:` after `0.1.0` produces `0.2.0`.
+For example, `feat:` after `0.2.1` produces `0.3.0`.
 
 Do not mark a change as breaking merely because it is substantial. Use `!` or
 a `BREAKING CHANGE:` footer only when the change is actually incompatible with
@@ -95,7 +95,7 @@ Do not create a replacement tag or manually change the version.
 
 - Release versions come from Conventional Commit semantics, not from slice
   numbers, milestone tags, or subjective estimates of change size.
-- `feat:` means a minor SemVer increment. From `0.1.0`, that is `0.2.0`.
+- `feat:` means a minor SemVer increment. From `0.2.1`, that is `0.3.0`.
 - Only an explicitly breaking change produces a major increment.
 - A successful eligible merge to `main` is sufficient to start release
   automation; no release command is required from a maintainer.

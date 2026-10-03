@@ -2,9 +2,10 @@
 
 ## Purpose
 
-The single point that owns the selected game context and its current state on
-the VPS. It accepts normalized state from one local producer, fans it out to
-HUD subscribers, and brokers one context-bound outbound action at a time.
+The same-host Imp node that owns the selected game context and its current
+state. It accepts normalized state from one local producer, fans it out to HUD
+subscribers, and brokers one context-bound outbound action at a time. The same
+relay runtime is used on a VPS or beside a local desktop MUD client.
 
 ## Source
 
@@ -12,7 +13,7 @@ HUD subscribers, and brokers one context-bound outbound action at a time.
   sequence counter, feed status, health payload. No transport knowledge.
 - `services/relay/src/imp_relay/server.py` - WebSocket endpoints,
   broadcast, health endpoint.
-- `services/relay/src/imp_relay/action.py` - one eligible TinyFugue
+- `services/relay/src/imp_relay/action.py` - one eligible client-adapter
   consumer and one in-flight action.
 - `services/relay/src/imp_relay/protocol.py` - canonical Python decoder.
 - `services/relay/src/imp_relay/config.py` - bind host/port, stale window.
@@ -21,13 +22,13 @@ HUD subscribers, and brokers one context-bound outbound action at a time.
 
 See `packages/protocol/SPEC.md` for the message-level contract.
 
-| Endpoint           | Role       | Behaviour                                           |
-| ------------------ | ---------- | --------------------------------------------------- |
-| `/state`           | subscriber | `hello`, retained `snapshot`, then live updates     |
-| `/ingest`          | producer   | accepts `select` and matching-context `publish`     |
-| `/action`          | requester  | accepts one action and returns its terminal status  |
-| `/action-consumer` | TF helper  | registers and acknowledges context-bound dispatches |
-| `/healthz`         | operator   | HTTP JSON, served on the same port                  |
+| Endpoint           | Role          | Behaviour                                           |
+| ------------------ | ------------- | --------------------------------------------------- |
+| `/state`           | subscriber    | `hello`, retained `snapshot`, then live updates     |
+| `/ingest`          | producer      | accepts `select` and matching-context `publish`     |
+| `/action`          | requester     | accepts one action and returns its terminal status  |
+| `/action-consumer` | client helper | registers and acknowledges context-bound dispatches |
+| `/healthz`         | operator      | HTTP JSON, served on the same port                  |
 
 `/healthz` is served through `websockets`' `process_request` hook, which is why
 there is no second listener and no HTTP framework.
@@ -40,8 +41,8 @@ Fed by:
 
 Read by:
 
-- `apps/desktop/src/lib/source/relay.ts`, across a local/SSH-forwarded relay
-  connection in external or managed mode
+- `apps/desktop/src/lib/source/relay.ts`, directly in Local mode or through
+  the separate SSH consumer endpoint in External/Managed mode
 - `imp-gateway`, as the authenticated Direct-WSS transport's loopback
   upstream
 
@@ -51,8 +52,9 @@ Depends on:
 
 Reused by:
 
-- `integrations/tinyfugue`, which depends on this project purely to share the
-  Python protocol codec rather than duplicate it
+- `integrations/common`, which supplies the shared publisher/normalizer;
+- `integrations/tinyfugue`; and
+- `integrations/mudlet`.
 
 ## Change impact
 
@@ -61,9 +63,10 @@ Reused by:
 - The default relay port `8787` is intentionally duplicated across process
   boundaries rather than imported from one language/runtime. Before changing
   it, search the repository for `8787`: current consumers include relay
-  configuration/server startup, TinyFugue publisher/action consumer, the
-  Tauri local-forward port, desktop local-relay configuration, gateway
-  upstream defaults, deployment units, and documentation. Tests frequently
+  configuration/server startup, shared publisher defaults, TinyFugue and
+  Mudlet action consumers, the desktop-owned local node, remote SSH targets,
+  gateway upstream defaults, deployment units, and documentation. The desktop
+  SSH consumer endpoint is separately fixed at `8789`. Tests frequently
   use ephemeral ports and will not enumerate every operational default.
 - Changing endpoint paths (`/state`, `/ingest`, `/action`,
   `/action-consumer`, `/healthz`) breaks the corresponding source, publisher,

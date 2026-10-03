@@ -26,9 +26,10 @@ the edges that matter here: integer vs. float coercion, surrogate handling,
 unknown-key policy, and error paths. A shared corpus would then be documenting
 a divergence rather than preventing one.
 
-The protocol is small and closed - five message types, one nested state object.
-Hand-writing it is a few hundred lines per language, adds no supply-chain
-surface to a security boundary, and lets both implementations agree on error
+At bootstrap the protocol had five message types and one nested state object;
+protocol v2 later added context-bound actions and transient text. Hand-written
+validation adds no supply-chain surface to a security boundary, and lets both
+implementations agree on error
 codes and error paths exactly. The fixtures make that agreement executable:
 each rejection fixture asserts a specific `code` and `path` in both languages.
 

@@ -3,6 +3,12 @@
 Status: accepted
 Date: 2026-09-15
 
+Historical scope: the VPS/TinyFugue topology and state-only responsibilities
+below describe the bootstrap rationale. The same Python relay now implements
+the Imp node beside either supported client, including the packaged desktop
+sidecar, and also brokers context-bound actions and transient text. The one
+runtime-dependency/no-web-framework decision remains current.
+
 ## Context
 
 The relay is a long-lived VPS process that accepts normalized state from a

@@ -30,6 +30,8 @@ Install the development dependencies:
 ```bash
 npm install
 uv sync --project services/relay
+uv sync --project integrations/common
+uv sync --project integrations/mudlet
 uv sync --project integrations/tinyfugue
 ```
 
@@ -45,8 +47,9 @@ Important references include:
 
 - [wire protocol](packages/protocol/SPEC.md);
 - [trust boundary](docs/architecture/boundaries/trust-boundary.md);
-- [current implementation status](docs/status.md); and
-- [roadmap](docs/roadmap.md).
+- [current implementation status](docs/status.md);
+- [roadmap](docs/roadmap.md); and
+- [repository audits (historical)](docs/audits.md).
 
 Source code and tests are authoritative if documentation and implementation
 ever disagree.
@@ -94,7 +97,8 @@ npm run check
 ```
 
 It covers formatting and documentation checks, TypeScript checks and tests,
-Python linting and tests, protocol integration checks, and the frontend build.
+relay/shared-adapter/Mudlet/TinyFugue Python linting and tests, protocol
+integration checks, and the frontend build.
 
 Native changes should also run the relevant native tests. For the Windows
 Tauri application:
@@ -130,7 +134,7 @@ Please include enough information to reproduce the problem:
 - Imp version or commit;
 - desktop operating system;
 - connection mode;
-- TinyFugue build and MUD when relevant;
+- MUD client, client build/version, and MUD when relevant;
 - steps to reproduce;
 - expected and actual behavior; and
 - relevant sanitized logs or error output.

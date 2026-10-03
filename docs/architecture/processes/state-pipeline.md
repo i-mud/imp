@@ -2,159 +2,206 @@
 
 ## Entry points
 
-- MUD GMCP traffic arriving in TinyFugue on the VPS
-- `integrations/tinyfugue/src/imp_tf/feed.py` (live state)
-- `integrations/tinyfugue/src/imp_tf/replay.py` (fixture replay)
-- `apps/desktop/src/lib/source/mock.ts` (no VPS involved at all)
+- GMCP traffic received by TinyFugue or Mudlet
+- `integrations/tinyfugue/src/imp_tf/feed.py`
+- `integrations/tinyfugue/src/imp_tf/replay.py`
+- `integrations/mudlet/src/imp_mudlet/runtime.py`
+- `integrations/common/src/imp_adapter/records.py`
+- `integrations/common/src/imp_adapter/normalize.py`
+- `integrations/common/src/imp_adapter/publisher.py`
+- `apps/desktop/src/lib/source/mock.ts`
 
 ## Flow
 
 ```text
 MUD
- |  GMCP packages
-TinyFugue  ---- integrations/tinyfugue/imp.tf
- |  IMP2 events: session + world + foreground/connection generations
-private drained spool
- |  imp-feed: strict event parsing and per-world normalization
-normalize.py
- |  GameState              <-- last point where GMCP concepts exist
-publisher.py
- |  select / matching-context publish, validated before sending
-relay /ingest
- |  protocol.decode_client_message  (fail-closed)
-RelayState                  <-- owns selected context + snapshot + seq + feed
- |  desktop-facing state/action capability
- |-- SSH local forward -------------------------------.
- |                                                   |
- `-- authenticated gateway -> TLS reverse proxy -> WSS
-                                                     |
-relay.ts  (RelayStateSource) <-----------------------'
- |  decodeServerMessage     (fail-closed)
- |  SourceEvent
-model.ts  (applyEvent)
- |  HudModel
+ |
+ | GMCP packages
+ v
+MUD client (TinyFugue / Mudlet)
+ |
+ | client-specific capture + lifecycle
+ v
+client adapter
+ |
+ | Record(at, package, payload)
+ v
+shared GMCP adapter / normalize.py
+ |
+ | canonical GameState       <-- last point where GMCP concepts exist
+ v
+shared publisher.py
+ |
+ | select / matching-context publish
+ v
+same-host Imp node /ingest
+ |
+ | protocol decode (fail closed)
+ v
+RelayState                    <-- owns selected context + snapshot + seq + feed
+ |
+ | desktop-facing state/action capability
+ |---------------- local loopback ------------------------.
+ |                                                       |
+ |-- desktop :8789 -> SSH -> remote node ----------------|
+ |                                                       |
+ `-- authenticated gateway -> TLS/WSS -------------------|
+                                                         |
+relay.ts (RelayStateSource) <----------------------------'
+ |
+ | decodeServerMessage (fail closed)
+ v
+SourceEvent
+ |
+ v
+HudModel
+ |
+ v
 components/*.svelte
 ```
+
+TinyFugue and Mudlet differ before the shared `Record` boundary. MUD-specific
+GMCP interpretation is shared after that boundary.
 
 Outbound actions are a separate reverse path:
 
 ```text
 desktop ActionSink
-  -> SSH-forwarded relay /action
-     OR authenticated gateway /action -> relay /action
+  -> selected node /action
+     (local directly, SSH through :8789, or authenticated WSS gateway)
   -> one matching /action-consumer
-  -> private context check -> one fixed /imp_send <encoded-data> TF line
-  -> helper exit -> synchronous TF context/world fence -> textdecode() -> send()
-  -> guarded replacement helper
-  -> idle reader loss -> silent helper exit, with no reconnect
+  -> client-specific final hop:
+
+     TinyFugue:
+       private context check
+       -> fixed /imp_send bridge line
+       -> synchronous TF context/world fence
+       -> send()
+
+     Mudlet:
+       helper -> Lua adapter
+       -> exact context recheck
+       -> send(command, false)
 ```
 
-It has one action in flight, no queue/retry/replay, and never becomes a method
-on `StateSource`.
+The broker permits one action in flight and has no queue, automatic retry,
+fan-out, or replay. `ActionSink` remains separate from `StateSource`.
 
-The mock source joins at `SourceEvent`, by building a frame and passing it
-through the same `decodeServerMessage`. That is deliberate: the development
-path exercises real validation rather than bypassing it.
+The mock source joins at `SourceEvent` by building a frame and passing it
+through the real decoder, so development still exercises protocol validation.
 
 ## Major dependencies
 
-| Hop           | Depends on                                                 |
-| ------------- | ---------------------------------------------------------- |
-| TF -> feed    | verified TinyFugue hook + private drained spool            |
-| feed -> relay | `websockets` client                                        |
-| relay -> HUD  | system OpenSSH forward, or authenticated gateway + TLS/WSS |
-| HUD           | Tauri 2 webview, Svelte 5                                  |
+| Hop                  | Depends on                                                         |
+| -------------------- | ------------------------------------------------------------------ |
+| TinyFugue -> adapter | fixed TF hooks, private drained spool, `imp-feed`                  |
+| Mudlet -> adapter    | installed Lua package and desktop-provisioned helper               |
+| adapter -> node      | shared Python record/normalizer/publisher runtime and `websockets` |
+| node -> local HUD    | loopback WebSocket                                                 |
+| remote node -> HUD   | SSH consumer endpoint `8789`, or authenticated gateway + TLS/WSS   |
+| HUD                  | Tauri 2 webview, Svelte 5                                          |
 
 ## Validation points
 
-State is validated at each trust boundary, intentionally rather than
-redundantly:
+State is validated at each trust boundary rather than assuming an upstream
+component behaved correctly:
 
-1. `events.parse_tf_event` - versioned TF event envelope and raw GMCP
-2. `publisher.py` - producer output through the canonical encoder
-3. relay `/ingest` and `relay.ts` - each consumer independently validates what
-   it receives, because neither trusts its peer's diligence
+1. the client adapter validates its client-specific event/input boundary;
+2. `Record` establishes the shared client-neutral GMCP shape;
+3. the shared normalizer projects MUD data into canonical Imp state;
+4. `publisher.py` emits protocol-valid producer messages;
+5. the node `/ingest` decoder independently validates producer frames; and
+6. `relay.ts` independently validates desktop-facing frames.
 
-Actions are checked before the desktop opens a socket, by both protocol
-decoders, and against the private context marker immediately before the helper
-writes TinyFugue input.
+Actions are validated before the desktop opens its request socket, again at the
+node, and at the client-specific final hop.
+
+TinyFugue uses its private exact-context marker plus the synchronous
+world/context fence immediately before `send()`. Mudlet refreshes profile focus
+and rechecks `(session, foreground, connection)` immediately before
+`send(command, false)`.
 
 ## Failure boundaries
 
-| Failure                           | Behaviour                                                                                                               |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| malformed TF event                | line skipped and counted; feed stays up                                                                                 |
-| unrecognised GMCP package         | that world's previous state remains unchanged                                                                           |
-| inactive-world GMCP               | cached per world; never published until selected                                                                        |
-| malformed `select`/`publish`      | rejected whole; stored state untouched; producer closed                                                                 |
-| mismatched-context `publish`      | ignored                                                                                                                 |
-| relay closes producer             | publisher reconnects while idle and reasserts only its retained selection; feed remains `stale` until a genuine publish |
-| feed process exits                | systemd restarts one lock-protected replacement                                                                         |
-| hook spool target missing         | TinyFugue loses updates but never blocks                                                                                |
-| managed SSH child exits           | supervisor retries; HUD remains in reconnecting presentation                                                            |
-| Direct WSS authentication fails   | no relay connection is opened; desktop socket closes and reconnects                                                     |
-| gateway or reverse proxy drops    | desktop state socket reconnects with bounded backoff; no state/action replay                                            |
-| producer disconnects              | snapshot retained; `feed` becomes `down`                                                                                |
-| binary or malformed HUD frame     | `protocol-error`; current socket closes, state remains untouched, and reconnect starts                                  |
-| unknown message `type`            | silently ignored (forwards compatibility)                                                                               |
-| relay unreachable                 | publisher retries with bounded exponential backoff                                                                      |
-| action context/helper unavailable | rejected without dispatch                                                                                               |
-| action times out after dispatch   | `unknown`; never retried automatically                                                                                  |
-| TinyFugue closes idle action pipe | helper writes nothing, closes its consumer socket, and exits; no reconnect or result                                    |
+| Failure                           | Behaviour                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| malformed client-specific event   | rejected/skipped by that adapter boundary without creating partial canonical state                                 |
+| unrecognised GMCP package         | previous canonical state remains unchanged                                                                         |
+| non-authoritative client context  | never becomes the selected published context until its lifecycle makes it authoritative                            |
+| malformed `select` / `publish`    | rejected whole; stored state untouched; producer closed                                                            |
+| mismatched-context `publish`      | ignored                                                                                                            |
+| node closes producer              | shared publisher reconnects and reasserts only retained selection; freshness remains stale until a genuine publish |
+| TinyFugue feed exits              | systemd restarts one lock-protected replacement                                                                    |
+| TinyFugue spool target missing    | TinyFugue loses updates but never blocks                                                                           |
+| Mudlet helper disappears          | that profile stops producing/consuming until helper lifecycle is re-established                                    |
+| desktop local node exits          | native supervisor retries; adapters reconnect                                                                      |
+| Managed SSH child exits           | transport supervisor retries; HUD remains reconnecting                                                             |
+| Direct WSS authentication fails   | no upstream node connection is opened                                                                              |
+| gateway or reverse proxy drops    | desktop reconnects with bounded backoff; retained snapshot returns, transient text/actions are not replayed        |
+| producer disconnects              | snapshot retained; `feed` becomes `down`                                                                           |
+| binary or malformed HUD frame     | `protocol-error`; socket closes; state remains untouched                                                           |
+| unknown message `type`            | state source ignores server frames; relay closes unknown client frames; action sink reports `unknown`              |
+| node unreachable                  | producer/desktop reconnect according to their bounded policies                                                     |
+| action context/helper unavailable | rejected without dispatch                                                                                          |
+| action times out after dispatch   | `unknown`; never retried automatically                                                                             |
 
 ## Relevant tests
 
-- `packages/protocol/test/` and `services/relay/tests/test_protocol_fixtures.py`
-  (shared corpus, both languages)
-- `services/relay/tests/test_server.py` (loopback, Origin policy, producer, and
-  action lifecycle)
-- `services/relay/tests/test_gateway.py` and `test_gateway_config.py`
-  (authentication, endpoint/origin policy, loopback gateway boundary, state
-  and action bridging)
-- `integrations/tinyfugue/tests/test_feed.py` (per-world state, checkpoints,
-  selection, and cancellation)
-- `integrations/tinyfugue/tests/test_action_consumer.py` (private context and
-  fixed-macro delivery)
-- `integrations/tinyfugue/tests/test_normalize.py` (GMCP mapping)
-- `apps/desktop/test/` and Rust tunnel tests (source, action sink, reducer, SSH)
-- `tests/e2e/relay_roundtrip.py` (producer -> relay -> subscriber)
+- `packages/protocol/test/` and
+  `services/relay/tests/test_protocol_fixtures.py` - shared wire corpus
+- `integrations/common/tests/` - client-neutral records, normalization, and
+  publishing
+- `integrations/tinyfugue/tests/` - TF event/feed/context/action lifecycle
+- `integrations/mudlet/tests/` - Mudlet lifecycle, bridge, state publishing,
+  and action delivery
+- `services/relay/tests/test_server.py` - loopback producer/subscriber/action
+  lifecycle
+- `services/relay/tests/test_gateway.py` and `test_gateway_config.py` -
+  authenticated remote state/action boundary
+- `apps/desktop/test/` - source, action sink, reducer, and runtime selection
+- `apps/desktop/src-tauri/src/node.rs` - local-node ownership/supervision tests
+- `apps/desktop/src-tauri/src/tunnel.rs` - SSH consumer ownership/adoption tests
+- `apps/desktop/src-tauri/src/gateway.rs` - local gateway ownership tests
+- `tests/e2e/relay_roundtrip.py` - producer -> node -> subscriber
 
 ## Change-impact notes
 
-Changing the hop boundaries is the expensive kind of change. Adding a field is
-cheap and follows the chain in `docs/architecture/objects/game-state.md`.
+Changing a hop boundary is substantially more expensive than adding a canonical
+state field. State-field changes follow
+`docs/architecture/objects/game-state.md`.
 
-The original TF -> bridge hop was verified against TinyFugue
-5.1.6-4-ga15a165 on the VPS and a target-MUD capture. The current versioned
-spool and action path have deterministic protocol/process coverage plus the
-live evidence recorded below. The macro test itself remains structural and does
-not execute TinyFugue, so changes to TinyFugue macro/context semantics require
-rerunning the connectionless procedure in `integrations/tinyfugue/README.md`
-before claiming the changed behavior is live-verified. Mappings in
-`normalize.py` remain limited to observed `Char.Status` and `Char.Vitals`
-fields.
+MUD-specific interpretation belongs in the shared GMCP adapter, not in a
+TinyFugue- or Mudlet-specific implementation. Client-specific changes should
+stop at the shared `Record` boundary unless they introduce genuinely new
+client-neutral lifecycle metadata.
+
+TinyFugue macro/context changes still require rerunning the connectionless
+procedure in `integrations/tinyfugue/README.md` before claiming changed
+TinyFugue behavior is live-verified. Mudlet lifecycle/final-hop changes require
+the corresponding Mudlet integration acceptance.
+
+Current normalization remains limited to observed AVATAR GMCP behavior rather
+than guessed mappings.
 
 ## Verification
 
-Status: state path verified end to end; outbound TinyFugue bridge live-verified
+Status: state and trusted-action paths live-verified for TinyFugue and Mudlet.
 
-Verified state evidence includes the test suites listed above; the sanitized
-`integrations/tinyfugue/fixtures/real-session.jsonl`; the VPS loopback relay;
-both SSH and authenticated Direct-WSS desktop transports; and the native
-Windows Tauri HUD. Runtime exercises covered initial identity/resources,
-damage and recovery, target acquisition/damage/clearing, producer stall and
-exit, relay restart, SSH-tunnel interruption, valid and invalid Direct-WSS
-authentication, and recovery after a gateway interruption.
+Shared state evidence includes the protocol/relay/adapter test suites, the
+sanitized TinyFugue fixture, local and VPS Imp nodes, local/Managed SSH and
+authenticated-WSS desktop transports, and the native Windows Tauri HUD.
 
-The outbound bridge was live-verified using real TinyFugue
-`5.2.2-3-g4f0ff34`, pinned to
-`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`, with connectionless echo worlds.
-The evidence covered exact-current delivery, synchronous foreground and
+TinyFugue live evidence covers exact-current delivery, foreground and
 connection-generation fences, pinned-world no-retarget behavior, one-shot
-helper replacement, relay restart, helper loss and recovery, and prompt
-shutdown. The pinning probe proved only that the raced action was not
-retargeted to the newly foregrounded world; it did not establish whether the
-action completed on its originally pinned world or was synchronously
-suppressed. Because the echo worlds had no MUD connections, this does not prove
-command execution by a real MUD server. `docs/status.md` remains the canonical
-evidence record.
+helper replacement, relay restart, helper loss/recovery, and prompt shutdown.
+The connectionless echo-world procedure proves the TinyFugue bridge/fences but
+does not by itself prove MUD-server command execution; separate native
+acceptance sent a real `look` through the TinyFugue/MUD path.
+
+Mudlet live evidence covers GMCP state, profile switching, foreground
+authority, OS focus changes, exact-context trusted actions, and a real `look`
+through Mudlet to the MUD. Remote Mudlet-backed state/actions were also
+verified through SSH and authenticated WSS transport without moving remote
+transport concerns into the Mudlet adapter.
+
+`docs/status.md` remains the canonical evidence record.

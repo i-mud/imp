@@ -4,6 +4,16 @@
 
 Accepted.
 
+Historical identity-cutover record (Slice 14), not current installation or
+release instructions. The public Imp release followed Slice 15; current runtime
+paths and automatic release procedures are documented in
+[`../../releases.md`](../../releases.md) and
+[`../processes/managed-runtime.md`](../processes/managed-runtime.md).
+
+The `0011` number was also used for the later
+[`local-client/node decision`](0011-local-client-adapters-and-imp-node.md);
+cite the filename or title to disambiguate them.
+
 ## Context
 
 The original TinyScry name coupled the product to TinyFugue and described only

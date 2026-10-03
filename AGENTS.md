@@ -18,6 +18,7 @@ Source, tests and runtime are the authority on what exists and what executes.
 | platform/build constraints             | `docs/development.md`              |
 | release/versioning rules and procedure | `docs/releases.md`                 |
 | what still needs a real MUD session    | `integrations/tinyfugue/README.md` |
+| historical repository audits           | `docs/audits.md`                   |
 
 Start at `docs/architecture/CONTEXT.md` for anything structural. It is a
 routing table, not a manual - read the one card that covers what you are

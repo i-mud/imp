@@ -1,12 +1,14 @@
 # Windows installation
 
-For `v0.1.0`, the supported prebuilt desktop target is Windows x64. The
-release is alpha quality.
+The supported prebuilt desktop target is Windows x64. Imp remains an alpha
+project.
 
 The Windows desktop application does not require Node.js, Rust, Python, WSL, or
-an Imp source checkout. The Imp VPS runtime is installed separately from the
-Linux x86_64 server bundle; TinyFugue itself remains operator-installed. See
-[`../deploy/README.md`](../deploy/README.md).
+an Imp source checkout. For a local Mudlet setup, the installer carries the Imp
+node, Mudlet helper/runtime, and `Imp.mpackage`; no VPS installation is
+required. For remote TinyFugue deployments, install the Imp runtime separately
+from the Linux x86_64 server bundle. TinyFugue itself remains operator-installed.
+See [`../deploy/README.md`](../deploy/README.md).
 
 ## Install Imp
 
@@ -18,15 +20,25 @@ Linux x86_64 server bundle; TinyFugue itself remains operator-installed. See
    transports below.
 6. Save the connection settings and restart Imp.
 
-The `v0.1.0` installer is unsigned. Windows may display a reputation or
-SmartScreen warning depending on the download path and system configuration.
+The Windows installer is currently unsigned. Windows may display a reputation
+or SmartScreen warning depending on the download path and system configuration.
 
 The running native version is shown at the bottom of Imp's Settings panel.
 
+## Local
+
+Local mode consumes the desktop-owned same-host Imp node on
+`127.0.0.1:8787`. It requires no SSH configuration and is the normal choice
+when Mudlet and Imp run on the same Windows machine.
+
+Select **Local**, save, and restart Imp. The local node itself is supervised in
+every connection mode, so a local Mudlet adapter remains attached even if the
+HUD is later switched to a remote node.
+
 ## Managed SSH
 
-Managed SSH is the simplest mode when the VPS is already reachable through a
-working OpenSSH host alias.
+Managed SSH is the simplest remote mode when the VPS is already reachable
+through a working OpenSSH host alias.
 
 Imp uses the Windows system OpenSSH client and does not store an SSH
 password or private key.
@@ -60,7 +72,11 @@ ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
 ```
 
 Then leave Imp in **External** connection mode. Imp connects to the
-forwarded relay at `127.0.0.1:8789`.
+forwarded node at `127.0.0.1:8789`.
+
+SSH forwards the entire remote relay TCP port, not just the routes used by the
+HUD. The local listener is loopback-only, but local users and processes can
+reach every forwarded relay route.
 
 ## Direct WSS
 
@@ -123,10 +139,8 @@ and pairing token against the deployment documentation.
 
 ## Release support boundary
 
-For `v0.1.0`:
-
 - Windows x64 is the supported prebuilt desktop target.
-- The release is alpha quality.
+- Imp remains alpha quality.
 - The installer is unsigned.
 - TinyFugue and Mudlet are supported MUD-client integrations.
 - AVATAR is the currently live-verified GMCP mapping.
