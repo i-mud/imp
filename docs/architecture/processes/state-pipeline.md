@@ -63,6 +63,23 @@ components/*.svelte
 TinyFugue and Mudlet differ before the shared `Record` boundary. MUD-specific
 GMCP interpretation is shared after that boundary.
 
+The shared normalizer also classifies whether each accepted record establishes
+canonical-state observation. Selected adapters publish those observations even
+when values are unchanged. The relay refreshes liveness for matching publishes,
+but emits a new snapshot/sequence only when canonical state changes; `select`
+always emits a selection snapshot and invalidates liveness. Unknown/unmapped
+input, transient text, and rejected records do not establish observation.
+
+Within a TinyFugue session, accepted foreground generations never decrease,
+including selections with no connected world. An equal foreground generation
+may reassert the same world or advance its connection generation, but cannot
+replace a known world with another. A null selection disables publication
+without forgetting that generation's known world. A world selection also
+cannot use a connection older than that world's cached generation, even under
+a newer foreground generation. A newer foreground may select another world;
+a new session resets the ordering history and world cache. These generation
+checks, not spool arrival order, govern delayed retired-inode selections.
+
 Outbound actions are a separate reverse path:
 
 ```text

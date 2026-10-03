@@ -194,3 +194,37 @@ def test_numeric_boundaries_and_existing_avatar_syntax_remain_valid(percent: int
 
     assert state.character == Character("Ariadne", Vital(1_000_000_000, 1_000_000_000), Vital(0, 0), None)
     assert state.target == Target("Troll", 87.5 if isinstance(percent, str) else percent)
+
+
+def test_normalizer_observed_tracks_latest_canonical_evidence() -> None:
+    normalizer = Normalizer()
+
+    def apply(package: str, payload: JsonValue) -> bool:
+        normalizer.apply(Record(at=1, package=package, payload=payload))
+        return normalizer.observed
+
+    assert not apply("Room.Info", {"name": "Ignored"})
+    assert not apply("Char.Status", {})
+    assert not apply("Char.Status", {"character_name": None})
+    assert not apply("Char.Status", {"opponent_health": "62"})
+    assert not apply("Char.Vitals", {"position": "Fight"})
+    assert not apply("Char.Vitals", {"hp": None, "maxhp": None})
+    assert not apply("Char.Vitals", {"hp": "12", "maxhp": "20"})
+
+    assert apply("Char.Status", {"character_name": "Ariadne"})
+    assert apply("Char.Status", {"character_name": "Ariadne"})
+    assert apply("Char.Vitals", {"hp": "12", "maxhp": "20"})
+    assert apply("Char.Vitals", {"hp": "12", "maxhp": "20"})
+    assert apply("Char.Status", {"opponent_name": "Troll"})
+    assert apply("Char.Status", {"opponent_name": "Troll"})
+    assert apply("Char.Status", {"opponent_health": "62"})
+    assert apply("Char.Status", {"opponent_name": ""})
+
+    assert not apply("Char.Status", {"opponent_name": "Rejected", "opponent_health": 101})
+    assert not normalizer.observed
+    assert not apply("Room.Info", ["not", "an", "object"])
+
+    assert not apply("Char.Vitals", {"position": "Fight"})
+    assert apply("Char.Status", {"opponent_name": "Troll"})
+    assert not apply("Char.Vitals", {"position": "Fight"})
+    assert apply("Char.Vitals", {"position": "Stand"})

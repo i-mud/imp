@@ -98,6 +98,43 @@ def test_publish_broadcasts_only_for_selected_context() -> None:
     asyncio.run(scenario())
 
 
+def test_identical_publish_refreshes_status_without_duplicate_snapshot() -> None:
+    async def scenario() -> None:
+        now = [0.0]
+        relay = RelayServer(port=0, stale_after=10.0, clock=lambda: now[0])
+        await relay.start()
+        try:
+            async with (
+                connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber,
+                connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer,
+            ):
+                assert (await _receive_type(subscriber, "status"))["feed"] == "down"
+                assert (await _receive_type(subscriber, "status"))["feed"] == "stale"
+                await producer.send(encode_select(CONTEXT, _state("Ada")))
+                selection = await _receive_type(subscriber, "snapshot")
+                before = relay.state.snapshot()
+                await producer.send(encode_publish(CONTEXT, _state("Ada")))
+                assert (await _receive_type(subscriber, "status"))["feed"] == "live"
+
+                now[0] = 11.0
+                await relay._announce_feed_if_changed()
+                assert (await _receive_type(subscriber, "status"))["feed"] == "stale"
+
+                now[0] = 12.0
+                await producer.send(encode_publish(CONTEXT, _state("Ada")))
+                await producer.send(encode_text(CONTEXT, 12000, "processed"))
+                restored = json.loads(await asyncio.wait_for(subscriber.recv(), timeout=1.0))
+                marker = json.loads(await asyncio.wait_for(subscriber.recv(), timeout=1.0))
+                assert (restored["type"], restored["feed"]) == ("status", "live")
+                assert (marker["type"], marker["text"]) == ("text", "processed")
+                assert relay.state.snapshot() is before
+                assert before is not None and before.seq == selection["seq"]
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
 def test_text_is_transient_and_broadcast_only_for_active_context() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)

@@ -95,12 +95,16 @@ Reused by:
   retained state.
 - The last snapshot is retained across producer disconnects; freshness is
   communicated by `feed`, not by dropping state.
+- Matching publishes refresh freshness even when state is identical. Identical
+  state retains the existing snapshot (`seq` and `at` included) without a
+  duplicate broadcast; status transitions remain independent.
 - One matching helper and one action in flight are permitted. There is no
   queue, retry, fan-out, or replay; post-dispatch ambiguity returns `unknown`.
 - A malformed frame is rejected whole, leaves stored state untouched, and
   closes the connection. Only the error code and path are logged - never the
   frame.
-- `seq` is monotonic within a process and restarts with it.
+- `seq` advances for selections and changed-state snapshots, is monotonic within
+  a process, and restarts with it.
 - One dead subscriber cannot break delivery to the others.
 
 ## Verification

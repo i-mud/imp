@@ -675,4 +675,70 @@ Actual relay/gateway CLI invocations rejected invalid durations with exit `2`
 and no traceback. This is Python-runtime evidence, not new native-client or
 live-MUD acceptance.
 
+### Slice 18 - Freshness correctness
+
+Slice 18, `freshness-correctness`, is complete. It remediates F02 without new
+wire messages, heartbeat infrastructure, or transport abstractions.
+
+The shared normalizer distinguishes valid mapped canonical-state observation
+from ignored/rejected input. TinyFugue and Mudlet publish accepted observations
+through their existing selected-context fences, including identical identity,
+vital, and target values. Empty/unmapped records, unknown packages, transient
+text, rejected records, buffered pre-identity vitals, and combat-position history
+alone do not refresh freshness; a position transition that clears an existing
+target remains a canonical-state observation.
+
+The relay refreshes the stale window on matching-context publication. Identical
+state retains the existing snapshot, timestamp, and sequence without a duplicate
+subscriber snapshot. Selections still emit snapshots and invalidate freshness;
+reconnect reasserts only the retained selection, not an observation. Publication
+attempts one send on the ready transport; an unavailable or failed transport
+drops observation evidence while retaining canonical values for recovery. Only
+a new authoritative observation after recovery may restore live. Identical
+observations do not invalidate transient-text delivery on the selected
+connection. Status transitions remain independent. Action authorization and
+transient/action no-replay semantics are unchanged.
+
+TinyFugue selection authority is generation-ordered rather than arrival-ordered.
+Within a session, foreground generations never decrease, including null
+selections. Equal generations preserve the known world while allowing
+reassertion or a newer connection; selections cannot revive an older cached
+world connection. A new session resets ordering history.
+
+Regression coverage includes shared observation classification, TinyFugue
+foreground/background and connection-generation boundaries, actual spool
+retired-inode interleaving, clock-controlled adapter/publisher/relay outages,
+an in-flight observation interrupted by transport replacement, and transient
+text during an identical observation send. Relay sequence/retention/stale
+restoration, subscriber status recovery without duplicate snapshots, and
+vital-alert baseline retention with exactly one threshold-crossing alert are
+also covered.
+
+Disposable local runtime smoke exercised a real TinyFugue spool/feed and a
+Mudlet decoded-input runtime, shared publisher, real relay, subscriber, and HTTP
+health observation. With a 0.3-second stale window, repeated identical vitals
+kept each feed live over 0.6 seconds with `producer_count=1`, `seq=2`, and only
+the original selection/changed-state snapshots. Unknown, text, rejected, and
+wrong-context traffic subsequently allowed staleness; an unchanged valid status
+observation restored live; silence became stale normally. All components and
+temporary spool/runtime directories were cleaned up. This is Python-runtime
+evidence, not new native-client, live-MUD, or notification-delivery acceptance.
+
+Follow-up local loopback smoke used a 0.15-second stale window. Twenty identical
+observations over 0.7 seconds kept both adapters live without changing the
+retained sequence/timestamp or duplicating subscriber snapshots. During
+0.32-second relay outages, unchanged and changed values were retained, recovered
+selections remained stale, and a new unchanged observation restored live without
+another snapshot. Actual retired-inode interleaving delivered an older Alpha
+selection after a newer Beta selection; Beta remained authoritative and Alpha
+observations could not refresh it. Negative traffic, transient text, and silence
+did not refresh the feed. Disposable components and temporary files were
+cleaned up.
+
+Focused common-adapter, TinyFugue, Mudlet, relay, and alert tests passed.
+The full `npm run check` gate passed, including both protocol decoders/corpus,
+desktop tests and production build, Python lint/format/strict typing, adapter
+and relay tests, documentation/version checks, and loopback end-to-end delivery.
+`git diff --check` also passed.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).

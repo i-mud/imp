@@ -29,7 +29,10 @@ async def _run() -> None:
         state = GameState(character=Character("Roundtrip", Vital(42, 50), None, None), target=None)
         context = StateContext("session1", 1, 1)
         async with connect(f"{url}/state") as subscriber, connect(f"{url}/ingest") as producer:
-            await producer.send(encode_select(context, state))
+            await producer.send(encode_select(context, GameState(character=None, target=None)))
+            selected = await _receive_snapshot(subscriber)
+            assert selected["seq"] == 1
+            assert selected["state"] == {"character": None, "target": None}
             await producer.send(encode_publish(context, state))
             snapshot = await _receive_snapshot(subscriber)
             assert snapshot["state"]["character"]["name"] == "Roundtrip"

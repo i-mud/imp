@@ -11,7 +11,6 @@ from imp_relay.protocol import Character, GameState, StateContext, Target, Vital
 from imp_relay.server import RelayServer
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
-from websockets.asyncio.server import ServerConnection, serve
 
 CONTEXT = StateContext("session1", 1, 1)
 OTHER_CONTEXT = StateContext("session1", 2, 2)
@@ -43,42 +42,143 @@ def test_non_loopback_target_is_always_refused() -> None:
     assert RelayPublisher().url == DEFAULT_RELAY_URL
 
 
-def test_reconnect_reselects_context_before_publish() -> None:
+@pytest.mark.parametrize("observed_name", ["First", "Changed"])
+def test_observation_on_lost_transport_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch, observed_name: str
+) -> None:
     async def scenario() -> None:
-        connections = 0
-        frames: list[dict[str, object]] = []
-        first_closed = asyncio.Event()
-        complete = asyncio.Event()
+        now = [0.0]
+        relay = RelayServer(port=0, stale_after=10.0, clock=lambda: now[0])
+        await relay.start()
+        port = relay.port
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{port}/ingest")
+        started = asyncio.Event()
+        release = asyncio.Event()
+        observation: asyncio.Task[None] | None = None
+        restarted = RelayServer(port=port, stale_after=10.0, clock=lambda: now[0])
 
-        async def handle(connection: ServerConnection) -> None:
-            nonlocal connections
-            connections += 1
-            if connections == 1:
-                frames.append(cast(dict[str, object], json.loads(cast(str, await connection.recv()))))
-                await connection.close()
-                first_closed.set()
-                return
-            frames.append(cast(dict[str, object], json.loads(cast(str, await connection.recv()))))
-            frames.append(cast(dict[str, object], json.loads(cast(str, await connection.recv()))))
-            complete.set()
-            await connection.wait_closed()
+        async def marker(subscriber: ClientConnection, text: str) -> None:
+            assert await publisher.text(CONTEXT, 1, text)
+            while True:
+                raw = await asyncio.wait_for(subscriber.recv(), timeout=1)
+                assert isinstance(raw, str)
+                message = json.loads(raw)
+                if message["type"] == "text":
+                    assert message["text"] == text
+                    return
 
-        async with serve(handle, "127.0.0.1", 0) as server:
-            port = server.sockets[0].getsockname()[1]
-            publisher = RelayPublisher(url=f"ws://127.0.0.1:{port}/ingest")
-            try:
-                await publisher.select(CONTEXT, _state("First"))
-                await asyncio.wait_for(first_closed.wait(), timeout=1)
-                await publisher.publish(CONTEXT, _state("Second"))
-                await asyncio.wait_for(complete.wait(), timeout=1)
-            finally:
-                await publisher.close()
+        try:
+            await publisher.select(CONTEXT, _state("First"))
+            await publisher.publish(CONTEXT, _state("First"))
+            async with websocket_connect(f"ws://127.0.0.1:{port}/state") as subscriber:
+                await marker(subscriber, "initial")
+                assert relay.state.health()["feed"] == "live"
 
-        assert [frame["type"] for frame in frames] == ["select", "select", "publish"]
-        assert all(
-            frame.get("context") == {"session": "session1", "foreground": 1, "connection": 1}
-            for frame in frames
-        )
+            connection = publisher._connection
+            assert connection is not None
+            original_send = connection.send
+
+            async def held_send(frame: str) -> None:
+                if json.loads(frame)["type"] == "publish":
+                    started.set()
+                    await release.wait()
+                await original_send(frame)
+
+            monkeypatch.setattr(connection, "send", held_send)
+            observation = asyncio.create_task(publisher.publish(CONTEXT, _state(observed_name)))
+            await asyncio.wait_for(started.wait(), timeout=1)
+            await relay.close()
+            now[0] = 11.0
+            await restarted.start()
+
+            async with websocket_connect(f"ws://127.0.0.1:{port}/state") as subscriber:
+                while True:
+                    raw = await asyncio.wait_for(subscriber.recv(), timeout=1)
+                    assert isinstance(raw, str)
+                    if json.loads(raw)["type"] == "snapshot":
+                        break
+                retained = restarted.state.snapshot()
+                assert retained is not None
+                assert retained.context == CONTEXT
+                assert retained.state == _state(observed_name)
+                assert restarted.state.health()["feed"] == "stale"
+
+                release.set()
+                await asyncio.wait_for(observation, timeout=1)
+                await marker(subscriber, "old observation finished")
+                assert restarted.state.snapshot() is retained
+                assert restarted.state.health()["feed"] == "stale"
+
+                await publisher.publish(CONTEXT, _state(observed_name))
+                await marker(subscriber, "new observation")
+                assert restarted.state.snapshot() is retained
+                assert restarted.state.health()["feed"] == "live"
+        finally:
+            release.set()
+            if observation is not None:
+                await asyncio.wait_for(observation, timeout=1)
+            await publisher.close()
+            await relay.close()
+            await restarted.close()
+
+    asyncio.run(scenario())
+
+
+def test_identical_observation_does_not_block_transient_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def scenario() -> None:
+        now = [0.0]
+        relay = RelayServer(port=0, stale_after=10.0, clock=lambda: now[0])
+        await relay.start()
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{relay.port}/ingest")
+        started = asyncio.Event()
+        release = asyncio.Event()
+        observation: asyncio.Task[None] | None = None
+        try:
+            await publisher.select(CONTEXT, _state())
+            await publisher.publish(CONTEXT, _state())
+            async with websocket_connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
+                assert await publisher.text(CONTEXT, 1, "initial")
+                while (
+                    json.loads(cast(str, await asyncio.wait_for(subscriber.recv(), timeout=1)))["type"]
+                    != "text"
+                ):
+                    pass
+                retained = relay.state.snapshot()
+                assert retained is not None
+
+                connection = publisher._connection
+                assert connection is not None
+                original_send = connection.send
+
+                async def held_send(frame: str) -> None:
+                    if json.loads(frame)["type"] == "publish":
+                        started.set()
+                        await release.wait()
+                    await original_send(frame)
+
+                monkeypatch.setattr(connection, "send", held_send)
+                observation = asyncio.create_task(publisher.publish(CONTEXT, _state()))
+                await asyncio.wait_for(started.wait(), timeout=1)
+                now[0] = 11.0
+                assert await publisher.text(CONTEXT, 11000, "during identical observation")
+                while True:
+                    raw = await asyncio.wait_for(subscriber.recv(), timeout=1)
+                    assert isinstance(raw, str)
+                    message = json.loads(raw)
+                    if message["type"] == "text":
+                        assert message["text"] == "during identical observation"
+                        break
+                assert relay.state.snapshot() is retained
+                assert relay.state.health()["feed"] == "stale"
+
+                release.set()
+                await asyncio.wait_for(observation, timeout=1)
+        finally:
+            release.set()
+            if observation is not None:
+                await asyncio.wait_for(observation, timeout=1)
+            await publisher.close()
+            await relay.close()
 
     asyncio.run(scenario())
 

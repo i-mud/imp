@@ -195,6 +195,7 @@ async def run_feed(
     }
     selected_context: StateContext | None = None
     selected_world: str | None = None
+    selected_foreground: int | None = None
     received = rejected = 0
     published_count = [0]
     text_forwarded = 0
@@ -219,6 +220,7 @@ async def run_feed(
                 event = parsed.event
                 if event.session != session:
                     session = event.session
+                    selected_foreground = None
                     worlds.clear()
                     selected_context = None
                     selected_world = None
@@ -226,8 +228,26 @@ async def run_feed(
                         context_marker(None)
 
                 if isinstance(event, SelectEvent):
+                    if selected_foreground is not None:
+                        if event.foreground < selected_foreground:
+                            continue
+                        if (
+                            event.foreground == selected_foreground
+                            and event.world is not None
+                            and selected_world is not None
+                            and event.world != selected_world
+                        ):
+                            continue
+                    if event.world is not None:
+                        runtime = worlds.get(event.world)
+                        if runtime is not None and event.connection < runtime.connection:
+                            continue
+                    if selected_foreground is None or event.foreground > selected_foreground:
+                        selected_foreground = event.foreground
+                        selected_world = event.world
+                    elif event.world is not None:
+                        selected_world = event.world
                     selected_context = event.context
-                    selected_world = event.world
                     if context_marker is not None:
                         context_marker(selected_context)
                     if event.world is None:
@@ -282,10 +302,9 @@ async def run_feed(
                     if runtime is None or runtime.connection != event.connection:
                         runtime = _WorldRuntime(event.connection, Normalizer())
                         worlds[event.world] = runtime
-                    previous = runtime.normalizer.state
                     state = runtime.normalizer.apply(event.record)
                     if (
-                        state != previous
+                        runtime.normalizer.observed
                         and selected_world == event.world
                         and selected_context is not None
                         and selected_context.connection == event.connection

@@ -80,6 +80,191 @@ def test_focused_profile_selects_then_publishes_normalized_state() -> None:
     asyncio.run(scenario())
 
 
+def test_repeated_observations_keep_relay_live_without_replacing_snapshot() -> None:
+    import json
+
+    from websockets.asyncio.client import connect
+
+    async def scenario() -> None:
+        now = [0.0]
+        relay = RelayServer(port=0, stale_after=10.0, clock=lambda: now[0])
+        await relay.start()
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{relay.port}/ingest")
+        runtime = MudletRuntime(MudletLifecycle("mudlet_observed"), lambda: publisher)
+        subscriber = None
+
+        try:
+            await runtime.handle(InitMessage("Observed", True, True))
+            await runtime.drain()
+            context = StateContext("mudlet_observed", 1, 1)
+            await _wait_until(lambda: _context_is(relay, context))
+            assert relay.state.feed_status(now[0]) == "stale"
+            subscriber = await connect(f"ws://127.0.0.1:{relay.port}/state")
+
+            async def sync_delivery() -> None:
+                await runtime.drain()
+                assert await publisher.text(context, 1, "processed")
+                while True:
+                    message = json.loads(await asyncio.wait_for(subscriber.recv(), timeout=1))
+                    if message["type"] == "text":
+                        assert message["text"] == "processed"
+                        return
+
+            await runtime.handle(_gmcp("Char.Status", {"opponent_name": ""}))
+            await sync_delivery()
+            identical = relay.state.snapshot()
+            assert identical is not None
+            assert identical.context == context
+            assert identical.seq == 1
+            assert relay.state.feed_status(now[0]) == "live"
+
+            await runtime.handle(
+                _gmcp("Char.Status", {"character_name": "Ariadne", "health": "12", "health_max": "20"})
+            )
+            await sync_delivery()
+            selected = relay.state.snapshot()
+            assert selected is not None
+            assert selected.context == context
+            assert selected.seq == 2
+            assert relay.state.feed_status(now[0]) == "live"
+
+            for observation_at in (9.0, 18.0, 27.0, 36.0):
+                now[0] = observation_at
+                await runtime.handle(_gmcp("Char.Status", {"character_name": "Ariadne"}))
+                await runtime.handle(_gmcp("Char.Vitals", {"hp": "12", "maxhp": "20"}))
+                await sync_delivery()
+                assert relay.state.snapshot() is selected
+                now[0] = observation_at + 8.99
+                assert relay.state.feed_status(now[0]) == "live"
+
+            now[0] = 46.0
+            await runtime.handle(_gmcp("Room.Info", {"name": "ignored"}))
+            await runtime.handle(_gmcp("Char.Status", {"unmapped": "ignored"}))
+            await runtime.handle(_gmcp("Char.Status", {"character_name": "Rejected", "opponent_health": 101}))
+            await sync_delivery()
+            assert relay.state.snapshot() == selected
+            assert relay.state.feed_status(now[0]) == "stale"
+
+            await runtime.handle(_gmcp("Char.Status", {"character_name": "Ariadne"}))
+            await sync_delivery()
+            assert relay.state.snapshot() == selected
+            assert relay.state.feed_status(now[0]) == "live"
+        finally:
+            if subscriber is not None:
+                await subscriber.close()
+            await runtime.close()
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
+def test_observation_during_relay_outage_retains_state_without_refreshing_feed() -> None:
+    import json
+
+    from websockets.asyncio.client import ClientConnection, connect
+    from websockets.asyncio.server import ServerConnection
+    from websockets.http11 import Request, Response
+
+    from imp_mudlet.protocol import decode_lua_message
+
+    class GatedRelayServer(RelayServer):
+        def __init__(self, now: list[float]) -> None:
+            super().__init__(port=0, stale_after=10.0, clock=lambda: now[0])
+            self.reconnect_blocked = False
+            self.reconnect_started = asyncio.Event()
+            self.release_reconnect = asyncio.Event()
+
+        async def _process_request(self, connection: ServerConnection, request: Request) -> Response | None:
+            if self.reconnect_blocked and request.path == "/ingest":
+                self.reconnect_started.set()
+                await self.release_reconnect.wait()
+            return await super()._process_request(connection, request)
+
+    async def scenario(name: str) -> None:
+        now = [0.0]
+        relay = GatedRelayServer(now)
+        await relay.start()
+        publisher = RelayPublisher(url=f"ws://127.0.0.1:{relay.port}/ingest")
+        runtime = MudletRuntime(MudletLifecycle("mudlet_outage"), lambda: publisher)
+        context = StateContext("mudlet_outage", 1, 1)
+
+        async def observe(character_name: str) -> None:
+            decoded = decode_lua_message(
+                json.dumps(
+                    {
+                        "type": "gmcp",
+                        "at": 1234,
+                        "package": "Char.Status",
+                        "payload": {"character_name": character_name},
+                    }
+                )
+            )
+            assert decoded.message is not None
+            await runtime.handle(decoded.message)
+
+        async def marker(subscriber: ClientConnection, text: str) -> None:
+            assert await publisher.text(context, 1, text)
+            while True:
+                raw = await asyncio.wait_for(subscriber.recv(), timeout=1)
+                assert isinstance(raw, str)
+                message = json.loads(raw)
+                if message["type"] == "text":
+                    assert message["text"] == text
+                    return
+
+        try:
+            await runtime.handle(InitMessage("Outage", True, True))
+            await asyncio.wait_for(runtime.drain(), timeout=1)
+            await _wait_until(lambda: _context_is(relay, context))
+            async with connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
+                await observe("Ariadne")
+                await asyncio.wait_for(runtime.drain(), timeout=1)
+                await marker(subscriber, "initial")
+                assert relay.state.health()["feed"] == "live"
+                before = relay.state.snapshot()
+                assert before is not None
+
+                relay.reconnect_blocked = True
+                connection = publisher._connection
+                assert connection is not None
+                await connection.close()
+                await asyncio.wait_for(relay.reconnect_started.wait(), timeout=1)
+                await _wait_until(lambda: relay.state.health()["producer_count"] == 0)
+                now[0] = 1.0
+                await observe(name)
+                retained_state = runtime.state
+                now[0] = 12.0
+                assert relay.state.snapshot() is before
+                assert relay.state.health()["feed"] == "down"
+
+                relay.release_reconnect.set()
+                await asyncio.wait_for(runtime.drain(), timeout=1)
+                await _wait_until(
+                    lambda: (snapshot := relay.state.snapshot()) is not None and snapshot.seq > before.seq
+                )
+                await marker(subscriber, "recovered selection")
+                retained = relay.state.snapshot()
+                assert retained is not None
+                assert retained.context == context
+                assert retained.state == retained_state
+                assert retained.seq == before.seq + 1
+                assert retained.at == 12000
+                assert relay.state.health()["feed"] == "stale"
+
+                await observe(name)
+                await asyncio.wait_for(runtime.drain(), timeout=1)
+                await marker(subscriber, "new observation")
+                assert relay.state.snapshot() is retained
+                assert relay.state.health()["feed"] == "live"
+        finally:
+            relay.release_reconnect.set()
+            await runtime.close()
+            await relay.close()
+
+    asyncio.run(scenario("Ariadne"))
+    asyncio.run(scenario("Bellerophon"))
+
+
 def test_unfocused_profile_caches_gmcp_without_becoming_a_producer() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)

@@ -161,8 +161,6 @@ class RelayServer:
                     snapshot = self._state.apply_select(message.context, message.state, self._clock())
                 elif isinstance(message, PublishMessage):
                     snapshot = self._state.apply_publish(message.context, message.state, self._clock())
-                    if snapshot is None:
-                        continue
                 elif isinstance(message, TextMessage):
                     if message.context == self._state.active_context:
                         await self._broadcast(encode_text(message.context, message.at, message.text))
@@ -170,7 +168,8 @@ class RelayServer:
                 else:
                     await self._close_invalid(connection)
                     return
-                await self._broadcast_snapshot(snapshot)
+                if snapshot is not None:
+                    await self._broadcast_snapshot(snapshot)
                 await self._announce_feed_if_changed()
         except ConnectionClosed:
             pass
