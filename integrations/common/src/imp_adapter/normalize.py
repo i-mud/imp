@@ -184,23 +184,44 @@ class Normalizer:
         self._target: Target | None = seeded_target
         self._position: str | None = None
         self._target_is_seeded = seeded_target is not None
+        self._observed = False
 
     @property
     def state(self) -> GameState:
         return self._state
 
+    @property
+    def observed(self) -> bool:
+        """Whether the latest apply accepted evidence contributing to canonical state."""
+        return self._observed
+
     def apply(self, record: Record) -> GameState:
+        self._observed = False
         if not isinstance(record.payload, dict):
             return self._state
 
         name, hp, mana, moves = self._name, self._hp, self._mana, self._moves
         target, position, target_is_seeded = self._target, self._position, self._target_is_seeded
+        observed = False
+        vital_observed = False
         try:
             vital_mapping = VITAL_MAPPINGS.get(record.package)
             if vital_mapping is not None:
                 hp = _update_vital(hp, record.payload, vital_mapping["hp"])
                 mana = _update_vital(mana, record.payload, vital_mapping["mana"])
                 moves = _update_vital(moves, record.payload, vital_mapping["moves"])
+                vital_observed = any(
+                    (
+                        _first_value(record.payload, keys.current) is not None
+                        or _first_value(record.payload, keys.maximum) is not None
+                    )
+                    and vital is not None
+                    for keys, vital in (
+                        (vital_mapping["hp"], hp),
+                        (vital_mapping["mana"], mana),
+                        (vital_mapping["moves"], moves),
+                    )
+                )
 
             name_mapping = NAME_MAPPINGS.get(record.package)
             if name_mapping is not None:
@@ -209,6 +230,8 @@ class Normalizer:
                     updated_name = strip_control_characters(raw_name)
                     if updated_name:
                         name = updated_name
+                        observed = True
+            observed |= vital_observed and name is not None
 
             position_mapping = POSITION_MAPPINGS.get(record.package)
             if position_mapping is not None:
@@ -220,6 +243,8 @@ class Normalizer:
                         if updated_position != FIGHT_POSITION and (
                             target_is_seeded or position == FIGHT_POSITION
                         ):
+                            if target is not None:
+                                observed = True
                             target = None
                         target_is_seeded = False
                         position = updated_position
@@ -228,10 +253,16 @@ class Normalizer:
             state = GameState(character=character, target=target)
             for mapping in TARGET_MAPPINGS:
                 if record.package == mapping.package:
+                    raw_name = _first_value(record.payload, mapping.name)
+                    raw_health = _first_value(record.payload, mapping.health_percent)
                     state = _with_target(state, record.payload, mapping)
-                    if isinstance(_first_value(record.payload, mapping.name), str):
+                    if isinstance(raw_name, str):
                         # Health-only deltas never confirm a checkpoint target.
                         target_is_seeded = False
+                        observed = True
+                    elif raw_name is None and raw_health is not None and state.target is not None:
+                        # _with_target has already validated this health value.
+                        observed = True
                     break
         except ValueError:
             return self._state
@@ -241,4 +272,5 @@ class Normalizer:
         self._name, self._hp, self._mana, self._moves = name, hp, mana, moves
         self._target, self._position, self._target_is_seeded = state.target, position, target_is_seeded
         self._state = state
+        self._observed = observed
         return state

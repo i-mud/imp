@@ -57,10 +57,12 @@ class RelayState:
     def apply_publish(self, context: StateContext, state: GameState, now: float) -> Snapshot | None:
         if context != self.active_context:
             return None
+        self._last_publish_at = now
+        if self._snapshot is not None and state == self._snapshot.state:
+            return None
         self._seq += 1
         snapshot = Snapshot(self._seq, int(now * 1000), context, state)
         self._snapshot = snapshot
-        self._last_publish_at = now
         return snapshot
 
     def snapshot(self) -> Snapshot | None:

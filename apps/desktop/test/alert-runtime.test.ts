@@ -61,6 +61,26 @@ describe('evaluateVitalAlerts', () => {
     expect(second.triggered.map((item) => item.definition.id)).toEqual(['health', 'mana']);
   });
 
+  it('preserves the crossing baseline through identical live observations without duplicate alerts', () => {
+    let evaluation = evaluateVitalAlerts(new Map(), [health], character(80, 80), true);
+    for (let observation = 0; observation < 5; observation += 1) {
+      evaluation = evaluateVitalAlerts(evaluation.states, [health], character(80, 80), true);
+      expect(evaluation.triggered).toEqual([]);
+    }
+
+    evaluation = evaluateVitalAlerts(evaluation.states, [health], character(20, 80), true);
+    expect(evaluation.triggered.map((item) => item.definition.id)).toEqual(['health']);
+
+    for (let observation = 0; observation < 5; observation += 1) {
+      evaluation = evaluateVitalAlerts(evaluation.states, [health], character(20, 80), true);
+      expect(evaluation.triggered).toEqual([]);
+    }
+
+    const stale = evaluateVitalAlerts(evaluation.states, [health], character(20, 80), false);
+    const restored = evaluateVitalAlerts(stale.states, [health], character(20, 80), true);
+    expect(restored.triggered).toEqual([]);
+  });
+
   it('evaluates movement triggers against normalized moves', () => {
     const moves: VitalAlertDefinition = {
       id: 'moves',

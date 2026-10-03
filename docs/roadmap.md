@@ -36,6 +36,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
 | Slice 16 - Mudlet and local client integration        | ✅ Complete | `mudlet-local-integration`            |
 | Slice 17 - Input boundary correctness                 | Complete    | Untagged                              |
+| Slice 18 - Freshness correctness                      | Complete    | Untagged                              |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -591,6 +592,20 @@ Remediates F01, F06, and F07 from the
 
 Regression and loopback runtime evidence is recorded in [`status.md`](status.md).
 The completed audit remains a historical snapshot; its other findings are
+outside this slice.
+
+### Slice 18 - Freshness correctness
+
+Slug: `freshness-correctness`. Complete; untagged.
+
+Remediates F02 through shared canonical-observation classification and the
+existing matching-context publication path. Unchanged valid observations keep
+the feed live without duplicate snapshots or sequence advancement. Unknown,
+transient, rejected, and nonselected input do not manufacture freshness.
+Selection/reconnect retention and action fencing remain independent.
+
+Deterministic regressions and disposable TinyFugue/Mudlet loopback runtime
+evidence are recorded in [`status.md`](status.md). Other audit findings remain
 outside this slice.
 
 ## Candidate work

@@ -64,17 +64,39 @@ Feed status, evaluated by the relay:
 The relay re-evaluates on a timer, so `live -> stale` is emitted without a
 publish arriving. Without that timer a dead feed would look live forever.
 
+Matching publishes represent accepted observations, not only state changes.
+The shared normalizer decides whether GMCP contributes valid canonical-state
+evidence; each client adapter applies its existing selected-context fence before
+publishing. Repeated identical mapped identity/vital/target observations refresh
+the relay's stale window. Unknown/unmapped input, text, and rejected records do
+not. Buffered vitals without identity and combat-position history alone do not
+establish canonical observation.
+
+An identical matching publish does not replace the retained snapshot, advance
+`seq` or `at`, or broadcast a duplicate snapshot. The relay still announces
+`stale -> live` when appropriate. Thus unchanged observations keep alert
+baselines fresh without manufacturing state transitions or duplicate alerts.
+
 Producer-side liveness has the same event-loop constraint. `RelayPublisher`
 owns one long-lived reconnect task, so an idle `/ingest` disconnect is detected
 without waiting for another GMCP or normalized-state event. It disposes the
 closed transport, connects one replacement with bounded backoff, and reasserts
-only the latest retained `select(context, state)`. It never replays a retained
-`publish`, and no action state is retained or replayed.
+only the latest retained `select(context, state)`. Observations attempt one send
+on the transport available when publication starts. They do not wait for an
+unavailable transport or retry on its replacement; canonical values received
+during the outage still update the retained selection. No observation or action
+evidence is queued for replay.
 
-That recovered selection is `stale`; freshness returns only after a genuine new
-matching-context publish. If the latest retained selection has `context: null`,
-the publisher reasserts it as non-actionable. One reconnect owner prevents a
-second producer session from overlapping the first.
+That recovered selection is `stale`; freshness returns only after a new
+authoritative observation received after the producer connection is ready.
+This also applies when an old observation send was in flight at disconnect.
+If the latest retained selection has `context: null`, the publisher reasserts it
+as non-actionable. One reconnect owner prevents overlapping producer sessions.
+
+An identical observation does not change the publisher's retained-selection
+revision, so it cannot disable transient text on an already selected transport
+while its send is pending. Text still drops while disconnected or selection is
+not ready; it never waits, retries, or replays.
 
 ## HUD presentation states
 
@@ -155,3 +177,6 @@ Status: verified
 Verified against: the tests listed above, the original managed-SSH lifecycle
 runtime checks, and Slice 11 live Direct-WSS recovery after a gateway
 interruption as recorded in `docs/status.md`.
+Slice 18 additionally verified injected-clock freshness regressions and real
+loopback TinyFugue spool/feed and Mudlet runtime paths with unchanged observations,
+ignored/rejected traffic, stale restoration, silence, and retained sequence/state.

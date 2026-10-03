@@ -100,13 +100,28 @@ Every message carries `"protocol": 2`. Unknown object keys are ignored.
 
 `seq` is a monotonic counter **per relay process**. It restarts when the relay
 restarts, so consumers reset their high-water mark on `hello` and on reconnect.
+It advances for each `select` and for a matching `publish` that changes canonical
+state. An identical matching `publish` refreshes feed liveness but creates no
+snapshot: retained `seq`, `at`, context, and state remain unchanged, and existing
+subscribers receive no duplicate snapshot.
+
+Producers publish after valid current observations of mapped canonical state,
+including unchanged values, not merely after state mutations. Unknown/unmapped
+packages or fields, transient text, rejected records, and nonselected context
+input must not cause such a publish. A selection (including reconnect reassertion
+of retained state) is not a new observation and remains stale until a genuine
+matching publish arrives. Producers may retain canonical values during an outage,
+but must not carry observation evidence across transport recovery: only a new
+authoritative observation after the producer connection is ready may refresh
+freshness. Status transitions are still delivered independently of snapshot
+changes; liveness does not authorize actions.
 
 `feed` describes the upstream game feed, not the socket:
 
 | Value   | Meaning                                                             |
 | ------- | ------------------------------------------------------------------- |
 | `live`  | a producer published for the active context within the stale window |
-| `stale` | a producer is connected but has not published the active context    |
+| `stale` | a producer is connected but no active-context publish is recent     |
 | `down`  | no producer is connected                                            |
 
 The relay retains its last snapshot across producer disconnects, so a

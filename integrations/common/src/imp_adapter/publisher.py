@@ -116,10 +116,28 @@ class RelayPublisher:
                 raise RuntimeError("publisher is closed")
             if context != self._selected_context:
                 raise ValueError("publish context is not the publisher's selected context")
-            self._selected_state = checked
-            self._selection_revision += 1
+            if checked != self._selected_state:
+                self._selected_state = checked
+                self._selection_revision += 1
             revision = self._selection_revision
-        await self._send_publish(context, checked, revision)
+            connection = self._connection
+        # Retain state for selection recovery, not observation evidence for replay.
+        if connection is None:
+            return
+        try:
+            await connection.send(encode_publish(context, checked))
+        except (ConnectionClosed, OSError, WebSocketException):
+            await self._discard_connection(connection)
+            return
+        async with self._condition:
+            if connection is not self._connection:
+                return
+            if revision == self._selection_revision:
+                self._connection_revision = revision
+                return
+            self._connection_revision = -1
+            current_revision = self._selection_revision
+        await self._send_selection(current_revision)
 
     async def text(self, context: StateContext, at: int, text: str) -> bool:
         """Attempt one transient send on the current selected connection.
@@ -170,34 +188,6 @@ class RelayPublisher:
                         return
                 else:
                     self._connection_revision = -1
-
-    async def _send_publish(
-        self,
-        context: StateContext,
-        state: GameState,
-        revision: int,
-    ) -> None:
-        frame = encode_publish(context, state)
-        while True:
-            connection = await self._connection_for_send()
-            async with self._condition:
-                if revision != self._selection_revision or context != self._selected_context:
-                    raise ValueError("publisher selection changed before publish completed")
-            try:
-                await connection.send(frame)
-            except (ConnectionClosed, OSError, WebSocketException):
-                await self._discard_connection(connection)
-                continue
-            async with self._condition:
-                if connection is not self._connection:
-                    continue
-                if revision == self._selection_revision:
-                    self._connection_revision = revision
-                    return
-                self._connection_revision = -1
-                current_revision = self._selection_revision
-            await self._send_selection(current_revision)
-            return
 
     async def _connection_for_send(self) -> ClientConnection:
         async with self._condition:

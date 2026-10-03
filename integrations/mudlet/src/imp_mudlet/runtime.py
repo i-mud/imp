@@ -118,12 +118,11 @@ class MudletRuntime:
             if not self.lifecycle.connected:
                 return
 
-            previous = self._normalizer.state
             state = self._normalizer.apply(message.record)
             context = self.lifecycle.context
 
             if (
-                state != previous
+                self._normalizer.observed
                 and self._publisher is not None
                 and context is not None
                 and context == self._active_context
