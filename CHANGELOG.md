@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.3] - 2026-10-03
+
+### Bug Fixes
+
+- keep selected feeds live on unchanged state observations ([6384e56](https://github.com/i-mud/imp/commit/6384e56b68413be3cccb152ce6e8d4c9f40a3bb1))
+
 ## [0.2.2] - 2026-10-03
 
 ### Bug Fixes
