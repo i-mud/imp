@@ -47,8 +47,9 @@ Important references include:
 
 - [wire protocol](packages/protocol/SPEC.md);
 - [trust boundary](docs/architecture/boundaries/trust-boundary.md);
-- [current implementation status](docs/status.md); and
-- [roadmap](docs/roadmap.md).
+- [current implementation status](docs/status.md);
+- [roadmap](docs/roadmap.md); and
+- [repository audits (historical)](docs/audits.md).
 
 Source code and tests are authoritative if documentation and implementation
 ever disagree.

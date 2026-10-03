@@ -54,6 +54,7 @@ interpretation is shared rather than duplicated between them.
 | Platform/build strategy                 | `docs/development.md`       |
 | Current implementation and verification | `docs/status.md`            |
 | Planned slices and deferred future work | `docs/roadmap.md`           |
+| Historical repository audits            | `docs/audits.md`            |
 
 ## Map entries
 

@@ -382,6 +382,7 @@ For the complete trust model, see
 - [Current implementation status](docs/status.md)
 - [Roadmap](docs/roadmap.md)
 - [Development](docs/development.md)
+- [Repository audits (historical)](docs/audits.md)
 
 ## Contributing
 
