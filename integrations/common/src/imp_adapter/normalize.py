@@ -88,17 +88,16 @@ def _first_value(payload: JsonObject, keys: tuple[str, ...]) -> JsonValue | None
 
 
 def _integer(value: JsonValue | None) -> int | None:
-    if isinstance(value, bool) or value is None:
+    if value is None:
         return None
-    if isinstance(value, int):
-        return value
     if isinstance(value, str) and _INTEGER_TEXT.fullmatch(value):
-        return int(value)
-    return None
-
-
-def _clamp_vital(value: int) -> int:
-    return max(0, min(value, MAX_VITAL))
+        digits = value.lstrip("+-").lstrip("0") or "0"
+        if len(digits) > 10:
+            raise ValueError("invalid vital")
+        value = (-1 if value.startswith("-") else 1) * int(digits)
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_VITAL:
+        raise ValueError("invalid vital")
+    return value
 
 
 def _update_vital(previous: Vital | None, payload: JsonObject, keys: VitalKeys) -> Vital | None:
@@ -109,34 +108,34 @@ def _update_vital(previous: Vital | None, payload: JsonObject, keys: VitalKeys) 
     if previous is None:
         if current is None or maximum is None:
             return None
-        return Vital(current=_clamp_vital(current), max=_clamp_vital(maximum))
+        return Vital(current=current, max=maximum)
     return Vital(
-        current=_clamp_vital(current if current is not None else previous.current),
-        max=_clamp_vital(maximum if maximum is not None else previous.max),
+        current=current if current is not None else previous.current,
+        max=maximum if maximum is not None else previous.max,
     )
 
 
 def _read_percent(value: JsonValue | None) -> float | None:
-    if isinstance(value, bool) or value is None:
+    if value is None:
         return None
+    if isinstance(value, bool):
+        raise ValueError("invalid percentage")
     if isinstance(value, int | float):
-        percent = float(value)
+        percent = value
     elif isinstance(value, str):
-        text = value.removesuffix("%").strip()
-        try:
-            percent = float(text)
-        except ValueError:
-            return None
+        percent = float(value.removesuffix("%").strip())
     else:
-        return None
-    if percent != percent or percent == float("inf") or percent == float("-inf"):
-        return None
-    return max(0.0, min(percent, 100.0))
+        raise ValueError("invalid percentage")
+    if not 0 <= percent <= 100:
+        raise ValueError("invalid percentage")
+    return float(percent)
 
 
 def _with_target(state: GameState, payload: JsonValue, mapping: TargetMapping) -> GameState:
     if not isinstance(payload, dict):
         return state
+    raw_health = _first_value(payload, mapping.health_percent)
+    health_percent = _read_percent(raw_health)
 
     raw_name = _first_value(payload, mapping.name)
     if raw_name is None:
@@ -151,8 +150,6 @@ def _with_target(state: GameState, payload: JsonValue, mapping: TargetMapping) -
     else:
         return state
 
-    raw_health = _first_value(payload, mapping.health_percent)
-    health_percent = _read_percent(raw_health)
     if raw_health is None and state.target is not None and name == state.target.name:
         health_percent = state.target.health_percent
     candidate = GameState(
@@ -192,56 +189,56 @@ class Normalizer:
     def state(self) -> GameState:
         return self._state
 
-    def _rebuild_character(self) -> GameState:
-        character = (
-            None
-            if self._name is None
-            else Character(name=self._name, hp=self._hp, mana=self._mana, moves=self._moves)
-        )
-        return GameState(character=character, target=self._target)
-
     def apply(self, record: Record) -> GameState:
-        if isinstance(record.payload, dict):
+        if not isinstance(record.payload, dict):
+            return self._state
+
+        name, hp, mana, moves = self._name, self._hp, self._mana, self._moves
+        target, position, target_is_seeded = self._target, self._position, self._target_is_seeded
+        try:
             vital_mapping = VITAL_MAPPINGS.get(record.package)
             if vital_mapping is not None:
-                self._hp = _update_vital(self._hp, record.payload, vital_mapping["hp"])
-                self._mana = _update_vital(self._mana, record.payload, vital_mapping["mana"])
-                self._moves = _update_vital(self._moves, record.payload, vital_mapping["moves"])
+                hp = _update_vital(hp, record.payload, vital_mapping["hp"])
+                mana = _update_vital(mana, record.payload, vital_mapping["mana"])
+                moves = _update_vital(moves, record.payload, vital_mapping["moves"])
 
             name_mapping = NAME_MAPPINGS.get(record.package)
             if name_mapping is not None:
                 raw_name = _first_value(record.payload, name_mapping)
                 if isinstance(raw_name, str):
-                    name = strip_control_characters(raw_name)
-                    if name:
-                        self._name = name
+                    updated_name = strip_control_characters(raw_name)
+                    if updated_name:
+                        name = updated_name
 
             position_mapping = POSITION_MAPPINGS.get(record.package)
             if position_mapping is not None:
                 raw_position = _first_value(record.payload, position_mapping)
                 if isinstance(raw_position, str):
-                    position = strip_control_characters(raw_position).strip()
-                    if position:
-                        # Either the target was only restored from a checkpoint
-                        # and live play is not in combat, or combat just ended.
-                        if position != FIGHT_POSITION and (
-                            self._target_is_seeded or self._position == FIGHT_POSITION
+                    updated_position = strip_control_characters(raw_position).strip()
+                    if updated_position:
+                        # Checkpoint retirement and combat history commit with the record.
+                        if updated_position != FIGHT_POSITION and (
+                            target_is_seeded or position == FIGHT_POSITION
                         ):
-                            self._target = None
-                        self._target_is_seeded = False
-                        self._position = position
+                            target = None
+                        target_is_seeded = False
+                        position = updated_position
 
-        state = self._rebuild_character()
-        for mapping in TARGET_MAPPINGS:
-            if record.package == mapping.package:
-                updated = _with_target(state, record.payload, mapping)
-                self._target = updated.target
-                if isinstance(record.payload, dict) and isinstance(
-                    _first_value(record.payload, mapping.name), str
-                ):
-                    # A live opponent_name is authoritative. Health-only deltas
-                    # must never confirm a target restored from the checkpoint.
-                    self._target_is_seeded = False
-                break
-        self._state = self._rebuild_character()
-        return self._state
+            character = None if name is None else Character(name=name, hp=hp, mana=mana, moves=moves)
+            state = GameState(character=character, target=target)
+            for mapping in TARGET_MAPPINGS:
+                if record.package == mapping.package:
+                    state = _with_target(state, record.payload, mapping)
+                    if isinstance(_first_value(record.payload, mapping.name), str):
+                        # Health-only deltas never confirm a checkpoint target.
+                        target_is_seeded = False
+                    break
+        except ValueError:
+            return self._state
+
+        # No accumulator (including unpublished vitals and combat history) changes
+        # until every conversion for this record has succeeded.
+        self._name, self._hp, self._mana, self._moves = name, hp, mana, moves
+        self._target, self._position, self._target_is_seeded = state.target, position, target_is_seeded
+        self._state = state
+        return state

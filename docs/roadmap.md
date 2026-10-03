@@ -35,6 +35,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`            |
 | Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
 | Slice 16 - Mudlet and local client integration        | ✅ Complete | `mudlet-local-integration`            |
+| Slice 17 - Input boundary correctness                 | Complete    | Untagged                              |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -573,6 +574,24 @@ mode.
 
 Slice 16 is complete. Imp-to-Imp chaining, TinyFugue identity reacquisition, and
 raw/ANSI GMCP robustness remain separate candidate work.
+
+### Slice 17 - Input boundary correctness
+
+Slug: `input-boundary-correctness`. Complete; untagged.
+
+Remediates F01, F06, and F07 from the
+[full repository audit](audits/2026-10-03-full-repository-audit.md):
+
+- bounded shared GMCP validation and conversion, with atomic record
+  normalization across TinyFugue and Mudlet;
+- overflow-safe relay numeric rejection through the existing invalid-frame
+  policy; and
+- finite, positive stale-feed and gateway-authentication durations at both
+  configuration and runtime construction boundaries.
+
+Regression and loopback runtime evidence is recorded in [`status.md`](status.md).
+The completed audit remains a historical snapshot; its other findings are
+outside this slice.
 
 ## Candidate work
 

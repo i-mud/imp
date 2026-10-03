@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -21,6 +22,10 @@ class GatewayConfig:
     auth_timeout: float
     token_sha256: bytes
     log_level: str
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.auth_timeout) or self.auth_timeout <= 0:
+            raise ValueError("auth_timeout must be finite and positive")
 
 
 def _parse_token_digest(value: str) -> bytes:
@@ -71,8 +76,8 @@ def parse_gateway_args(argv: list[str] | None = None) -> GatewayConfig:
         parser.error("--host must resolve to a loopback binding")
     if not 0 < parsed.port <= 65_535:
         parser.error("--port must be in 1..65535")
-    if parsed.auth_timeout <= 0:
-        parser.error("--auth-timeout must be positive")
+    if not math.isfinite(parsed.auth_timeout) or parsed.auth_timeout <= 0:
+        parser.error("--auth-timeout must be finite and positive")
     if parsed.token_sha256 is None:
         parser.error("--token-sha256 or IMP_GATEWAY_TOKEN_SHA256 is required")
 

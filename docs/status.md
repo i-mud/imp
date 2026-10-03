@@ -640,4 +640,39 @@ does not modify Mudlet profiles automatically.
 The temporary desktop-side WSS credential used for acceptance was removed after
 testing and `remote-access.json` returned to disabled state.
 
+### Slice 17 - Input boundary correctness
+
+Slice 17, `input-boundary-correctness`, is complete. It remediates F01, F06, and
+F07 from the [historical repository audit](audits/2026-10-03-full-repository-audit.md)
+without changing the protocol or extending the observed AVATAR mappings.
+
+Shared GMCP records permit at most 32 nested payload containers. JSON recursion
+failures at the shared and client-envelope boundaries are ordinary rejections.
+Mapped vitals must be integers in `0..1_000_000_000`; opponent percentages must
+be finite numbers in `0..100`. Invalid conversions and out-of-range numbers
+reject the whole record rather than being clamped.
+
+The normalizer stages identity, vitals, target, combat position, and checkpoint
+provenance before committing any accumulator. Rejection leaves both exposed
+state and unpublished buffered fields untouched; later valid records cannot
+reveal changes from the rejected record.
+
+The Python protocol decoder range-checks integers without converting them to
+float and applies finiteness checks only to floats. Oversized integers follow
+the existing invalid-frame policy close (`1008`), not an internal-error close.
+Shared fixtures protect the unchanged contract in both Python and TypeScript.
+
+Relay stale-feed and gateway authentication durations must be finite and
+positive in config objects and runtime constructors. CLI arguments and the
+gateway timeout environment setting reject infinities, NaN, zero, and negatives.
+
+Focused adapter/client, protocol/server, and duration regressions passed.
+The complete `npm run check` gate also passed.
+Loopback smoke runs exercised the real TinyFugue feed and Mudlet JSONL bridge,
+publisher, relay, and subscriber: hostile nesting and numeric input were
+rejected, later valid input continued, and prior vitals/target remained intact.
+Actual relay/gateway CLI invocations rejected invalid durations with exit `2`
+and no traceback. This is Python-runtime evidence, not new native-client or
+live-MUD acceptance.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).

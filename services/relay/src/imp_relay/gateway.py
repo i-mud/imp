@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import re
 from contextlib import suppress
 from http import HTTPStatus
@@ -101,8 +102,8 @@ class GatewayServer:
             raise ValueError("gateway port must be in 0..65535")
         if len(token_sha256) != 32:
             raise ValueError("gateway token digest must contain exactly 32 bytes")
-        if auth_timeout <= 0:
-            raise ValueError("gateway authentication timeout must be positive")
+        if not math.isfinite(auth_timeout) or auth_timeout <= 0:
+            raise ValueError("gateway authentication timeout must be finite and positive")
 
         self._host = host
         self._port = port

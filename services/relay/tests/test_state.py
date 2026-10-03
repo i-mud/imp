@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import pytest
+
 from imp_relay.protocol import GameState, StateContext
 from imp_relay.state import RelayState
 
 EMPTY = GameState(character=None, target=None)
 CONTEXT = StateContext("session1", 1, 1)
+
+
+@pytest.mark.parametrize("stale_after", [float("inf"), float("-inf"), float("nan"), 0.0, -1.0])
+def test_relay_state_rejects_nonpositive_or_nonfinite_stale_after(stale_after: float) -> None:
+    with pytest.raises(ValueError):
+        RelayState(stale_after=stale_after)
 
 
 def test_sequence_is_monotonic_and_snapshot_is_retained_after_disconnect() -> None:

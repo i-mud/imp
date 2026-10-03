@@ -97,7 +97,7 @@ def decode_lua_message(line: str) -> DecodeResult:
 
     try:
         parsed: object = json.loads(raw, parse_constant=_reject_json_constant)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, RecursionError):
         return _invalid("invalid_json")
 
     if not isinstance(parsed, dict):
@@ -139,15 +139,18 @@ def decode_lua_message(line: str) -> DecodeResult:
         if "payload" not in body:
             return _invalid("invalid_gmcp")
 
-        envelope = json.dumps(
-            {
-                "at": body.get("at"),
-                "package": body.get("package"),
-                "payload": body["payload"],
-            },
-            separators=(",", ":"),
-            ensure_ascii=True,
-        )
+        try:
+            envelope = json.dumps(
+                {
+                    "at": body.get("at"),
+                    "package": body.get("package"),
+                    "payload": body["payload"],
+                },
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+        except RecursionError:
+            return _invalid("invalid_gmcp")
         record = parse_record(envelope)
         if not record.ok or record.record is None:
             return _invalid(record.error or "invalid_gmcp")

@@ -101,6 +101,12 @@ def test_gateway_relay_url_accepts_explicit_loopback_ws() -> None:
     assert validate_relay_url("ws://[::1]:8787/") == "ws://[::1]:8787"
 
 
+@pytest.mark.parametrize("auth_timeout", [float("inf"), float("-inf"), float("nan"), 0.0, -1.0])
+def test_gateway_rejects_nonpositive_or_nonfinite_auth_timeout(auth_timeout: float) -> None:
+    with pytest.raises(ValueError):
+        GatewayServer(TOKEN_DIGEST, auth_timeout=auth_timeout)
+
+
 def test_gateway_listener_rejects_non_loopback_binding() -> None:
     with pytest.raises(ValueError, match="loopback"):
         GatewayServer(TOKEN_DIGEST, host="0.0.0.0")

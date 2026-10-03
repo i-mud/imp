@@ -5,7 +5,8 @@ import stat
 from collections.abc import Callable
 from pathlib import Path
 
-from imp_relay.protocol import GameState, StateContext
+import pytest
+from imp_relay.protocol import Character, GameState, StateContext, Target, Vital
 
 from imp_tf.diagnostics import DiagnosticCapture
 from imp_tf.feed import FeedCheckpoint, WorldCheckpoint, load_checkpoint, run_feed, store_checkpoint
@@ -322,5 +323,59 @@ def test_relay_outage_does_not_stop_spool_draining_and_new_selection_cancels_old
         assert source.calls >= 4
         assert publisher.cancelled.is_set()
         assert publisher.operations[-1][1] == StateContext("s1", 2, 2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[" * 33 + "0" + "]" * 33,
+        "[" * 1100 + "0" + "]" * 1100,
+        '{"health":"5","mana":"' + "9" * 5000 + '"}',
+        '{"health":"5","opponent_health":' + "9" * 400 + "}",
+        '{"health":"5","opponent_health":1e400}',
+    ],
+)
+def test_hostile_gmcp_is_skipped_and_feed_continues_without_partial_state(payload: str) -> None:
+    async def scenario() -> None:
+        source = _FakeSource(
+            [
+                [
+                    "IMP2 S session1 1 1 Alpha 1",
+                    'IMP2 G session1 1 Alpha 2 Char.Status {"character_name":"Ariadne",'
+                    '"health":"90","health_max":"100","mana":"70","mana_max":"80",'
+                    '"opponent_name":"Troll","opponent_health":"62"}',
+                    f"IMP2 G session1 1 Alpha 3 Char.Status {payload}",
+                    'IMP2 G session1 1 Alpha 4 Char.Status {"character_name":"Continued"}',
+                ]
+            ]
+        )
+        publisher = _CollectingPublisher()
+        stop = asyncio.Event()
+
+        def checkpoint(value: FeedCheckpoint) -> None:
+            if _character_name(value.worlds["Alpha"].state) == "Continued":
+                stop.set()
+
+        await asyncio.wait_for(
+            run_feed(source, publisher, stop=stop, checkpoint=checkpoint),
+            timeout=1,
+        )
+
+        context = StateContext("session1", 1, 1)
+        assert publisher.operations == [
+            ("select", context, EMPTY),
+            (
+                "publish",
+                context,
+                GameState(Character("Ariadne", Vital(90, 100), Vital(70, 80), None), Target("Troll", 62.0)),
+            ),
+            (
+                "publish",
+                context,
+                GameState(Character("Continued", Vital(90, 100), Vital(70, 80), None), Target("Troll", 62.0)),
+            ),
+        ]
 
     asyncio.run(scenario())

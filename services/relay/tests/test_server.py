@@ -164,6 +164,31 @@ def test_malformed_ingest_frame_closes_without_mutating_state() -> None:
     asyncio.run(scenario())
 
 
+def test_oversized_consumer_context_integer_closes_as_invalid_frame() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        original = relay.state.apply_select(CONTEXT, _state("Original"), now=1.0)
+        await relay.start()
+        try:
+            consumer = await connect(f"ws://127.0.0.1:{relay.port}/action-consumer")
+            await consumer.send(
+                '{"type":"consumer","protocol":2,"context":{"session":"session1",'
+                f'"foreground":1,"connection":{"9" * 400}' + "}}"
+            )
+            with pytest.raises(ConnectionClosed):
+                await consumer.recv()
+            assert consumer.close_code == POLICY_VIOLATION_CLOSE_CODE
+            assert relay.state.snapshot() == original
+
+            async with connect(f"ws://127.0.0.1:{relay.port}/action-consumer") as later:
+                await later.send(encode_consumer(CONTEXT))
+                assert (await _receive_type(later, "consumer-ready"))["type"] == "consumer-ready"
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
+
+
 def test_healthz_returns_json_status() -> None:
     async def scenario() -> None:
         relay = RelayServer(port=0)
