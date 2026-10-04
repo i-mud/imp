@@ -70,6 +70,13 @@ but emits a new snapshot/sequence only when canonical state changes; `select`
 always emits a selection snapshot and invalidates liveness. Unknown/unmapped
 input, transient text, and rejected records do not establish observation.
 
+`RelayServer` fans out encoded frames through independent 16-frame subscriber
+FIFOs and one writer per socket. Broadcast never waits for socket sends; overflow
+or a 5-second send deadline aborts only the slow peer. These transient delivery
+buffers do not own canonical state, change freshness, or replay text. A gateway
+upstream is an ordinary subscriber and may be retired if its remote client
+backpressures the proxy.
+
 Within a TinyFugue session, accepted foreground generations never decrease,
 including selections with no connected world. An equal foreground generation
 may reassert the same world or advance its connection generation, but cannot
@@ -156,6 +163,7 @@ and rechecks `(session, foreground, connection)` immediately before
 | Direct WSS authentication fails   | no upstream node connection is opened                                                                              |
 | gateway or reverse proxy drops    | desktop reconnects with bounded backoff; retained snapshot returns, transient text/actions are not replayed        |
 | producer disconnects              | snapshot retained; `feed` becomes `down`                                                                           |
+| subscriber cannot keep up         | its bounded FIFO/send deadline retires only that peer; ingestion and other subscribers continue                    |
 | binary or malformed HUD frame     | `protocol-error`; socket closes; state remains untouched                                                           |
 | unknown message `type`            | state source ignores server frames; relay closes unknown client frames; action sink reports `unknown`              |
 | node unreachable                  | producer/desktop reconnect according to their bounded policies                                                     |
@@ -173,6 +181,9 @@ and rechecks `(session, foreground, connection)` immediately before
   and action delivery
 - `services/relay/tests/test_server.py` - loopback producer/subscriber/action
   lifecycle
+- `services/relay/tests/test_subscriber_backpressure.py` and
+  `test_subscriber_lifecycle.py` - actual socket pressure, bounded queues,
+  emission order, watchdog/text isolation, and writer cleanup
 - `services/relay/tests/test_gateway.py` and `test_gateway_config.py` -
   authenticated remote state/action boundary
 - `apps/desktop/test/` - source, action sink, reducer, and runtime selection

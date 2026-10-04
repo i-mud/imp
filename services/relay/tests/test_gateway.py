@@ -28,6 +28,8 @@ from imp_relay.protocol import (
     encode_action,
     encode_consumer,
     encode_consumer_result,
+    encode_publish,
+    encode_select,
     encode_text,
 )
 from imp_relay.server import RelayServer
@@ -433,5 +435,168 @@ def test_action_upstream_unavailable_is_attempted_once_without_proxy(
         finally:
             await gateway.close()
             blocker.close()
+
+    asyncio.run(scenario())
+
+
+def test_authenticated_gateway_upstream_isolated_from_slow_remote_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        relay_listener = relay._server
+        assert relay_listener is not None
+        gateway = GatewayServer(
+            TOKEN_DIGEST,
+            port=0,
+            relay_url=f"ws://127.0.0.1:{relay.port}",
+        )
+        await gateway.start()
+        connections: list[ClientConnection] = []
+        tasks: list[asyncio.Task[object]] = []
+        try:
+
+            def uncompressed_upstream(*args: Any, **kwargs: Any) -> Any:
+                kwargs["compression"] = None
+                return connect(*args, **kwargs)
+
+            monkeypatch.setattr(gateway_module, "connect", uncompressed_upstream)
+
+            direct = await connect(
+                f"ws://127.0.0.1:{relay.port}/state",
+                compression=None,
+                max_queue=1,
+                ping_interval=None,
+            )
+            connections.append(direct)
+            remote = await connect(
+                f"ws://127.0.0.1:{gateway.port}/state",
+                compression=None,
+                max_queue=1,
+                ping_interval=None,
+            )
+            connections.append(remote)
+            await _receive_type(direct, "hello")
+            await _receive_type(direct, "status")
+            await remote.send(_auth())
+            await _receive_type(remote, "hello")
+            await _receive_type(remote, "status")
+
+            direct_socket = cast(socket.socket, direct.transport.get_extra_info("socket"))
+            direct_port = cast(tuple[str, int], direct_socket.getsockname())[1]
+            direct_subscriber = next(
+                connection
+                for connection in relay_listener.connections
+                if connection.remote_address[1] == direct_port
+            )
+            upstream_subscriber = next(
+                connection for connection in relay_listener.connections if connection is not direct_subscriber
+            )
+            upstream_queue = relay._subscribers[upstream_subscriber]
+            upstream_socket = cast(
+                socket.socket,
+                upstream_subscriber.transport.get_extra_info("socket"),
+            )
+            upstream_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+
+            remote_socket = cast(socket.socket, remote.transport.get_extra_info("socket"))
+            remote_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            remote_port = cast(tuple[str, int], remote_socket.getsockname())[1]
+            gateway_server = gateway._server
+            assert gateway_server is not None
+            gateway_connection = next(
+                connection
+                for connection in gateway_server.connections
+                if connection.remote_address[1] == remote_port
+            )
+            gateway_socket = cast(
+                socket.socket,
+                gateway_connection.transport.get_extra_info("socket"),
+            )
+            gateway_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+            remote.transport.pause_reading()
+
+            max_backlog = 0
+            max_upstream_write_buffer = 0
+            max_gateway_write_buffer = 0
+
+            async def observe_backpressure() -> None:
+                nonlocal max_backlog, max_upstream_write_buffer, max_gateway_write_buffer
+                while upstream_subscriber in relay_listener.connections:
+                    max_backlog = max(max_backlog, upstream_queue.qsize())
+                    max_upstream_write_buffer = max(
+                        max_upstream_write_buffer,
+                        upstream_subscriber.transport.get_write_buffer_size(),
+                    )
+                    max_gateway_write_buffer = max(
+                        max_gateway_write_buffer,
+                        gateway_connection.transport.get_write_buffer_size(),
+                    )
+                    await asyncio.sleep(0)
+
+            monitor = asyncio.create_task(observe_backpressure())
+            tasks.append(monitor)
+
+            async def receive_direct() -> list[int]:
+                sequences: list[int] = []
+                while len(sequences) < 4_000:
+                    snapshot = await _receive_type(direct, "snapshot")
+                    sequence = snapshot["seq"]
+                    assert isinstance(sequence, int)
+                    sequences.append(sequence)
+                return sequences
+
+            reader = asyncio.create_task(receive_direct())
+            tasks.append(reader)
+            producer = await connect(
+                f"ws://127.0.0.1:{relay.port}/ingest",
+                compression=None,
+                max_queue=1,
+                ping_interval=None,
+            )
+            connections.append(producer)
+
+            async def send_snapshots() -> None:
+                await producer.send(encode_select(CONTEXT, _state("00000001" + "\u754c" * 56)))
+                for sequence in range(2, 4_001):
+                    name = f"{sequence:08d}" + "\u754c" * 56
+                    await producer.send(encode_publish(CONTEXT, _state(name)))
+                    if sequence % 32 == 0:
+                        await asyncio.sleep(0)
+
+            sender = asyncio.create_task(send_snapshots())
+            tasks.append(sender)
+            sequences = await asyncio.wait_for(asyncio.gather(sender, reader), timeout=12)
+            assert sequences[1] == list(range(1, 4_001))
+
+            async with asyncio.timeout(5):
+                while upstream_subscriber in relay_listener.connections:
+                    await asyncio.sleep(0.001)
+            await asyncio.wait_for(monitor, timeout=2)
+
+            snapshot = relay.state.snapshot()
+            assert snapshot is not None and snapshot.seq == 4_000
+            assert direct_subscriber in relay_listener.connections
+            assert list(relay._subscribers) == [direct_subscriber]
+            assert upstream_queue.maxsize == 16 and upstream_queue.qsize() <= 16
+            assert 0 < max_backlog <= 16
+            assert max_upstream_write_buffer > upstream_subscriber.transport.get_write_buffer_limits()[1]
+            assert max_gateway_write_buffer > gateway_connection.transport.get_write_buffer_limits()[1]
+
+            remote.transport.resume_reading()
+            with pytest.raises(ConnectionClosed):
+                async with asyncio.timeout(5):
+                    while True:
+                        await remote.recv()
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for connection in connections:
+                connection.transport.abort()
+            await gateway.close()
+            await relay.close()
 
     asyncio.run(scenario())

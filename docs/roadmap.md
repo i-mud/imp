@@ -37,6 +37,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 16 - Mudlet and local client integration        | ✅ Complete | `mudlet-local-integration`            |
 | Slice 17 - Input boundary correctness                 | Complete    | Untagged                              |
 | Slice 18 - Freshness correctness                      | Complete    | Untagged                              |
+| Slice 19 - Subscriber isolation                       | Complete    | Untagged                              |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -607,6 +608,20 @@ Selection/reconnect retention and action fencing remain independent.
 Deterministic regressions and disposable TinyFugue/Mudlet loopback runtime
 evidence are recorded in [`status.md`](status.md). Other audit findings remain
 outside this slice.
+
+### Slice 19 - Subscriber isolation
+
+Slug: `subscriber-isolation`. Complete; untagged.
+
+Remediates F03 with one serialized writer and a bounded 16-frame FIFO per
+subscriber. Broadcast enqueues without awaiting network sends; overflow or a
+5-second send deadline retires only the slow peer. Startup/live frame order,
+Slice 18 retention/freshness/sequence rules, and transient-text no-replay
+semantics remain unchanged. Gateway upstreams are ordinary subscribers.
+
+Actual WebSocket backpressure and lifecycle regression/runtime evidence are
+recorded in [`status.md`](status.md). No generic messaging infrastructure,
+protocol changes, or other audit remediation is included.
 
 ## Candidate work
 
