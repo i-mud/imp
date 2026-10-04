@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from http import HTTPStatus
+from importlib.metadata import version
 from typing import Final
 
 from websockets.asyncio.server import Server, ServerConnection, serve
@@ -34,6 +35,7 @@ from .protocol import (
     encode_text,
 )
 from .state import RelayState, Snapshot
+from .websocket_logging import websocket_logger
 
 LOGGER = logging.getLogger(__name__)
 MAX_FRAME_BYTES: Final = 65_536
@@ -54,7 +56,6 @@ class RelayServer:
         port: int = 8787,
         stale_after: float = 10.0,
         relay_name: str = "Imp relay",
-        relay_version: str = "0.1.0",
         clock: Callable[[], float] = time.time,
     ) -> None:
         if host not in {"127.0.0.1", "::1", "localhost"}:
@@ -62,7 +63,7 @@ class RelayServer:
         self._host = host
         self._port = port
         self._clock = clock
-        self._relay = RelayInfo(relay_name, relay_version)
+        self._relay = RelayInfo(relay_name, version("imp-relay"))
         self._state = RelayState(stale_after=stale_after, clock=clock)
         self._actions = ActionBroker()
         self._subscribers: dict[ServerConnection, asyncio.Queue[str]] = {}
@@ -89,6 +90,7 @@ class RelayServer:
             self._port,
             process_request=self._process_request,
             max_size=MAX_FRAME_BYTES,
+            logger=websocket_logger(),
         )
         self._stale_task = asyncio.create_task(self._watch_staleness())
 
@@ -305,11 +307,10 @@ async def start_relay(
     port: int = 8787,
     stale_after: float = 10.0,
     relay_name: str = "Imp relay",
-    relay_version: str = "0.1.0",
     clock: Callable[[], float] = time.time,
 ) -> RelayServer:
     """Start an in-process relay; primarily useful for integration tests."""
 
-    relay = RelayServer(host, port, stale_after, relay_name, relay_version, clock)
+    relay = RelayServer(host, port, stale_after, relay_name, clock)
     await relay.start()
     return relay

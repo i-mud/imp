@@ -38,6 +38,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 17 - Input boundary correctness                 | Complete    | Untagged                              |
 | Slice 18 - Freshness correctness                      | Complete    | Untagged                              |
 | Slice 19 - Subscriber isolation                       | Complete    | Untagged                              |
+| Slice 20 - Diagnostic hardening                       | Complete    | Untagged                              |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -622,6 +623,21 @@ semantics remain unchanged. Gateway upstreams are ordinary subscribers.
 Actual WebSocket backpressure and lifecycle regression/runtime evidence are
 recorded in [`status.md`](status.md). No generic messaging infrastructure,
 protocol changes, or other audit remediation is included.
+
+### Slice 20 - Diagnostic hardening
+
+Slug: `diagnostic-hardening`. Complete; untagged.
+
+Remediates F04/F11: relay/gateway-owned WebSocket connections explicitly use a
+credential-safe logger with an INFO floor and monotonic severity restrictions,
+without changing unrelated dependency loggers. Application DEBUG and permitted
+nonsecret lifecycle diagnostics remain available. Relay hello identity comes
+from the running Python distribution's release-managed metadata, including
+installed server wheels and the frozen desktop sidecar.
+
+Logging regressions and source/installed/frozen runtime evidence are recorded
+in [`status.md`](status.md). Authentication, protocol compatibility, release
+policy, freshness, subscriber isolation, and other audit findings are unchanged.
 
 ## Candidate work
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from importlib.metadata import version as package_version
 from typing import cast
 
 import pytest
@@ -49,6 +50,20 @@ async def _receive_type(connection: ClientConnection, expected_type: str) -> dic
 async def _select(relay: RelayServer, context: StateContext | None = CONTEXT) -> None:
     async with connect(f"ws://127.0.0.1:{relay.port}/ingest") as producer:
         await producer.send(encode_select(context, _state("Selected")))
+
+
+def test_hello_reports_installed_package_version() -> None:
+    async def scenario() -> None:
+        relay = RelayServer(port=0)
+        await relay.start()
+        try:
+            async with connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
+                hello = await _receive_type(subscriber, "hello")
+                assert cast(dict[str, object], hello["relay"])["version"] == package_version("imp-relay")
+        finally:
+            await relay.close()
+
+    asyncio.run(scenario())
 
 
 def test_subscriber_receives_contextual_retained_snapshot() -> None:

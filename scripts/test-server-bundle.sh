@@ -116,8 +116,13 @@ EXPECTED_WEBSOCKETS="${EXPECTED_WEBSOCKETS%%-*}"
 
 "$HOME_DIR/.local/share/imp/current/.venv/bin/python" \
   - "$VERSION" "$EXPECTED_WEBSOCKETS" <<'PY_VERIFY'
-from importlib.metadata import version
+import asyncio
+import json
 import sys
+from importlib.metadata import version
+
+from imp_relay.server import RelayServer
+from websockets.asyncio.client import connect
 
 expected_imp = sys.argv[1]
 expected_websockets = sys.argv[2]
@@ -127,7 +132,19 @@ assert version("imp-adapter") == expected_imp
 assert version("imp-tinyfugue") == expected_imp
 assert version("websockets") == expected_websockets
 
-print("package versions: OK")
+async def verify_hello_version():
+    relay = RelayServer(port=0)
+    await relay.start()
+    try:
+        async with connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
+            hello = json.loads(await subscriber.recv())
+            assert hello["relay"]["version"] == version("imp-relay") == expected_imp
+    finally:
+        await relay.close()
+
+asyncio.run(verify_hello_version())
+
+print("package and hello versions: OK")
 PY_VERIFY
 
 for entry in imp-relay imp-gateway imp-feed imp-action-consumer; do

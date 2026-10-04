@@ -19,6 +19,8 @@ from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.http11 import Request, Response
 
+from .websocket_logging import websocket_logger
+
 MAX_FRAME_BYTES: Final = 65_536
 MAX_AUTH_FRAME_CHARS: Final = 256
 AUTH_POLICY_CLOSE_CODE: Final = 1008
@@ -128,6 +130,7 @@ class GatewayServer:
             self._port,
             process_request=self._process_request,
             max_size=MAX_FRAME_BYTES,
+            logger=websocket_logger(),
         )
 
     async def close(self) -> None:
@@ -221,6 +224,7 @@ class GatewayServer:
                 self._upstream_url("/state"),
                 proxy=None,
                 max_size=MAX_FRAME_BYTES,
+                logger=websocket_logger(),
             ) as upstream:
                 relay_task = asyncio.create_task(self._copy_state(upstream, connection))
                 client_task = asyncio.create_task(self._watch_state_client(connection))
@@ -271,6 +275,7 @@ class GatewayServer:
                 self._upstream_url("/action"),
                 proxy=None,
                 max_size=MAX_FRAME_BYTES,
+                logger=websocket_logger(),
             ) as upstream:
                 await upstream.send(request)
 

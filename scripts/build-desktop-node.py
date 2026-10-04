@@ -59,6 +59,8 @@ def main() -> None:
             str(WORK),
             "--specpath",
             str(SPEC),
+            "--copy-metadata",
+            "imp-relay",
             str(RELAY / "sidecar_entry.py"),
         ],
         cwd=RELAY,

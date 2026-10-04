@@ -63,7 +63,7 @@ connection.
 The native desktop persists the plaintext token because the WebView must send
 the authentication frame. The token is not placed in the URL, WebSocket
 subprotocol, build-time `VITE_*` configuration, WebView `localStorage`, or
-ordinary logs.
+logs, including DEBUG frame diagnostics.
 
 ## State bridge
 
@@ -145,7 +145,7 @@ reverse-proxy route set.
 - The gateway retains no snapshot or received text.
 - The gateway never retries an action.
 - The health endpoint contains no operator, relay-state, or credential data.
-- The pairing token never appears in a URL or ordinary diagnostic output.
+- The pairing token never appears in a URL or diagnostic output, including DEBUG.
 
 ## Verification
 
