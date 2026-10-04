@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.4] - 2026-10-04
+
+### Bug Fixes
+
+- isolate slow relay subscribers ([edb486c](https://github.com/i-mud/imp/commit/edb486cbfb39faabfb11828ef67ede5ec0d038b4))
+
 ## [0.2.3] - 2026-10-03
 
 ### Bug Fixes
