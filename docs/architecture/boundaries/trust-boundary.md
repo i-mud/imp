@@ -186,6 +186,20 @@ read in a terminal.
 
 Malformed-line counts are logged so a broken feed is still visible.
 
+Relay `serve()`, gateway `serve()`, and both gateway upstream `connect()` paths
+explicitly use the Imp-owned `imp_relay.websocket` logger. WebSocket DEBUG
+handshake/frame diagnostics include raw authentication and close payloads, so
+this logger has an INFO security floor. Its threshold never decreases: it
+also preserves existing Imp/application/root and dependency parent/server/client
+restrictions, including across later component startup and restart.
+
+The process-global `websockets` logger configuration is untouched. Explicit
+DEBUG settings on its descendants cannot enable diagnostics on Imp-owned
+connections. Unrelated WebSocket consumers retain their caller-owned policy.
+Application DEBUG remains available, and connection lifecycle INFO is available
+when no stricter restriction applies. Successful, rejected, malformed, and
+interrupted authentication must not log credentials.
+
 ## Change impact
 
 Touching any file in the table above is a security change.

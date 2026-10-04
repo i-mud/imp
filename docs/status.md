@@ -794,4 +794,61 @@ The gateway backpressure regression allows buffered frames to drain after
 upstream retirement and requires a normal remote stream close. Its 5-second
 receive guard detects inactivity, not a total drain-time contract.
 
+### Slice 20 - Diagnostic hardening
+
+Slice 20, `diagnostic-hardening`, remediates F04/F11 from the
+[historical repository audit](audits/2026-10-03-full-repository-audit.md);
+that audit remains immutable.
+
+A baseline DEBUG loopback probe exposed both accepted and rejected disposable
+credentials through `websockets.server` and `websockets.client`. Independent
+review found that the initial parent-level suppression could be bypassed by
+explicit DEBUG descendants and could weaken stricter caller configuration.
+
+Relay/gateway listeners and both gateway upstream paths now explicitly supply
+the Imp-owned `imp_relay.websocket` logger. It has an INFO floor and preserves
+the highest existing Imp/application/root and dependency parent/server/client
+severity threshold, including restrictions established by earlier startup.
+Global dependency loggers are untouched. Application DEBUG and permitted
+connection lifecycle INFO remain available; no token fragments, redaction
+framework, or authentication changes were introduced.
+
+Logging regressions exercise explicit server/client DEBUG under every supported
+application level, with a NOTSET capture handler that can observe propagated
+DEBUG even under root CRITICAL. Actual WebSockets cover successful auth,
+wrong-token rejection, malformed JSON, wrong auth shape, binary auth, closure
+during auth, and an auth-shaped payload traversing the action upstream client.
+Additional regressions cover WARNING/ERROR/CRITICAL caller restrictions, both
+components alone, changing root level between component starts, restarts, and
+unrelated consumer DEBUG remaining visible. Credentials, serialized auth frames,
+and their hex representations are absent from Imp-owned connection diagnostics.
+
+Before correction, the added uncensored review regressions had 35 failures and
+one pass. The final 42 logging cases, 34 gateway tests, and 217 relay tests
+passed. Post-review CLI probes explicitly enabled both dependency descendants
+at DEBUG and repeated the full authentication/upstream matrix without leaking
+credentials or auth/close payloads. The rebuilt Linux frozen sidecar repeated
+that matrix successfully; F11 package identity remained `0.2.4`.
+
+Relay hello now reads `importlib.metadata.version("imp-relay")`, without an
+override or fallback. Existing release automation updates the relay's
+`pyproject.toml` and lockfiles. uv installs editable metadata for source runs;
+server wheels carry installed metadata; PyInstaller explicitly copies it into
+the frozen sidecar. Wire compatibility remains `protocol: 2`.
+
+Normal uv CLI, disposable wheel-installed CLI, and Linux frozen-sidecar probes
+all observed hello version `0.2.4`, independently matched against package
+metadata. All three DEBUG gateway smokes delivered hello/status after valid
+auth, rejected an invalid credential with `1008`, and excluded both credentials
+and auth payloads from captured stdout/stderr while retaining startup/connection
+diagnostics. Server-bundle build/install acceptance also passed and now checks
+the actual hello against installed metadata and bundle `VERSION`.
+
+The full `npm run check` gate, separate protocol/E2E checks, and
+`git diff --check origin/main` passed, including documentation/version checks,
+all frontend/adapter/client tests, strict typing, and the production build.
+
+This is local diagnostic/package-runtime evidence, not deployment, release,
+live-MUD, or native-client acceptance. Other audit findings remain out of scope.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).
