@@ -790,4 +790,8 @@ and `git diff --check origin/main` passed.
 The full `npm run check` gate also passed, including desktop/adapter/client
 tests and the frontend production build.
 
+The gateway backpressure regression allows buffered frames to drain after
+upstream retirement and requires a normal remote stream close. Its 5-second
+receive guard detects inactivity, not a total drain-time contract.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).
