@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosed, InvalidStatus
+from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, InvalidStatus
 from websockets.typing import Origin
 
 import imp_relay.gateway as gateway_module
@@ -585,9 +585,10 @@ def test_authenticated_gateway_upstream_isolated_from_slow_remote_client(
             assert max_gateway_write_buffer > gateway_connection.transport.get_write_buffer_limits()[1]
 
             remote.transport.resume_reading()
-            with pytest.raises(ConnectionClosed):
-                async with asyncio.timeout(5):
-                    while True:
+            # Retirement leaves buffered frames to drain; guard inactivity, not total drain time.
+            with pytest.raises(ConnectionClosedOK):
+                while True:
+                    async with asyncio.timeout(5):
                         await remote.recv()
         finally:
             for task in tasks:
