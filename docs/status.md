@@ -741,4 +741,53 @@ desktop tests and production build, Python lint/format/strict typing, adapter
 and relay tests, documentation/version checks, and loopback end-to-end delivery.
 `git diff --check` also passed.
 
+### Slice 19 - Subscriber isolation
+
+Slice 19, `subscriber-isolation`, remediates F03 from the
+[historical repository audit](audits/2026-10-03-full-repository-audit.md).
+`RelayServer` owns one writer and a FIFO limited to 16 encoded frames per
+subscriber, plus at most one in-flight frame. Broadcast enqueues without waiting
+for peer sends. Overflow or a 5-second send deadline removes only that peer and
+aborts its transport; disconnect/shutdown cancel and await its writer.
+
+Startup is atomically queued as `hello`, retained `snapshot` if present, then
+current `status`; live snapshots/status/text follow in emission order.
+Delivery buffers are transient, not a second retained-state model. `RelayState`
+and Slice 18 snapshot/sequence/timestamp/freshness semantics are unchanged.
+Text remains context-bound, nonretained, nonreplayed, and non-freshness-bearing.
+Slow gateway state upstreams follow the ordinary subscriber retirement policy;
+delivery is not guaranteed to peers that cannot keep up.
+
+A disposable baseline probe using actual WebSockets stalled relay and healthy
+subscriber at sequence 132, with only 3,833 of 20,000 producer sends completed.
+Aborting only the non-reading socket let both reach 20,001. After isolation,
+the post-test loopback smoke completed all 20,000 publications in 5.474 seconds;
+relay and healthy subscriber reached sequence 20,001 without manual slow-peer
+removal. Actual transport backpressure was observed at sequence 86, with
+32,807 transport write-buffer bytes and two queued frames. Slow-peer overflow
+retirement was observed after producer send 105, at 0.511 seconds; maximum
+observed FIFO depth was exactly 16.
+
+While that peer was still blocked and registered, the healthy subscriber
+received watchdog staleness within 0.369 seconds and transient text within
+0.0006 seconds. A new subscriber received the ordered retained-state handshake
+without replaying that text. Cleanup left zero registered subscribers and zero
+pending tasks. This is disposable local Python/WebSocket runtime evidence,
+not deployment, release, live-MUD, or native-client acceptance.
+
+A separate actual-socket probe stopped publishing once a send was blocked.
+The send deadline retired that peer 4.996 seconds later with only three frames
+queued; the healthy subscriber still received `live -> stale`. Cleanup again
+left zero pending tasks.
+
+Six added regressions cover actual TCP pressure with two ordered healthy peers,
+exact queue capacity/overflow, blocked startup, watchdog/text isolation,
+send deadline, pending-delivery disconnect, writer failure/cancellation,
+shutdown overlapping retirement, and a real authenticated gateway proxy under
+remote-client backpressure. The 174-test relay suite, Python lint/format/strict
+typing, 64 TypeScript protocol tests, cross-component E2E, documentation checks,
+and `git diff --check origin/main` passed.
+The full `npm run check` gate also passed, including desktop/adapter/client
+tests and the frontend production build.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).

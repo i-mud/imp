@@ -53,6 +53,15 @@ the relay's counter restarts with its process. A non-connected phase also
 clears the actionable context, so stale displayed values cannot authorize an
 action.
 
+The relay enqueues the startup frames without yielding, then registers the
+subscriber for live traffic. One writer sends both startup and live frames in
+FIFO order. Each peer has at most 16 waiting frames and one in-flight frame;
+overflow or a 5-second blocked send removes that peer and aborts its transport.
+No producer or watchdog announcement awaits those writes. Disconnect and relay
+shutdown cancel and await the connection-owned writer. A gateway state upstream
+is subject to the same policy; reconnect restores only the relay's retained
+snapshot/current status, never missed transient text.
+
 Feed status, evaluated by the relay:
 
 | Condition                                                     | `feed`  |
@@ -135,6 +144,7 @@ current. `apps/desktop/test/model.test.ts` pins this as a regression.
 | gateway/proxy drops        | Direct WSS enters reconnecting and recovers without retained gateway state      |
 | relay restarts             | HUD reconnects; publisher reconnects while idle and restores selection as stale |
 | one subscriber disconnects | others unaffected                                                               |
+| one subscriber blocks      | bounded delivery retires that socket; healthy peers and feed watchdog continue  |
 | producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data                          |
 
 Backoff is exponential with jitter and a cap, so a long outage does not become
@@ -150,8 +160,9 @@ a reconnect storm when the relay returns.
   argv, reconnect failure and owned-child shutdown
 - `apps/desktop/test/model.test.ts` - seq reset, reconnect display rule
 - `services/relay/tests/test_state.py` - feed transitions
-- `services/relay/tests/test_server.py` - hello/snapshot/status ordering,
-  subscriber isolation, producer-count cleanup
+- `services/relay/tests/test_server.py`, `test_subscriber_backpressure.py`, and
+  `test_subscriber_lifecycle.py` - hello/snapshot/status ordering, bounded
+  subscriber isolation, watchdog/text delivery, and writer/producer cleanup
 - `integrations/tinyfugue/tests/test_publisher.py` - idle disconnect detection,
   latest-selection reassertion, null-context recovery, and reconnect ownership
 - `integrations/tinyfugue/tests/test_bridge.py` - relay-initiated producer
@@ -180,3 +191,6 @@ interruption as recorded in `docs/status.md`.
 Slice 18 additionally verified injected-clock freshness regressions and real
 loopback TinyFugue spool/feed and Mudlet runtime paths with unchanged observations,
 ignored/rejected traffic, stale restoration, silence, and retained sequence/state.
+Slice 19 additionally verified non-reading subscriber retirement under real
+loopback TCP backpressure without delaying healthy-peer snapshots, watchdog
+status, or text, and shutdown with no subscriber tasks remaining.

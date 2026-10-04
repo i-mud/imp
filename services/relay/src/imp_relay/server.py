@@ -38,6 +38,8 @@ from .state import RelayState, Snapshot
 LOGGER = logging.getLogger(__name__)
 MAX_FRAME_BYTES: Final = 65_536
 POLICY_VIOLATION_CLOSE_CODE: Final = 1008
+_SUBSCRIBER_QUEUE_SIZE: Final = 16
+_SUBSCRIBER_SEND_TIMEOUT: Final = 5.0
 _BROWSER_ORIGINS: Final = frozenset({"http://localhost:1420", "http://tauri.localhost"})
 _BROWSER_ENDPOINTS: Final = frozenset({"/state", "/action", "/healthz"})
 _PRIVILEGED_ENDPOINTS: Final = frozenset({"/ingest", "/action-consumer"})
@@ -63,7 +65,7 @@ class RelayServer:
         self._relay = RelayInfo(relay_name, relay_version)
         self._state = RelayState(stale_after=stale_after, clock=clock)
         self._actions = ActionBroker()
-        self._subscribers: set[ServerConnection] = set()
+        self._subscribers: dict[ServerConnection, asyncio.Queue[str]] = {}
         self._server: Server | None = None
         self._stale_task: asyncio.Task[None] | None = None
         self._last_feed: FeedStatus = self._state.feed_status(self._clock())
@@ -101,8 +103,9 @@ class RelayServer:
         self._server = None
         if server is not None:
             server.close()
+            for subscriber in tuple(self._subscribers):
+                self._retire_subscriber(subscriber)
             await server.wait_closed()
-        self._subscribers.clear()
 
     async def _process_request(self, connection: ServerConnection, request: Request) -> Response | None:
         path = request.path
@@ -135,18 +138,39 @@ class RelayServer:
             await self._handle_action_consumer(connection)
 
     async def _handle_subscriber(self, connection: ServerConnection) -> None:
-        if not await self._send(connection, encode_hello(self._now_millis(), self._relay)):
-            return
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=_SUBSCRIBER_QUEUE_SIZE)
+        # Register without yielding so live traffic cannot overtake startup frames.
+        queue.put_nowait(encode_hello(self._now_millis(), self._relay))
         snapshot = self._state.snapshot()
-        if snapshot is not None and not await self._send_snapshot(connection, snapshot):
-            return
-        if not await self._send_status(connection, self._state.feed_status(self._clock())):
-            return
-        self._subscribers.add(connection)
+        if snapshot is not None:
+            queue.put_nowait(encode_snapshot(snapshot.seq, snapshot.at, snapshot.context, snapshot.state))
+        queue.put_nowait(encode_status(self._now_millis(), self._state.feed_status(self._clock()), None))
+        self._subscribers[connection] = queue
+        writer = asyncio.create_task(self._write_subscriber(connection, queue))
         try:
             await connection.wait_closed()
         finally:
-            self._subscribers.discard(connection)
+            self._subscribers.pop(connection, None)
+            writer.cancel()
+            with suppress(asyncio.CancelledError):
+                await writer
+
+    async def _write_subscriber(self, connection: ServerConnection, queue: asyncio.Queue[str]) -> None:
+        try:
+            while True:
+                payload = await queue.get()
+                async with asyncio.timeout(_SUBSCRIBER_SEND_TIMEOUT):
+                    await connection.send(payload)
+                queue.task_done()
+        except (ConnectionClosed, TimeoutError):
+            pass
+        finally:
+            self._retire_subscriber(connection)
+
+    def _retire_subscriber(self, connection: ServerConnection) -> None:
+        self._subscribers.pop(connection, None)
+        # A non-reading peer cannot be relied on to complete a close handshake.
+        connection.transport.abort()
 
     async def _handle_producer(self, connection: ServerConnection) -> None:
         self._state.producer_connected()
@@ -256,18 +280,14 @@ class RelayServer:
     async def _broadcast_status(self, feed: FeedStatus) -> None:
         await self._broadcast(encode_status(self._now_millis(), feed, None))
 
-    async def _send_snapshot(self, connection: ServerConnection, snapshot: Snapshot) -> bool:
-        return await self._send(
-            connection, encode_snapshot(snapshot.seq, snapshot.at, snapshot.context, snapshot.state)
-        )
-
-    async def _send_status(self, connection: ServerConnection, feed: FeedStatus) -> bool:
-        return await self._send(connection, encode_status(self._now_millis(), feed, None))
-
     async def _broadcast(self, payload: str) -> None:
-        for subscriber in tuple(self._subscribers):
-            if not await self._send(subscriber, payload):
-                self._subscribers.discard(subscriber)
+        for subscriber, queue in tuple(self._subscribers.items()):
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                self._retire_subscriber(subscriber)
+        # Let writers run even when producer recv() drains already buffered frames.
+        await asyncio.sleep(0)
 
     async def _send(self, connection: ServerConnection, payload: str) -> bool:
         try:

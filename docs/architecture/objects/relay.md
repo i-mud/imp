@@ -12,7 +12,7 @@ relay runtime is used on a VPS or beside a local desktop MUD client.
 - `services/relay/src/imp_relay/state.py` - `RelayState`: snapshot,
   sequence counter, feed status, health payload. No transport knowledge.
 - `services/relay/src/imp_relay/server.py` - WebSocket endpoints,
-  broadcast, health endpoint.
+  per-subscriber delivery/writer lifecycle, health endpoint.
 - `services/relay/src/imp_relay/action.py` - one eligible client-adapter
   consumer and one in-flight action.
 - `services/relay/src/imp_relay/protocol.py` - canonical Python decoder.
@@ -22,13 +22,13 @@ relay runtime is used on a VPS or beside a local desktop MUD client.
 
 See `packages/protocol/SPEC.md` for the message-level contract.
 
-| Endpoint           | Role          | Behaviour                                           |
-| ------------------ | ------------- | --------------------------------------------------- |
-| `/state`           | subscriber    | `hello`, retained `snapshot`, then live updates     |
-| `/ingest`          | producer      | accepts `select` and matching-context `publish`     |
-| `/action`          | requester     | accepts one action and returns its terminal status  |
-| `/action-consumer` | client helper | registers and acknowledges context-bound dispatches |
-| `/healthz`         | operator      | HTTP JSON, served on the same port                  |
+| Endpoint           | Role          | Behaviour                                            |
+| ------------------ | ------------- | ---------------------------------------------------- |
+| `/state`           | subscriber    | `hello`, retained `snapshot`, `status`, live traffic |
+| `/ingest`          | producer      | accepts `select` and matching-context `publish`      |
+| `/action`          | requester     | accepts one action and returns its terminal status   |
+| `/action-consumer` | client helper | registers and acknowledges context-bound dispatches  |
+| `/healthz`         | operator      | HTTP JSON, served on the same port                   |
 
 `/healthz` is served through `websockets`' `process_request` hook, which is why
 there is no second listener and no HTTP framework.
@@ -98,6 +98,18 @@ Reused by:
 - Matching publishes refresh freshness even when state is identical. Identical
   state retains the existing snapshot (`seq` and `at` included) without a
   duplicate broadcast; status transitions remain independent.
+- Each subscriber has one serialized writer and a FIFO of at most 16 encoded
+  frames, plus at most one frame in flight. Startup frames are enqueued together
+  before registration; live snapshot/status/text frames follow relay emission
+  order. Broadcast only enqueues without waiting for socket progress.
+- Queue overflow or a send taking 5 seconds retires only that subscriber:
+  remove it from broadcast membership and abort its transport without waiting
+  for a close handshake. Disconnect cancels and awaits its writer; shutdown
+  aborts subscriber transports and awaits all handlers/writers.
+- The FIFO is transient delivery, not retained state. `RelayState` remains the
+  sole snapshot/freshness owner. No retry, replay, coalescing, or delivery
+  guarantee exists for a subscriber that cannot keep up. Gateway upstreams use
+  the same policy as other subscribers.
 - One matching helper and one action in flight are permitted. There is no
   queue, retry, fan-out, or replay; post-dispatch ambiguity returns `unknown`.
 - A malformed frame is rejected whole, leaves stored state untouched, and
@@ -105,7 +117,8 @@ Reused by:
   frame.
 - `seq` advances for selections and changed-state snapshots, is monotonic within
   a process, and restarts with it.
-- One dead subscriber cannot break delivery to the others.
+- A blocked, slow, or closed subscriber cannot hold up producer ingestion,
+  watchdog announcements, or healthy subscribers.
 
 ## Verification
 
@@ -114,3 +127,6 @@ Verified against: relay unit/loopback server tests,
 `tests/e2e/relay_roundtrip.py`, gateway integration tests that bridge the
 relay only after authentication, and live SSH/Direct-WSS transport evidence in
 `docs/status.md`.
+Slice 19 additionally verified real TCP backpressure with a non-reading
+subscriber, healthy-peer ordered progress, bounded overflow/deadline retirement,
+watchdog/text delivery, and subscriber writer cleanup.
