@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.5] - 2026-10-04
+
+### Bug Fixes
+
+- harden relay diagnostics and version identity ([fcb1bdc](https://github.com/i-mud/imp/commit/fcb1bdcb4b3fcb2cdbb5bf56e8d2bac0084e4237))
+
 ## [0.2.4] - 2026-10-04
 
 ### Bug Fixes
