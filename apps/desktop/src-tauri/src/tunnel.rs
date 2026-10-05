@@ -13,20 +13,16 @@
 use std::collections::VecDeque;
 use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
-use std::process::{Child, Command, Stdio};
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use parking_lot::Mutex;
 use serde::Serialize;
 
+use crate::runtime::{OwnedChild as Child, RuntimeOwner, RuntimeStdout};
 pub const NODE_PORT: u16 = 8787;
 pub const SSH_FORWARD_PORT: u16 = 8789;
 const CONNECT_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -125,7 +121,7 @@ impl TunnelSupervisor {
     /// the worker takes the forward over only once that endpoint is gone and
     /// the port is free again. An unrelated listener at startup is a refusal:
     /// no child, no supervision.
-    pub fn managed(ssh_target: String, local_port: u16) -> Arc<Self> {
+    pub fn managed(ssh_target: String, local_port: u16, owner: Arc<RuntimeOwner>) -> Arc<Self> {
         let supervisor = Arc::new(Self {
             status: Mutex::new(TunnelStatus {
                 diagnostic: TunnelDiagnostic::Reconnecting,
@@ -153,7 +149,7 @@ impl TunnelSupervisor {
 
         let worker_ref = Arc::clone(&supervisor);
         let stop = Arc::clone(&supervisor.stop);
-        let handle = thread::spawn(move || worker_ref.run(ssh_target, local_port, stop));
+        let handle = thread::spawn(move || worker_ref.run(ssh_target, local_port, stop, owner));
         *supervisor.worker.lock() = Some(handle);
         supervisor
     }
@@ -183,7 +179,13 @@ impl TunnelSupervisor {
         self.status.lock().diagnostic = diagnostic;
     }
 
-    fn run(self: Arc<Self>, ssh_target: String, local_port: u16, stop: Arc<AtomicBool>) {
+    fn run(
+        self: Arc<Self>,
+        ssh_target: String,
+        local_port: u16,
+        stop: Arc<AtomicBool>,
+        owner: Arc<RuntimeOwner>,
+    ) {
         let mut backoff = INITIAL_BACKOFF;
         while !stop.load(Ordering::SeqCst) {
             self.await_free_local_port(local_port, &stop);
@@ -193,7 +195,7 @@ impl TunnelSupervisor {
             self.set_diagnostic(TunnelDiagnostic::Reconnecting);
             eprintln!("imp: SSH tunnel starting ({ssh_target} -> 127.0.0.1:{local_port})");
 
-            match spawn_ssh(&ssh_target, local_port) {
+            match spawn_ssh(&ssh_target, local_port, &owner) {
                 Ok(mut child) => {
                     if wait_for_ready(&mut child, local_port, &stop) {
                         eprintln!("imp: SSH tunnel established");
@@ -420,11 +422,15 @@ pub(crate) fn probe_gateway_healthz(local_port: u16) -> bool {
     object.len() == 1 && object.get("status").and_then(serde_json::Value::as_str) == Some("ok")
 }
 
-fn ssh_command(ssh_target: &str, local_port: u16) -> Command {
+pub(crate) fn ssh_command(ssh_target: &str, local_port: u16) -> Command {
     let mut command = Command::new("ssh");
     command
         .arg("-N")
         .arg("-T")
+        .arg("-S")
+        .arg("none")
+        .arg("-o")
+        .arg("ForkAfterAuthentication=no")
         .arg("-o")
         .arg("BatchMode=yes")
         .arg("-o")
@@ -436,19 +442,19 @@ fn ssh_command(ssh_target: &str, local_port: u16) -> Command {
         .arg("-L")
         .arg(format!("127.0.0.1:{local_port}:127.0.0.1:{NODE_PORT}"))
         .arg("--")
-        .arg(ssh_target)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
+        .arg(ssh_target);
 
     command
 }
 
-fn spawn_ssh(ssh_target: &str, local_port: u16) -> std::io::Result<Child> {
-    let mut child = ssh_command(ssh_target, local_port).spawn()?;
+fn spawn_ssh(ssh_target: &str, local_port: u16, owner: &RuntimeOwner) -> std::io::Result<Child> {
+    let command = ssh_command(ssh_target, local_port);
+    let mut child = owner.spawn(
+        command.get_program(),
+        command.get_args(),
+        RuntimeStdout::Null,
+    )?;
+    eprintln!("imp: owned SSH pid={}", child.id());
 
     if let Some(stderr) = child.stderr.take() {
         thread::spawn(move || drain_stderr(stderr));
@@ -458,7 +464,7 @@ fn spawn_ssh(ssh_target: &str, local_port: u16) -> std::io::Result<Child> {
 
 /// Drains the entire pipe so OpenSSH can never block on stderr, retaining
 /// only a bounded tail for failure diagnostics.
-fn drain_stderr(mut stderr: std::process::ChildStderr) {
+fn drain_stderr(mut stderr: std::fs::File) {
     let mut tail = VecDeque::with_capacity(STDERR_TAIL_BYTES);
     let mut chunk = [0u8; 512];
     loop {
@@ -538,37 +544,6 @@ mod tests {
     }
 
     #[test]
-    fn ssh_argv_preserves_host_verification_and_forwards_loopback_only() {
-        let command = ssh_command("-option-shaped-alias", 9000);
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            args,
-            [
-                "-N",
-                "-T",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ExitOnForwardFailure=yes",
-                "-o",
-                "ServerAliveInterval=15",
-                "-o",
-                "ServerAliveCountMax=3",
-                "-L",
-                "127.0.0.1:9000:127.0.0.1:8787",
-                "--",
-                "-option-shaped-alias",
-            ]
-        );
-        assert!(!args.iter().any(|arg| arg == "StrictHostKeyChecking=no"));
-        assert!(!args.iter().any(|arg| arg == "UserKnownHostsFile=/dev/null"));
-    }
-
-    #[test]
     fn managed_mode_never_kills_a_pre_existing_listener_on_the_local_port() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -578,7 +553,11 @@ mod tests {
             }
         });
 
-        let supervisor = TunnelSupervisor::managed("unreachable-alias-for-test".into(), port);
+        let supervisor = TunnelSupervisor::managed(
+            "unreachable-alias-for-test".into(),
+            port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
         let status = supervisor.status();
 
         assert_eq!(status.diagnostic, TunnelDiagnostic::LocalPortUnavailable);
@@ -728,8 +707,11 @@ mod tests {
     fn managed_mode_adopts_an_existing_relay_endpoint_without_owning_it() {
         let relay = ForeignListener::start(RELAY_HEALTHZ);
 
-        let supervisor =
-            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            relay.port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
 
         assert_eq!(
             supervisor.status().diagnostic,
@@ -820,8 +802,11 @@ mod tests {
     #[test]
     fn shutdown_during_a_stalled_health_read_stays_within_the_probe_bound() {
         let relay = ForeignListener::start(RELAY_HEALTHZ);
-        let supervisor =
-            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            relay.port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
         assert_eq!(
             supervisor.status().diagnostic,
             TunnelDiagnostic::ExternalPortInUse
@@ -864,8 +849,11 @@ mod tests {
             LocalPortState::RelayEndpoint
         );
 
-        let supervisor =
-            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            relay.port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
 
         let deadline = Instant::now() + PORT_WATCH_INTERVAL * 2;
         while Instant::now() < deadline {
@@ -884,8 +872,11 @@ mod tests {
     #[test]
     fn managed_mode_takes_over_after_the_adopted_endpoint_disappears() {
         let mut relay = ForeignListener::start(RELAY_HEALTHZ);
-        let supervisor =
-            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            relay.port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
         assert_eq!(
             supervisor.status().diagnostic,
             TunnelDiagnostic::ExternalPortInUse
@@ -913,8 +904,11 @@ mod tests {
     #[test]
     fn managed_mode_never_takes_over_a_port_another_process_still_holds() {
         let relay = ForeignListener::start(RELAY_HEALTHZ);
-        let supervisor =
-            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            relay.port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
         assert_eq!(
             supervisor.status().diagnostic,
             TunnelDiagnostic::ExternalPortInUse
@@ -948,8 +942,11 @@ mod tests {
     #[test]
     fn shutdown_while_monitoring_an_adopted_endpoint_is_prompt_and_leaves_it_running() {
         let relay = ForeignListener::start(RELAY_HEALTHZ);
-        let supervisor =
-            TunnelSupervisor::managed("definitely-not-a-configured-host".into(), relay.port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            relay.port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
         assert_eq!(
             supervisor.status().diagnostic,
             TunnelDiagnostic::ExternalPortInUse
@@ -980,7 +977,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener); // release the port; ssh should fail to reach the alias, not the bind
 
-        let supervisor = TunnelSupervisor::managed("definitely-not-a-configured-host".into(), port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
 
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut saw_unavailable = false;
@@ -1005,7 +1006,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        let supervisor = TunnelSupervisor::managed("definitely-not-a-configured-host".into(), port);
+        let supervisor = TunnelSupervisor::managed(
+            "definitely-not-a-configured-host".into(),
+            port,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
         thread::sleep(Duration::from_millis(200));
 
         supervisor.shutdown();
@@ -1017,7 +1022,11 @@ mod tests {
 
     #[test]
     fn managed_mode_rejects_an_empty_target_without_spawning() {
-        let supervisor = TunnelSupervisor::managed("  ".into(), SSH_FORWARD_PORT);
+        let supervisor = TunnelSupervisor::managed(
+            "  ".into(),
+            SSH_FORWARD_PORT,
+            Arc::new(RuntimeOwner::new().unwrap()),
+        );
 
         assert_eq!(
             supervisor.status().diagnostic,

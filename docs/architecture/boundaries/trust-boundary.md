@@ -177,6 +177,32 @@ Managed tunnel mode delegates credentials and host verification to the system
 SSH client. Copying private keys into the app, persisting an SSH password, or
 weakening OpenSSH host verification remains out of bounds.
 
+## Desktop process ownership
+
+Only runtime children created by this desktop instance enter native lifetime
+ownership: the same-host node, optional producer gateway, and Managed SSH.
+Ownership comes from the spawn handle, never an executable-name, port, PID-file,
+or command-line search. Existing listeners, adopted SSH forwards, Mudlet-owned
+helpers, and VPS/systemd services remain outside this boundary.
+Owned SSH target connections explicitly disable shared-master reuse/persistence
+and authentication-triggered backgrounding. They do not inspect, modify, or
+terminate an external control socket/master. On Unix, nested jump/proxy clients
+must also have foreground configuration; the target's options do not propagate
+to OpenSSH's generated jump client.
+
+Windows assigns children to a private kill-on-close Job Object atomically at
+process creation. The desktop alone owns its non-inheritable job handle;
+ordinary descendants inherit job membership without breakaway permission.
+Abrupt desktop termination closes that handle in the kernel. A container or
+creation failure is a startup failure, never permission to run an uncontained
+child. Normal supervisor shutdown still terminates and reaps individual children.
+
+The Unix guardian/private-process-group mechanism and its narrower guarantees
+are described in
+[`../processes/managed-runtime.md`](../processes/managed-runtime.md).
+Lifetime containment is not a sandbox and does not confer ownership of remote
+services, broker-created processes, or unrelated local listeners.
+
 ## Logging
 
 Rejected input is never logged. Errors carry a code and a dotted field path

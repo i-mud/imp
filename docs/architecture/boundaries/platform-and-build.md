@@ -81,6 +81,29 @@ These exist so the HUD does not become Windows-only by accident:
   supported Tauri notification plugin rather than shell commands or a custom
   platform bridge.
 
+## Runtime lifetime containment
+
+Windows release runtime children use a private kill-on-close Job Object, with
+atomic job membership at process creation (Windows 10+). Ordinary descendants
+are contained; an incompatible enclosing job fails startup rather than
+enabling breakaway or running uncontained. Only node, gateway, and owned
+Managed SSH spawns enter the job, not Tauri dev/build tools or WebView.
+
+Linux/macOS source builds use an independent guardian and private process
+group for supported foreground runtime trees. Kernel pipe EOF triggers cleanup
+after desktop death. Linux additionally gives the direct child `PDEATHSIG` with
+a parent recheck and enables guardian subreaping; macOS has neither Linux
+facility. Managed SSH disables target-client sharing/backgrounding, and Unix
+jump/proxy clients require their own foreground configuration. Independently
+daemonizing or session/group-changing descendants and guardian failure are
+outside that tree guarantee. This is not equivalent to Windows kernel Job
+containment. Native macOS runtime acceptance remains unavailable; no macOS
+release claim is made.
+
+The precise lifecycle contract is in
+[`../processes/managed-runtime.md`](../processes/managed-runtime.md), and the
+isolated native checks are in [`../../development.md`](../../development.md).
+
 ## Verifying the Rust crate without a full toolchain
 
 The Rust side can be type-checked in a container that has `webkit2gtk`, which

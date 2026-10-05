@@ -146,6 +146,87 @@ snapshot has arrived. Socket liveness and feed liveness are separate signals -
 see
 [`architecture/processes/connection-lifecycle.md`](architecture/processes/connection-lifecycle.md).
 
+## Native runtime ownership checks
+
+On a host with the native prerequisites and bundled resources:
+
+```bash
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features runtime-acceptance
+cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --features runtime-acceptance
+```
+
+The feature builds an isolated subprocess fixture, not another shipped runtime.
+Windows CI runs it without terminating the runner's controlling process tree.
+The tests exercise the production ownership implementation, abrupt parent
+death, descendants, multiple children, external safety, failed startup, and
+normal exit/restart. Windows additionally checks atomic job assignment and
+nested-job behavior.
+Fixture guards retain exact Windows handles, Linux pidfds, or a connected
+fixture self-exit channel on other Unix hosts. Windows/Linux identities enter
+cleanup ownership before remaining metadata reads or handshake validation;
+connected Unix channels are registered before their response is checked.
+Guards observe survival/death before cleanup and clean through assertion
+unwinding without replacing the original failure. An uncontained launcher and
+a deliberately withheld handshake prove the failure/cleanup paths on Windows
+and Linux; the Linux `setsid()` negative control records the group boundary.
+Windows executable-resolution tests compare production spawns with Rust
+`Command`, including cwd shadowing, PATH precedence, explicit paths, and
+Unicode/space names. Recheck this parity when updating the Rust toolchain.
+
+For real Windows desktop acceptance, sync the mirror and build its sidecars
+using the normal Windows Build workflow prerequisites. Build the production
+desktop with a disposable application identifier, then run the acceptance
+script from the mirror:
+
+```powershell
+$config = Join-Path $env:TEMP ('imp-ownership-' + [guid]::NewGuid() + '.json')
+try {
+  '{"identifier":"dev.imud.imp.ownership-acceptance"}' | Set-Content -Encoding ascii $config
+  npm run tauri --workspace @imp/desktop -- build --bundles nsis --config $config
+  if ($LASTEXITCODE) { throw 'Native build failed' }
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-native-ownership.ps1
+  if ($LASTEXITCODE) { throw 'Native ownership acceptance failed' }
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-native-ownership.ps1 -InjectFailureAfterSpawn
+  if ($LASTEXITCODE -eq 0) { throw 'Injected acceptance failure was not reported' }
+} finally {
+  Remove-Item $config
+}
+```
+
+Do not run this against the normal application identifier. The script refuses
+occupied runtime ports and an existing acceptance configuration, creates only
+disposable settings, and retains exact spawned process handles. It checks real
+node/gateway health, hard desktop termination, normal window close, child
+crash/restart, relaunch, and survival of an external copy of the same sidecar.
+Its Managed SSH case uses a local banner-stalling TCP peer: it exercises the
+real system SSH spawn and partial startup, not an authenticated VPS forward.
+No installer is installed and no MUD, credential, or remote service is used.
+
+`-InjectFailureAfterSpawn` intentionally exits nonzero after discovering Managed
+SSH replacements. Require `Injected failure cleanup passed: all exact fixture
+handles exited.` before accepting that negative run. The original failure is
+reported only after all retained desktop/runtime/external fixture handles have
+been stopped, waited, and checked.
+
+For authenticated SSH acceptance on Linux, build the frozen desktop node and
+the feature harness, then run:
+
+```bash
+cargo build --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features runtime-acceptance --bin runtime-ownership-harness
+uv run --project services/relay python scripts/test-managed-ssh.py apps/desktop/src-tauri/target/debug/runtime-ownership-harness
+```
+
+This requires the installed OpenSSH server (`sshd`), usable server prerequisites,
+and free loopback port `8787`. It launches its own local server with disposable
+keys/config/known-hosts and the actual frozen node; no system service or operator
+SSH configuration is changed. It exercises synchronous 1 MiB LocalCommand
+completion, effective config under persistent defaults, authenticated
+ProxyCommand/ProxyJump with explicitly foreground jump aliases, normal/abrupt
+cleanup, relaunch, and an independently persistent external master/forward.
+Its observer retains pidfds only for its own descendant tree, including
+adopted daemonized fixtures, and cleans/waits them before propagating failure.
+
 ## Before pushing
 
 ```bash

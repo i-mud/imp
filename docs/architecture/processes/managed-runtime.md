@@ -122,6 +122,34 @@ platform `ssh` client directly by argv and forwards:
 OpenSSH continues to own agent, `IdentityFile`, `ProxyJump`, `known_hosts`, and
 host verification.
 
+The desktop-owned client adds `-S none` and `-o ForkAfterAuthentication=no`.
+OpenSSH's documented `none` control path disables both creation and reuse of
+shared masters; the separate fork override prevents authentication-triggered
+backgrounding. `ControlMaster=no` alone would still reuse an existing socket.
+These command-line overrides do not edit SSH configuration, contact an existing
+control socket, or stop an external master. See
+[`ssh(1)`](https://man.openbsd.org/ssh.1#S) and
+[`ssh_config(5)`](https://man.openbsd.org/ssh_config.5#ForkAfterAuthentication).
+
+Unix support requires the proxy/jump client itself to stay foreground as well.
+OpenSSH does not propagate the destination's `-S`/`-o` options to its generated
+ProxyJump client. For each jump alias, put these before broader SSH defaults:
+
+```sshconfig
+Host my-jump
+    ControlPath none
+    ForkAfterAuthentication no
+```
+
+ProxyCommand programs must likewise avoid persistent multiplexing, background
+forks, or independent sessions. An authenticated stock OpenSSH probe with
+persistent jump-host defaults left a detached jump master after owner death,
+even though the target client and forward were removed. This is an observed
+limit, not hypothetical. The approved contract requires foreground proxy
+configuration; Imp does not rewrite SSH configuration or construct proxy
+commands to enforce it. Independently persistent nested clients are outside
+the supported Unix runtime contract, not claimed contained.
+
 Managed mode classifies the `8789` consumer port as a usable Imp relay,
 unrelated listener, or free port. A usable existing relay is adopted and
 monitored without ownership. If it disappears and the port becomes free, the
@@ -156,6 +184,69 @@ Runtime clients and supervisors are constructed during Tauri setup. Saving
 settings changes the next application start only; it does not hot-swap the
 running source, action sink, node, gateway, or SSH supervisor.
 
+## Native desktop lifetime ownership
+
+One `RuntimeOwner` is initialized before the desktop supervisors. Node and
+gateway keep Tauri's bundled sidecar resolution and argv; Managed SSH uses the
+system OpenSSH client with the foreground/nonpersistent policy above. All three
+launch through the same ownership boundary. Saving settings still applies on
+next start, and existing startup/adoption/retry decisions are unchanged.
+
+The spawn API accepts executable, argv, and stdout policy rather than silently
+discarding `std::process::Command` settings. Runtime children inherit cwd and
+environment, use null stdin and piped stderr, and are hidden on Windows. Node
+and gateway stdout remains piped for diagnostics; Managed SSH stdout goes to
+the null device, including synchronous `LocalCommand` output.
+
+### Windows
+
+The desktop holds the sole non-inheritable handle to an unnamed Job Object
+with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. `CreateProcessW` uses
+`PROC_THREAD_ATTRIBUTE_JOB_LIST` to assign membership before the child can run;
+there is no spawn-then-assign or suspended-but-unassigned interval.
+Only the child's standard-input/output/error handles are inherited.
+Normal descendants inherit the job; breakaway is not enabled. External
+services and processes created through independent brokers are not claimed.
+
+Normal exit keeps the existing gateway/node/tunnel shutdown, kill, wait, and
+supervisor joining. Abrupt desktop termination closes the job handle in the
+kernel and kills remaining members without Rust destructors or Tauri callbacks.
+An incompatible enclosing job, failed container setup, or failed process
+creation returns an error rather than launching outside ownership.
+Windows 10 or newer is required by the atomic job-list creation attribute.
+
+Executable lookup follows Rust 1.98.1
+[`Command`](https://doc.rust-lang.org/1.98.1/std/process/struct.Command.html#platform-specific-behavior)
+before process creation, rather than `CreateProcessW`'s implicit search.
+Bare names search the application,
+system, Windows, then inherited PATH directories; cwd is not added implicitly.
+Explicit paths keep Rust's extension and path-conversion rules. The resolved
+image is passed as non-null `lpApplicationName` without changing Job List
+assignment, handle inheritance, creation flags, or stdio.
+
+### Linux and macOS source builds
+
+Each owned tree has a small guardian running the current executable before
+Tauri initialization. The desktop alone holds the write end of its lifetime
+pipe. Kernel EOF after desktop death causes the guardian to kill the child's
+private process group and reap it; a group alone would not provide that
+parent-death trigger. The guardian has a separate session. Linux enables
+subreaper reaping of in-group descendants and gives the direct runtime child
+`PR_SET_PDEATHSIG(SIGKILL)` with a parent recheck before exec. That signal is
+not inherited by grandchildren. macOS uses group signalling and waits for the
+group to disappear; its init process, not a Linux-style subreaper, reaps orphans.
+Both preserve the runtime's raw exit status/signals through the control socket.
+
+This is narrower than Windows Job containment: a descendant that deliberately
+changes process group/session can escape. A stopped or failed guardian also
+cannot provide the same kernel-enforced tree guarantee. Neither source-build
+target has desktop release acceptance; see the current evidence and limits in
+[`../../status.md`](../../status.md).
+
+Tauri dev/Cargo wrappers and the frontend dev server are not runtime-owned.
+Only explicit native runtime spawns enter containment; WebView processes
+remain platform-owned.
+
 ## Failure boundaries
 
 | Failure                                        | Recovery / visible result                                                                        |
@@ -186,6 +277,8 @@ running source, action sink, node, gateway, or SSH supervisor.
 - `integrations/tinyfugue/imp.tf` - idempotent fixed-path hooks
 - `deploy/systemd/` - VPS user units
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership and adopted-endpoint watch
+- `apps/desktop/src-tauri/src/node.rs` and `gateway.rs` - sidecar supervision
+- `apps/desktop/src-tauri/src/runtime.rs` and `runtime/` - platform lifetime ownership
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - native connection validation,
   canonical persistence, runtime projection, and renderer-safe settings store
 - `apps/desktop/src/lib/tunnel.ts` - transport-independent diagnostic polling
@@ -198,6 +291,17 @@ Relevant regression checks live in `integrations/tinyfugue/tests/test_spool.py`,
 `apps/desktop/src-tauri/src/tunnel.rs`,
 `apps/desktop/src-tauri/src/tunnel_config.rs`, and
 `apps/desktop/test/tunnel.test.ts`.
+
+Native subprocess regressions live in
+`apps/desktop/src-tauri/tests/runtime_ownership.rs` and
+`apps/desktop/src-tauri/tests/windows_executable_resolution.rs`, enabled by the
+`runtime-acceptance` feature in Windows CI. Windows/Linux observers register
+retained process identities before remaining metadata validation or handshakes;
+other Unix observers register connected self-exit channels before response
+validation. Partial setup failures retain their original error during cleanup.
+Real window-close/hard-termination acceptance uses
+`scripts/test-native-ownership.ps1`; its isolated config/build procedure is in
+[`../../development.md`](../../development.md).
 
 ## Verification
 

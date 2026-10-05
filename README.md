@@ -199,6 +199,12 @@ Imp node remotely.
 Imp starts and supervises the SSH forwarding process itself. It uses the
 platform OpenSSH client and your existing SSH configuration, keys,
 `known_hosts`, and agent.
+The desktop-owned client stays foreground and does not create or reuse a
+persistent shared master (`-S none`, `ForkAfterAuthentication=no`). Your SSH
+configuration and any external masters are left unchanged.
+For Unix source builds, jump/proxy clients must also remain foreground; the
+target's options do not propagate to OpenSSH's generated ProxyJump client. See
+the [foreground proxy configuration requirement](docs/architecture/processes/managed-runtime.md#desktop-tunnel-boundary).
 
 Imp does not store your SSH password or private key. The SSH local listener is
 `127.0.0.1:8789` and forwards the **entire remote relay TCP port** on `8787`;

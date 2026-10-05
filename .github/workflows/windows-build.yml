@@ -119,7 +119,7 @@ jobs:
         run: npm run release:check-version
 
       - name: Test native application
-        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features runtime-acceptance
 
       - name: Build NSIS installer
         run: npm run tauri --workspace @imp/desktop -- build --bundles nsis
