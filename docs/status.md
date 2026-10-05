@@ -382,6 +382,12 @@ each is the kind that comes back.
 
 ## Completed implementation
 
+The Slices 17–23 audit-remediation program is complete. All numbered findings
+and the separately deferred broker timeout gap are remediated; the
+[closure record](audits/2026-10-05-remediation-closure.md) maps landed PRs and
+verification without changing the historical audit or expanding native/live
+acceptance claims. The known deferred issues above are separate candidate work.
+
 Slice 23, `actionbroker-timeout-validation`, resolves the separately deferred
 ActionBroker finite-positive result-timeout validation gap, not an F01–F11
 finding. Direct construction now rejects zero, negative, infinite, and NaN
@@ -390,8 +396,8 @@ default remain accepted. Direct-broker loopback coverage verifies that a missing
 consumer result still returns `unknown` with `consumer result timed out`, rejects
 a late result, and releases in-flight ownership for a subsequent successful
 action. Higher-level timing validation and action routing/result semantics are
-unchanged. The historical audit is unchanged; this does not claim broader audit
-closure.
+unchanged. The historical audit is unchanged; program closure is recorded
+separately in the closure record.
 
 Slices 5 (`hud-ui-refinement`) and 6 (`alerts-window-polish`) are complete.
 Their native Windows evidence is recorded above. Slice 6 delivered
@@ -1027,8 +1033,9 @@ Final targeted-review remediation:
 This evidence does not establish native macOS runtime or Linux/macOS desktop
 release acceptance. A descendant that deliberately changes Unix group/session,
 a stopped/failed Unix guardian, and independently broker-created Windows
-processes are not claimed by the containment contract. F08–F10 and all other
-audit findings remain out of scope; no deployment or release was performed.
+processes are not claimed by the containment contract. Other audit findings were
+outside Slice 21's scope and were remediated in their respective slices; no
+deployment or release was performed by that slice.
 
 ### Slice 22 - Client-neutral UI and docs polish
 
