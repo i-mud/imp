@@ -40,6 +40,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 19 - Subscriber isolation                       | Complete    | Untagged                              |
 | Slice 20 - Diagnostic hardening                       | Complete    | Untagged                              |
 | Slice 21 - Native runtime ownership                   | Implemented | Untagged; platform limits below       |
+| Slice 22 - Client-neutral UI and docs polish          | Complete    | Untagged                              |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -664,6 +665,20 @@ an intentional `setsid()` descendant escape was also demonstrated. Darwin API
 typechecking passed, but native macOS execution and full desktop build remain
 unverified. The unrestricted cross-platform no-survivor invariant is therefore
 not claimed. Evidence and explicit limitations are in [`status.md`](status.md).
+
+### Slice 22 - Client-neutral UI and docs polish
+
+Slug: `client-neutral-ui-docs`. Complete; untagged.
+
+Remediates F08–F10: client-neutral shared action/offline feedback, labelled
+native segmented radios with standard keyboard selection and visible focus,
+and the current async runtime-client action-sink setup in the TinyFugue guide.
+Integration-specific names and the historical audit are preserved. Browser
+acceptance and focused rendered-semantics coverage are recorded in
+[`status.md`](status.md); no runtime, protocol, or native ownership change.
+
+The separately deferred ActionBroker timeout-validation gap remains outstanding.
+This slice does not claim closure of the full audit.
 
 ## Candidate work
 

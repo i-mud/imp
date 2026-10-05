@@ -23,10 +23,9 @@ describe('action invocation state', () => {
     await invokeAction(state, sinkWith(send), null, action);
 
     expect(send).not.toHaveBeenCalled();
-    expect(state).toEqual({
-      pendingActionId: null,
-      feedback: 'No current TinyFugue game context.',
-    });
+    expect(state.pendingActionId).toBeNull();
+    expect(state.feedback).toMatch(/no current .*context/i);
+    expect(state.feedback).not.toMatch(/TinyFugue|Mudlet/);
   });
 
   it('forwards the captured context and exact command once, then clears pending state', async () => {

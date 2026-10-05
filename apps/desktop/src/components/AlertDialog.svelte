@@ -251,24 +251,24 @@
       <div class="selector-row">
         <span>Trigger</span>
         <div class="segmented" role="radiogroup" aria-label="Alert trigger">
-          <button
-            class:selected={kind === 'vital'}
-            type="button"
-            role="radio"
-            aria-checked={kind === 'vital'}
-            onclick={() => setKind('vital')}
-          >
-            Vitals
-          </button>
-          <button
-            class:selected={kind === 'text'}
-            type="button"
-            role="radio"
-            aria-checked={kind === 'text'}
-            onclick={() => setKind('text')}
-          >
-            Text
-          </button>
+          <label>
+            <input
+              type="radio"
+              name="alert-trigger"
+              checked={kind === 'vital'}
+              onchange={() => setKind('vital')}
+            />
+            <span>Vitals</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="alert-trigger"
+              checked={kind === 'text'}
+              onchange={() => setKind('text')}
+            />
+            <span>Text</span>
+          </label>
         </div>
       </div>
 
@@ -311,28 +311,28 @@
         <div class="selector-row">
           <span>Match</span>
           <div class="segmented" role="radiogroup" aria-label="Text match mode">
-            <button
-              class:selected={matchMode === 'contains'}
-              type="button"
-              role="radio"
-              aria-checked={matchMode === 'contains'}
-              onclick={() => {
-                matchMode = 'contains';
-              }}
-            >
-              Contains
-            </button>
-            <button
-              class:selected={matchMode === 'wildcard'}
-              type="button"
-              role="radio"
-              aria-checked={matchMode === 'wildcard'}
-              onclick={() => {
-                matchMode = 'wildcard';
-              }}
-            >
-              Wildcard
-            </button>
+            <label>
+              <input
+                type="radio"
+                name="text-match-mode"
+                checked={matchMode === 'contains'}
+                onchange={() => {
+                  matchMode = 'contains';
+                }}
+              />
+              <span>Contains</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="text-match-mode"
+                checked={matchMode === 'wildcard'}
+                onchange={() => {
+                  matchMode = 'wildcard';
+                }}
+              />
+              <span>Wildcard</span>
+            </label>
           </div>
         </div>
 
@@ -500,32 +500,49 @@
     border-radius: var(--radius);
   }
 
-  .segmented button {
+  .segmented label {
+    position: relative;
+    display: block;
+    cursor: pointer;
+  }
+
+  .segmented input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: inherit;
+  }
+
+  .segmented span {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: var(--space-2) var(--space-3);
-    border: 0;
-    background: transparent;
     color: var(--muted);
-    cursor: pointer;
     font-size: var(--font-2xs);
     line-height: 1;
   }
 
-  .segmented button + button {
+  .segmented label + label {
     border-left: 1px solid var(--divider);
   }
 
-  .segmented button:hover,
-  .segmented button:focus-visible {
+  .segmented label:hover span {
     background: var(--accent-hover);
-    outline: none;
   }
 
-  .segmented button.selected {
+  .segmented input:checked + span {
     background: var(--accent-subtle);
     color: var(--text);
+  }
+
+  .segmented input:focus-visible + span {
+    outline: 2px solid var(--accent-focus);
+    outline-offset: -2px;
   }
 
   input,

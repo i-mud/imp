@@ -23,7 +23,7 @@
   let pairingToken = $state('');
   let saving = $state(false);
   let saved = $state(false);
-  let firstModeButton = $state<HTMLButtonElement>();
+  let modeGroup = $state<HTMLDivElement>();
   let initialFocusApplied = false;
 
   $effect(() => {
@@ -37,7 +37,7 @@
 
     if (!initialFocusApplied) {
       initialFocusApplied = true;
-      requestAnimationFrame(() => firstModeButton?.focus());
+      requestAnimationFrame(() => modeGroup?.querySelector<HTMLInputElement>('input:checked')?.focus());
     }
   });
 
@@ -131,40 +131,20 @@
         <div class="selector-row">
           <span>Mode</span>
 
-          <div class="segmented" role="radiogroup" aria-label="Connection mode">
-            <button
-              bind:this={firstModeButton}
-              class:selected={mode === 'external'}
-              type="button"
-              role="radio"
-              aria-checked={mode === 'external'}
-              disabled={saving}
-              onclick={() => chooseMode('external')}>External</button
-            >
-            <button
-              class:selected={mode === 'local'}
-              type="button"
-              role="radio"
-              aria-checked={mode === 'local'}
-              disabled={saving}
-              onclick={() => chooseMode('local')}>Local</button
-            >
-            <button
-              class:selected={mode === 'managed'}
-              type="button"
-              role="radio"
-              aria-checked={mode === 'managed'}
-              disabled={saving}
-              onclick={() => chooseMode('managed')}>Managed</button
-            >
-            <button
-              class:selected={mode === 'direct'}
-              type="button"
-              role="radio"
-              aria-checked={mode === 'direct'}
-              disabled={saving}
-              onclick={() => chooseMode('direct')}>Direct</button
-            >
+          <div bind:this={modeGroup} class="segmented" role="radiogroup" aria-label="Connection mode">
+            {#each ['external', 'local', 'managed', 'direct'] as const as option (option)}
+              <label>
+                <input
+                  type="radio"
+                  name="connection-mode"
+                  value={option}
+                  checked={mode === option}
+                  disabled={saving}
+                  onchange={() => chooseMode(option)}
+                />
+                <span>{option.charAt(0).toUpperCase() + option.slice(1)}</span>
+              </label>
+            {/each}
           </div>
         </div>
 
@@ -332,32 +312,53 @@
     border-radius: var(--radius);
   }
 
-  .segmented button {
+  .segmented label {
+    position: relative;
+    display: block;
+    cursor: pointer;
+  }
+
+  .segmented input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: inherit;
+  }
+
+  .segmented span {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: var(--space-2) var(--space-3);
-    border: 0;
-    background: transparent;
     color: var(--muted);
-    cursor: pointer;
     font-size: var(--font-2xs);
     line-height: 1;
   }
 
-  .segmented button + button {
+  .segmented label + label {
     border-left: 1px solid var(--divider);
   }
 
-  .segmented button:hover,
-  .segmented button:focus-visible {
+  .segmented label:hover span {
     background: var(--accent-hover);
-    outline: none;
   }
 
-  .segmented button.selected {
+  .segmented input:checked + span {
     background: var(--accent-subtle);
     color: var(--text);
+  }
+
+  .segmented input:focus-visible + span {
+    outline: 2px solid var(--accent-focus);
+    outline-offset: -2px;
+  }
+
+  .segmented input:disabled + span {
+    opacity: var(--opacity-disabled);
   }
 
   input {

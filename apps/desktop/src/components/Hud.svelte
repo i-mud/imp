@@ -140,12 +140,18 @@
   const showMana = $derived(character?.mana?.max !== 0);
   const expandedBase = $derived(target !== null ? EXPANDED_WITH_TARGET_WINDOW_SIZE : EXPANDED_WINDOW_SIZE);
 
-  function setDisplayMode(mode: DisplayMode): void {
-    settingsOpen = false;
+  function setDisplayMode(mode: DisplayMode, keyboard: boolean): void {
+    settingsOpen = keyboard;
     actionsOpen = false;
     alertsOpen = false;
     displayMode = mode;
     saveDisplayMode(mode);
+    // Keyboard selection remounts Settings in the other layout; keep its radio focus.
+    if (keyboard) {
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLInputElement>('input[name="display-mode"]:checked')?.focus();
+      });
+    }
   }
 
   function setAlertDefinitions(nextDefinitions: AlertDefinition[]): boolean {
@@ -783,7 +789,7 @@
         {:else}
           <section class="empty-state">
             <strong>{model.phase === 'reconnecting' ? 'Reconnecting to relay…' : 'Relay unavailable'}</strong>
-            <span>{model.detail ?? 'Start the relay, then connect TinyFugue.'}</span>
+            <span>{model.detail ?? 'Start the relay, then connect your MUD client.'}</span>
           </section>
         {/if}
 
