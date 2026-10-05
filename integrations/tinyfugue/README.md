@@ -313,15 +313,23 @@ hook and create two local echo worlds:
 ```
 
 Start the normal relay, feed, SSH forward, and desktop development runtime with
-`VITE_IMP_SOURCE=relay`. In the desktop browser's developer console, use
-the production factory and sink; do not construct an `/action` frame or open a
-WebSocket by hand:
+`VITE_IMP_SOURCE=relay`. In the desktop browser's developer console, construct
+the runtime clients through the same async factory used by application
+initialization, and use its returned action sink; do not construct an `/action`
+frame or open a WebSocket by hand:
 
 ```js
-const { createActionSink } = await import('/src/lib/config.ts');
-const sink = createActionSink(); // RelayActionSink in relay mode
-const send = (context, command) => sink.send(context, command);
+const { actionSink } = await import('/src/lib/config.ts').then(({ createRuntimeClients }) =>
+  createRuntimeClients(),
+);
+const send = (context, command) => actionSink.send(context, command);
 ```
+
+`createRuntimeClients()` loads the configured connection settings
+and creates both source and action sink. The action sink opens and closes its
+WebSocket per `send()`; it has no separate lifecycle cleanup to call. This
+console-created runtime does not attach the state source, which remains
+connected through normal application initialization.
 
 Copy the exact `session`, `foreground`, and `connection` values from the
 newline-terminated `~/.local/state/imp/context` marker into a JavaScript

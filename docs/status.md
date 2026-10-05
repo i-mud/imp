@@ -379,6 +379,9 @@ each is the kind that comes back.
 3. **Raw/ANSI GMCP parsing robustness.** Some captured GMCP material with raw
    ANSI/control bytes has produced `invalid_raw_json`. The correct
    capture/parsing/normalization boundary remains to be investigated.
+4. **ActionBroker timeout validation.** The separately deferred finite-positive
+   timeout-validation gap remains outstanding; Slice 22 does not close the
+   whole historical audit.
 
 ## Completed implementation
 
@@ -1018,5 +1021,43 @@ release acceptance. A descendant that deliberately changes Unix group/session,
 a stopped/failed Unix guardian, and independently broker-created Windows
 processes are not claimed by the containment contract. F08–F10 and all other
 audit findings remain out of scope; no deployment or release was performed.
+
+### Slice 22 - Client-neutral UI and docs polish
+
+Slice 22, `client-neutral-ui-docs`, remediates F08, F09, and F10 from the
+immutable [historical audit](audits/2026-10-03-full-repository-audit.md):
+
+- Shared action forwarding, missing-context, unavailable-consumer, and
+  relay-unavailable guidance no longer imply TinyFugue-only support. Connection
+  help still names Mudlet and TinyFugue as supported local-client examples.
+- Display, Theme, Connection mode, Alert trigger, and Text match mode use
+  labelled native radios in named groups. Segmented styling and selected states
+  remain intact, with an inset visible keyboard-focus outline. Connection
+  choices remain disabled while saving.
+- Keyboard display changes retain Settings and restore selection focus after
+  the compact/expanded remount. Pointer display changes still dismiss Settings.
+  Other Settings/Actions navigation and Escape handlers are unchanged.
+- The TinyFugue acceptance guide uses async `createRuntimeClients()` and its
+  returned `actionSink`, preserving the current exact-context consumer route,
+  fixed-macro bridge, and no-retry/no-replay contract.
+
+Browser acceptance exercised all five groups with Tab and arrow keys, checked
+single-group Tab stops, selected/focused state, connection wrapping and saving
+guards, and Escape restoration in Settings, Alerts, and Actions. Screenshots
+were inspected for expanded Settings at 320x227, compact attached Settings,
+320-wide Connection/Alerts dialogs, and client-neutral offline/action feedback.
+No unexpected wrapping or clipping was observed on those surfaces.
+
+The existing Node-only Vitest stack has no DOM/keyboard test library. Focused
+regressions therefore check rendered native-radio labels, grouping, and checked
+attributes; real Chromium keyboard/interaction assertions supplement them.
+The documented factory was executed in the relay-mode browser and returned a
+`RelayActionSink`; an unavailable endpoint returned `unknown`, not a fabricated
+successful action. No live MUD/VPS or new Windows-native acceptance is claimed.
+
+Validation passed: 15 focused frontend tests, all 152 desktop tests, desktop
+TypeScript/Svelte checks with no warnings, the frontend production build, all
+101 TinyFugue tests, formatting/lint/docs/version checks,
+`git diff --check origin/main`, and the complete `npm run check` gate.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).

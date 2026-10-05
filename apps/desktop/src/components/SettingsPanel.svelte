@@ -20,7 +20,7 @@
     theme: ThemePreference;
     appVersion: string | null;
     alertSaveError: string | null;
-    onmodechange: (mode: DisplayMode) => void;
+    onmodechange: (mode: DisplayMode, keyboard: boolean) => void;
     onthemechange: (theme: ThemePreference) => void;
     onmanageconnection: (invoker: HTMLButtonElement) => void;
     onmanagealerts: (invoker: HTMLButtonElement) => void;
@@ -40,16 +40,16 @@
       <div id="display-settings-title" class="menu-title">Display</div>
       <div class="segmented" role="radiogroup" aria-label="Display mode">
         {#each ['expanded', 'compact'] as const as option (option)}
-          <button
-            class:selected={mode === option}
-            type="button"
-            role="radio"
-            aria-checked={mode === option}
-            onclick={(event) => {
-              event.stopPropagation();
-              onmodechange(option);
-            }}>{option === 'expanded' ? 'Expanded' : 'Compact'}</button
-          >
+          <label>
+            <input
+              type="radio"
+              name="display-mode"
+              value={option}
+              checked={mode === option}
+              onchange={(event) => onmodechange(option, event.currentTarget.matches(':focus-visible'))}
+            />
+            <span>{option === 'expanded' ? 'Expanded' : 'Compact'}</span>
+          </label>
         {/each}
       </div>
     </div>
@@ -60,18 +60,17 @@
       <div id="theme-settings-title" class="menu-title">Theme</div>
       <div class="segmented" role="radiogroup" aria-label="Theme">
         {#each THEME_OPTIONS as option (option.value)}
-          <button
-            class:selected={theme === option.value}
-            type="button"
-            role="radio"
-            aria-checked={theme === option.value}
-            aria-label={option.label}
-            title={option.label}
-            onclick={(event) => {
-              event.stopPropagation();
-              onthemechange(option.value);
-            }}><option.icon size={12} /></button
-          >
+          <label title={option.label}>
+            <input
+              type="radio"
+              name="theme"
+              value={option.value}
+              checked={theme === option.value}
+              aria-label={option.label}
+              onchange={() => onthemechange(option.value)}
+            />
+            <span><option.icon size={12} /></span>
+          </label>
         {/each}
       </div>
     </div>
@@ -209,34 +208,47 @@
     border-radius: var(--radius);
   }
 
-  .segmented button {
+  .segmented label {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .segmented input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: inherit;
+  }
+
+  .segmented span {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: var(--space-2) var(--space-3);
-    border: 0;
-    background: transparent;
     color: var(--muted);
-    cursor: pointer;
     font-size: var(--font-2xs);
-    /* Collapse the default leading so the line box equals the label and the
-       declared padding is the space that actually surrounds it. */
     line-height: 1;
   }
 
-  .segmented button + button {
+  .segmented label + label {
     border-left: 1px solid var(--divider);
   }
 
-  .segmented button:hover,
-  .segmented button:focus-visible {
+  .segmented label:hover span {
     background: var(--accent-hover);
-    outline: none;
   }
 
-  .segmented button.selected {
+  .segmented input:checked + span {
     background: var(--accent-subtle);
     color: var(--text);
+  }
+
+  .segmented input:focus-visible + span {
+    outline: 2px solid var(--accent-focus);
+    outline-offset: -2px;
   }
 
   .alert-save-error {
