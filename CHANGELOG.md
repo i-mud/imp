@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.7] - 2026-10-05
+
+### Bug Fixes
+
+- make shared UI client-neutral and accessible ([b513e7e](https://github.com/i-mud/imp/commit/b513e7edbb0d235db14936ddd017a9346e518e4e))
+
 ## [0.2.6] - 2026-10-05
 
 ### Bug Fixes
