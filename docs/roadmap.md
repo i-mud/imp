@@ -35,13 +35,13 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`            |
 | Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
 | Slice 16 - Mudlet and local client integration        | ✅ Complete | Untagged; slug below                  |
-| Slice 17 - Input boundary correctness                 | Complete    | Untagged                              |
-| Slice 18 - Freshness correctness                      | Complete    | Untagged                              |
-| Slice 19 - Subscriber isolation                       | Complete    | Untagged                              |
-| Slice 20 - Diagnostic hardening                       | Complete    | Untagged                              |
-| Slice 21 - Native runtime ownership                   | Complete    | Untagged; platform limits below       |
-| Slice 22 - Client-neutral UI and docs polish          | Complete    | Untagged                              |
-| Slice 23 - ActionBroker timeout validation            | Complete    | Untagged                              |
+| Slice 17 - Input boundary correctness                 | Complete    | `input-boundary-correctness`          |
+| Slice 18 - Freshness correctness                      | Complete    | `freshness-correctness`               |
+| Slice 19 - Subscriber isolation                       | Complete    | `subscriber-isolation`                |
+| Slice 20 - Diagnostic hardening                       | Complete    | `diagnostic-hardening`                |
+| Slice 21 - Native runtime ownership                   | Complete    | `native-runtime-ownership`            |
+| Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`              |
+| Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -588,7 +588,7 @@ raw/ANSI GMCP robustness remain separate candidate work.
 
 ### Slice 17 - Input boundary correctness
 
-Slug: `input-boundary-correctness`. Complete; untagged.
+Milestone tag: `input-boundary-correctness`. Complete.
 
 Remediates F01, F06, and F07 from the
 [full repository audit](audits/2026-10-03-full-repository-audit.md):
@@ -606,7 +606,7 @@ outside this slice.
 
 ### Slice 18 - Freshness correctness
 
-Slug: `freshness-correctness`. Complete; untagged.
+Milestone tag: `freshness-correctness`. Complete.
 
 Remediates F02 through shared canonical-observation classification and the
 existing matching-context publication path. Unchanged valid observations keep
@@ -620,7 +620,7 @@ outside this slice.
 
 ### Slice 19 - Subscriber isolation
 
-Slug: `subscriber-isolation`. Complete; untagged.
+Milestone tag: `subscriber-isolation`. Complete.
 
 Remediates F03 with one serialized writer and a bounded 16-frame FIFO per
 subscriber. Broadcast enqueues without awaiting network sends; overflow or a
@@ -634,7 +634,7 @@ protocol changes, or other audit remediation is included.
 
 ### Slice 20 - Diagnostic hardening
 
-Slug: `diagnostic-hardening`. Complete; untagged.
+Milestone tag: `diagnostic-hardening`. Complete.
 
 Remediates F04/F11: relay/gateway-owned WebSocket connections explicitly use a
 credential-safe logger with an INFO floor and monotonic severity restrictions,
@@ -649,7 +649,7 @@ policy, freshness, subscriber isolation, and other audit findings are unchanged.
 
 ### Slice 21 - Native runtime ownership
 
-Slug: `native-runtime-ownership`. Complete within the supported platform contract; untagged.
+Milestone tag: `native-runtime-ownership`. Complete within the supported platform contract.
 
 Addresses F05 for the Windows release target with atomic child Job Object
 membership and kernel kill-on-final-handle-close for owned node, gateway, and
@@ -674,7 +674,7 @@ not claimed. Evidence and explicit limitations are in [`status.md`](status.md).
 
 ### Slice 22 - Client-neutral UI and docs polish
 
-Slug: `client-neutral-ui-docs`. Complete; untagged.
+Milestone tag: `client-neutral-ui-docs`. Complete.
 
 Remediates F08–F10: client-neutral shared action/offline feedback, labelled
 native segmented radios with standard keyboard selection and visible focus,
@@ -688,7 +688,7 @@ Slice 22 alone did not claim closure of the full audit; the separate
 
 ### Slice 23 - ActionBroker timeout validation
 
-Slug: `actionbroker-timeout-validation`. Complete; untagged.
+Milestone tag: `actionbroker-timeout-validation`. Complete.
 
 Resolves the separately deferred timeout-validation gap, not an F01–F11 finding.
 The broker constructor requires a finite, strictly positive result timeout and
