@@ -3,6 +3,7 @@ name = "imp-desktop"
 version = "0.2.5"
 description = "Imp desktop companion for live MUD state, alerts, and trusted actions"
 edition = "2021"
+default-run = "imp-desktop"
 
 [lib]
 name = "imp_desktop_lib"
@@ -11,6 +12,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "imp-desktop"
 path = "src/main.rs"
+
+[[bin]]
+name = "runtime-ownership-harness"
+path = "tests/support/runtime_harness.rs"
+required-features = ["runtime-acceptance"]
+test = false
+
+[features]
+runtime-acceptance = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -27,11 +37,19 @@ tauri-plugin-window-state = "2"
 url = "2"
 tauri-plugin-shell = "=2.3.6"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
     "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+    "Win32_Storage_FileSystem",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
 ] }

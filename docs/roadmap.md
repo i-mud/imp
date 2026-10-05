@@ -39,6 +39,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 18 - Freshness correctness                      | Complete    | Untagged                              |
 | Slice 19 - Subscriber isolation                       | Complete    | Untagged                              |
 | Slice 20 - Diagnostic hardening                       | Complete    | Untagged                              |
+| Slice 21 - Native runtime ownership                   | Implemented | Untagged; platform limits below       |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -638,6 +639,31 @@ installed server wheels and the frozen desktop sidecar.
 Logging regressions and source/installed/frozen runtime evidence are recorded
 in [`status.md`](status.md). Authentication, protocol compatibility, release
 policy, freshness, subscriber isolation, and other audit findings are unchanged.
+
+### Slice 21 - Native runtime ownership
+
+Slug: `native-runtime-ownership`. Implemented; untagged.
+
+Addresses F05 for the Windows release target with atomic child Job Object
+membership and kernel kill-on-final-handle-close for owned node, gateway, and
+Managed SSH trees. Existing graceful shutdown, supervision, adoption, and
+external-process nonownership remain intact. Subprocess regressions run in
+Windows CI; real native hard-death/normal-close/relaunch acceptance passed.
+
+Independent-review remediation restores Managed SSH null stdout and uses an
+honest executable/argv/stdout spawn API. Owned target SSH explicitly disables
+master sharing and authentication-triggered backgrounding. Unix support
+requires foreground jump/proxy configuration too: a stock persistent jump
+client was observed to escape the target-only policy. No SSH connection/config
+rewrite or arbitrary Unix daemon containment was added. Acceptance guards clean
+exact fixtures through failures, including deliberately uncontained launchers.
+
+Linux/macOS source builds use lifetime-pipe guardians and private process groups,
+not an equivalent non-escapable kernel container. Linux runtime smoke passed;
+an intentional `setsid()` descendant escape was also demonstrated. Darwin API
+typechecking passed, but native macOS execution and full desktop build remain
+unverified. The unrestricted cross-platform no-survivor invariant is therefore
+not claimed. Evidence and explicit limitations are in [`status.md`](status.md).
 
 ## Candidate work
 

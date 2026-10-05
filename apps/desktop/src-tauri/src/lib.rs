@@ -2,6 +2,7 @@ mod gateway;
 mod mudlet;
 mod node;
 mod remote_access;
+mod runtime;
 mod topmost;
 mod tray;
 mod tunnel;
@@ -64,6 +65,7 @@ fn alerts_muted(state: tauri::State<'_, tray::AlertMuteState>) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    runtime::run_helper_if_requested();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -107,6 +109,10 @@ pub fn run() {
             }
 
             let config_dir = app.path().app_config_dir()?;
+            let runtime_owner =
+                Arc::new(runtime::RuntimeOwner::new().map_err(|error| {
+                    format!("failed to initialize Imp runtime ownership: {error}")
+                })?);
             let config_path = config_dir.join("tunnel.json");
             let remote_access_path = config_dir.join("remote-access.json");
 
@@ -117,18 +123,22 @@ pub fn run() {
             let tunnel_supervisor = match config.mode {
                 TunnelMode::External => TunnelSupervisor::external(),
                 TunnelMode::Local => TunnelSupervisor::inactive(),
-                TunnelMode::Managed => {
-                    TunnelSupervisor::managed(config.ssh_target, SSH_FORWARD_PORT)
-                }
+                TunnelMode::Managed => TunnelSupervisor::managed(
+                    config.ssh_target,
+                    SSH_FORWARD_PORT,
+                    Arc::clone(&runtime_owner),
+                ),
                 TunnelMode::Direct => TunnelSupervisor::direct(),
             };
-            let node_supervisor = NodeSupervisor::local(app.handle().clone(), NODE_PORT);
+            let node_supervisor =
+                NodeSupervisor::local(app.handle().clone(), NODE_PORT, Arc::clone(&runtime_owner));
             let gateway_supervisor = if remote_access.wss_enabled {
                 GatewaySupervisor::local(
                     app.handle().clone(),
                     remote_access.gateway_port,
                     NODE_PORT,
                     remote_access.pairing_token_sha256.clone(),
+                    Arc::clone(&runtime_owner),
                 )
             } else {
                 GatewaySupervisor::inactive()
@@ -137,6 +147,7 @@ pub fn run() {
             app.manage(runtime_connection);
             app.manage(config_store);
             app.manage(tunnel_supervisor);
+            app.manage(runtime_owner);
             app.manage(node_supervisor);
             app.manage(gateway_supervisor);
             Ok(())

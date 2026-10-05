@@ -851,4 +851,172 @@ all frontend/adapter/client tests, strict typing, and the production build.
 This is local diagnostic/package-runtime evidence, not deployment, release,
 live-MUD, or native-client acceptance. Other audit findings remain out of scope.
 
+### Slice 21 - Native runtime ownership
+
+Slice 21, `native-runtime-ownership`, addresses F05 from the immutable
+[historical audit](audits/2026-10-03-full-repository-audit.md). Disposable
+baseline Rust launchers reproduced the leak on Linux and Windows: after
+SIGKILL/TerminateProcess killed the launcher, its frozen node still answered
+`/healthz`. These were production spawn-primitive probes, not Tauri crash tests.
+
+The desktop now initializes one runtime owner before creating supervisors.
+Node and optional gateway retain bundled sidecar resolution and argv. Owned
+Managed SSH intentionally adds `-S none` and `ForkAfterAuthentication=no`, so
+the target client neither shares a master nor backgrounds after authentication.
+Existing ports, auth, filtering, relay routes, package identity, Slice 20 logging,
+and reconnect/adoption decisions are unchanged. External/adopted listeners,
+masters, and services never enter ownership.
+
+Windows uses an unnamed, non-inheritable kill-on-close Job Object. Children
+enter the job atomically through `PROC_THREAD_ATTRIBUTE_JOB_LIST` at process
+creation; there is no suspended-but-unassigned gap. Normal descendants inherit
+membership without breakaway permission. Setup/creation failures fail closed.
+Linux/macOS source builds use an independent guardian and lifetime pipe to
+clean up private child process groups; that is not a non-escapable kernel tree
+container. Platform limits are recorded in the
+[runtime card](architecture/processes/managed-runtime.md).
+
+Independent-review remediation reproduced three real OpenSSH failures before
+changing policy: a synchronous 1 MiB LocalCommand blocked on the lost null
+stdout despite a bound listener; an owned ControlPersist master and usable
+forward survived owner death; and persistent target SSH through ProxyJump lost
+its proxy/forward while the desktop harness remained alive. These are observed
+stock-configuration failures, not hypothetical malicious-child cases.
+
+The narrowed spawn API restores null Managed SSH stdout without logging it.
+Node/gateway stdout and stderr remain piped; all children inherit cwd/environment
+and use null stdin (the sidecars do not read their former unused input pipe).
+Linux 10.2 and Windows 9.5 OpenSSH effective-config probes verified that
+`-S none` removes ControlPath and the separate fork override resolves to `no`,
+even with configured ControlMaster auto/yes and ControlPersist yes. Explicit
+Master/Persist overrides proved redundant and were removed.
+
+An additional authenticated probe showed that the generated ProxyJump client
+does not inherit the target's options: a persistently configured jump master
+survived owner death, although the target and forward did not. The approved
+scope requires foreground jump/proxy configuration rather than rewriting SSH
+connection logic. Independently persistent nested clients are explicitly
+outside the supported Unix contract; the
+[runtime card](architecture/processes/managed-runtime.md#desktop-tunnel-boundary)
+gives the required jump-alias settings.
+
+Initial Slice 21 Windows 11 acceptance used the actual release desktop with only a
+disposable config identifier changed. Its node and gateway answered their real
+health endpoints. Abrupt TerminateProcess killed both, and a separate Managed
+case killed the actual system SSH child as well. The SSH peer intentionally
+stalled before authentication: no live tunnel, VPS, credentials, or MUD were
+used. Exact spawn PIDs, retained process handles, and desktop parent lineage
+established ownership; no executable-name or port scavenging was used.
+
+The same native run crashed node/gateway/SSH individually and observed
+supervisor replacements, exercised real normal window close, and relaunched
+without stale `8787`/`8788` listeners. An external frozen node with the same
+executable remained healthy throughout. All three desktop cases completed
+within the 15-second acceptance bound. Measured totals were approximately
+2.1–2.3 seconds including health probes, not raw kernel termination latency.
+
+Initial Windows validation passed 67 library tests and seven integration
+cases, including private-job flags/handle inheritance, invalid-job startup
+with a runnable positive control, abrupt death of two owned trees with
+grandchildren, external safety, normal shutdown/relaunch, actual child crash,
+failed executable startup, argument preservation, and an enclosing/nested job.
+The `runtime-acceptance` tests are enabled in both Windows Build and release
+native validation. Real window acceptance remains a separate procedure in
+[`development.md`](development.md).
+
+Initial Linux validation passed 66 library tests and four ownership integration cases;
+the two ignored entries are subprocess dispatchers, not skipped acceptance
+scenarios. A separate production-primitive smoke launched the actual frozen
+node, gateway, and system OpenSSH with a local pre-authentication stalled peer.
+SIGKILL of each owning harness stopped its recorded runtime and guardian within
+the ten-second bound (observed 2.6–14.1 ms including observation/probes).
+Normal node/gateway shutdown and same-port relaunch passed; an external frozen
+node stayed healthy. The disposable observer reaped exact orphaned guardian
+PIDs, rather than relying on WSL PID 1 as a fixture reaper. Linux Clippy passed
+without warnings.
+Additional Linux probes killed the guardian itself and observed the direct
+runtime child die via `PDEATHSIG`, with owner wait surfacing failure. A separate
+owned runtime deliberately forked a `setsid()` descendant: the owned root and
+guardian died after desktop-harness SIGKILL, but that escaped descendant stayed
+alive. Its exact fixture PID was then terminated and reaped. This demonstrates,
+rather than merely infers, the source-build containment limitation.
+
+The Unix ownership module type-checked for `aarch64-apple-darwin` against the
+existing libc dependency. This checks Darwin API/cfg availability only: it is
+not a full Tauri/macOS build or native runtime acceptance.
+
+The Windows native sidecar/helper builds and NSIS packaging passed; the
+installer was not installed or published. `npm run check` passed, including
+frontend/adapter/client/relay/protocol checks and the production frontend build.
+Windows Clippy passed with three existing unnecessary-cast warnings in
+`topmost.rs`; strict `-D warnings` remains blocked by those untouched warnings.
+
+Remediation revalidation:
+
+- Linux default Rust: 65 passing library tests plus the ignored helper
+  dispatcher. Ownership feature: the same library suite and eight passing
+  integration cases (one additional dispatcher). Windows default Rust:
+  66 passing library tests; feature: 66 library plus nine integration cases.
+- Exact binary stdout/stderr capture and null-stdin EOF passed on both hosts;
+  a synchronous 1 MiB null-stdout writer completed without a reader/logger.
+  Disposable subprocess probes also verified inherited cwd/environment.
+- The intentionally uncontained launcher failed its death assertion on Linux
+  and Windows; unwind guards then stopped the exact root/grandchild fixtures.
+  Linux's deliberate `setsid()` survivor was similarly observed before cleanup.
+  Linux pidfd/subreaper observation reaps exact adopted fixture identities.
+- The actual frozen Linux node/gateway passed hard death, normal shutdown,
+  same-port relaunch, external safety, and direct-child guardian-death checks.
+  The authenticated SSH fixture passed target/client LocalCommand readiness,
+  both foreground proxy paths, normal/abrupt cleanup, and relaunch. A separately
+  persistent external master kept its forward and unchanged socket/config.
+- Windows 11 release desktop acceptance was rerun with the disposable
+  identifier: Local/Managed hard death, real normal close, all runtime
+  crash/replacements, external frozen-node survival, and port release passed.
+  Normal cases took approximately 2.06–2.39 seconds including HTTP probes.
+  `-InjectFailureAfterSpawn` exited 1 as intended after Managed replacements,
+  only after reporting all retained fixture handles exited.
+- Native frozen-node/Mudlet-helper builds and production/disposable-identifier
+  NSIS builds passed without installing or publishing an installer.
+- Darwin production/test cfg and Unix fixture cleanup paths type-checked for
+  `aarch64-apple-darwin`; shared SSH policy is platform-independent source.
+  No native macOS execution or full Tauri/macOS build was performed.
+
+Final targeted-review remediation:
+
+- Windows cwd-shadowing was reproduced before changes: baseline Rust `Command`
+  selected installed OpenSSH 9.5; the owned spawn selected the benign cwd
+  sentinel. Executable resolution now follows Rust 1.98.1 before atomic
+  creation and supplies a non-null application image. Production-path parity
+  checks cover PATH/application/system precedence, implicit cwd exclusion,
+  explicit relative/absolute paths, extensions, Unicode/spaces, and long paths.
+- Observer handshake failure was reproduced on Linux and Windows: setup timed
+  out while the uncontained grandchild remained alive. Exact identities now
+  enter cleanup ownership before fallible setup. The regression still observes
+  the timeout, then confirms death before independent safety cleanup and
+  listener release; both uncontained generations have cleanup guards.
+- Windows default Rust passed 66 library tests. Ownership-feature validation
+  passed 66 library, ten ownership, and three executable-resolution integration
+  tests; two parity dispatchers are intentionally ignored outside subprocesses.
+  Linux passed 65 library and nine ownership integration tests, with its helper
+  dispatchers ignored outside subprocesses. Platform containment, binary stdio,
+  negative-boundary cleanup, and external-process survival remain covered.
+- The authenticated Linux SSH/proxy fixture and actual frozen node/gateway
+  lifecycle passed again. Darwin production, harness, and observer test cfg
+  typechecking passed; no native macOS execution is claimed.
+- Final Windows release desktop acceptance passed Local and Managed hard death,
+  normal window close, runtime replacements, relaunch/port release, and external
+  frozen-node survival. Retained SSH handles identified installed
+  `C:\Windows\System32\OpenSSH\ssh.exe`; both foreground options remained present.
+  The original 15-second startup timeout did not recur. Failure injection exited
+  1 after reporting cleanup success for all exact fixture handles.
+- Final formatting, convention Clippy, desktop TypeScript tests, diff whitespace
+  checks, and `npm run check` passed. Windows Clippy still reports the three
+  existing untouched `topmost.rs` cast warnings.
+
+This evidence does not establish native macOS runtime or Linux/macOS desktop
+release acceptance. A descendant that deliberately changes Unix group/session,
+a stopped/failed Unix guardian, and independently broker-created Windows
+processes are not claimed by the containment contract. F08–F10 and all other
+audit findings remain out of scope; no deployment or release was performed.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).

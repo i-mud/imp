@@ -13,11 +13,9 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::AppHandle;
-use tauri_plugin_shell::{
-    process::{CommandChild, CommandEvent},
-    ShellExt,
-};
+use tauri_plugin_shell::ShellExt;
 
+use crate::runtime::{self, OwnedChild, RuntimeOwner};
 use crate::tunnel::{probe_gateway_healthz, probe_open};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -49,24 +47,19 @@ pub struct GatewayStatus {
 }
 
 trait OwnedGateway: Send {
-    fn terminated(&self) -> bool;
+    fn terminated(&mut self) -> bool;
     fn kill(self: Box<Self>) -> Result<(), String>;
 }
 
-struct SidecarGateway {
-    child: CommandChild,
-    terminated: Arc<AtomicBool>,
-}
-
-impl OwnedGateway for SidecarGateway {
-    fn terminated(&self) -> bool {
-        self.terminated.load(Ordering::SeqCst)
+impl OwnedGateway for OwnedChild {
+    fn terminated(&mut self) -> bool {
+        runtime::terminated(self, "gateway")
     }
 
-    fn kill(self: Box<Self>) -> Result<(), String> {
-        let SidecarGateway { child, .. } = *self;
-        child
-            .kill()
+    fn kill(mut self: Box<Self>) -> Result<(), String> {
+        OwnedChild::kill(&mut self)
+            .and_then(|()| self.wait())
+            .map(|status| runtime::log_exit(status, "gateway"))
             .map_err(|error| format!("failed to stop bundled Imp gateway: {error}"))
     }
 }
@@ -97,8 +90,9 @@ impl GatewaySupervisor {
         gateway_port: u16,
         relay_port: u16,
         pairing_token_sha256: String,
+        owner: Arc<RuntimeOwner>,
     ) -> Arc<Self> {
-        let spawn = sidecar_spawner(app, gateway_port, relay_port, pairing_token_sha256);
+        let spawn = sidecar_spawner(app, gateway_port, relay_port, pairing_token_sha256, owner);
         Self::with_spawner(gateway_port, spawn)
     }
 
@@ -254,7 +248,7 @@ impl GatewaySupervisor {
     fn owned_terminated(&self) -> bool {
         self.child
             .lock()
-            .as_ref()
+            .as_mut()
             .is_some_and(|child| child.terminated())
     }
 
@@ -276,6 +270,7 @@ fn sidecar_spawner(
     gateway_port: u16,
     relay_port: u16,
     pairing_token_sha256: String,
+    owner: Arc<RuntimeOwner>,
 ) -> SpawnGateway {
     Arc::new(move || {
         let command = app
@@ -292,44 +287,18 @@ fn sidecar_spawner(
             .arg("--token-sha256")
             .arg(pairing_token_sha256.clone());
 
-        let (mut events, child) = command
-            .spawn()
-            .map_err(|error| format!("failed to spawn bundled Imp gateway: {error}"))?;
+        let command: std::process::Command = command.into();
+        let mut child = owner
+            .spawn(
+                command.get_program(),
+                command.get_args(),
+                runtime::RuntimeStdout::Piped,
+            )
+            .map_err(|error| format!("failed to spawn owned bundled Imp gateway: {error}"))?;
+        eprintln!("imp: owned gateway pid={}", child.id());
+        runtime::log_output(&mut child, "gateway");
 
-        let terminated = Arc::new(AtomicBool::new(false));
-        let event_terminated = Arc::clone(&terminated);
-
-        tauri::async_runtime::spawn(async move {
-            while let Some(event) = events.recv().await {
-                match event {
-                    CommandEvent::Stdout(bytes) => {
-                        for line in String::from_utf8_lossy(&bytes).lines() {
-                            eprintln!("imp: gateway: {line}");
-                        }
-                    }
-                    CommandEvent::Stderr(bytes) => {
-                        for line in String::from_utf8_lossy(&bytes).lines() {
-                            eprintln!("imp: gateway: {line}");
-                        }
-                    }
-                    CommandEvent::Error(error) => {
-                        eprintln!("imp: gateway process event error: {error}");
-                    }
-                    CommandEvent::Terminated(payload) => {
-                        eprintln!(
-                            "imp: gateway process terminated (code={:?}, signal={:?})",
-                            payload.code, payload.signal
-                        );
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            event_terminated.store(true, Ordering::SeqCst);
-        });
-
-        Ok(Box::new(SidecarGateway { child, terminated }) as Box<dyn OwnedGateway>)
+        Ok(Box::new(child) as Box<dyn OwnedGateway>)
     })
 }
 
@@ -415,7 +384,7 @@ mod tests {
     }
 
     impl OwnedGateway for FakeGateway {
-        fn terminated(&self) -> bool {
+        fn terminated(&mut self) -> bool {
             self.terminated.load(Ordering::SeqCst)
         }
 

@@ -1727,6 +1727,7 @@ name = "imp-desktop"
 version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
+ "libc",
  "parking_lot",
  "raw-window-handle",
  "serde",

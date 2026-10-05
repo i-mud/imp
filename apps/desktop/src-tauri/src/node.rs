@@ -19,11 +19,9 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::AppHandle;
-use tauri_plugin_shell::{
-    process::{CommandChild, CommandEvent},
-    ShellExt,
-};
+use tauri_plugin_shell::ShellExt;
 
+use crate::runtime::{self, OwnedChild, RuntimeOwner};
 use crate::tunnel::{classify_local_port, LocalPortState};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -53,24 +51,19 @@ pub struct NodeStatus {
 }
 
 trait OwnedNode: Send {
-    fn terminated(&self) -> bool;
+    fn terminated(&mut self) -> bool;
     fn kill(self: Box<Self>) -> Result<(), String>;
 }
 
-struct SidecarNode {
-    child: CommandChild,
-    terminated: Arc<AtomicBool>,
-}
-
-impl OwnedNode for SidecarNode {
-    fn terminated(&self) -> bool {
-        self.terminated.load(Ordering::SeqCst)
+impl OwnedNode for OwnedChild {
+    fn terminated(&mut self) -> bool {
+        runtime::terminated(self, "node")
     }
 
-    fn kill(self: Box<Self>) -> Result<(), String> {
-        let SidecarNode { child, .. } = *self;
-        child
-            .kill()
+    fn kill(mut self: Box<Self>) -> Result<(), String> {
+        OwnedChild::kill(&mut self)
+            .and_then(|()| self.wait())
+            .map(|status| runtime::log_exit(status, "node"))
             .map_err(|error| format!("failed to stop bundled Imp node: {error}"))
     }
 }
@@ -85,8 +78,8 @@ pub struct NodeSupervisor {
 }
 
 impl NodeSupervisor {
-    pub fn local(app: AppHandle, local_port: u16) -> Arc<Self> {
-        let spawn = sidecar_spawner(app, local_port);
+    pub fn local(app: AppHandle, local_port: u16, owner: Arc<RuntimeOwner>) -> Arc<Self> {
+        let spawn = sidecar_spawner(app, local_port, owner);
         Self::with_spawner(local_port, spawn)
     }
 
@@ -240,7 +233,7 @@ impl NodeSupervisor {
     fn owned_terminated(&self) -> bool {
         self.child
             .lock()
-            .as_ref()
+            .as_mut()
             .is_some_and(|child| child.terminated())
     }
 
@@ -257,7 +250,7 @@ impl NodeSupervisor {
     }
 }
 
-fn sidecar_spawner(app: AppHandle, local_port: u16) -> SpawnNode {
+fn sidecar_spawner(app: AppHandle, local_port: u16, owner: Arc<RuntimeOwner>) -> SpawnNode {
     Arc::new(move || {
         let command = app
             .shell()
@@ -268,46 +261,18 @@ fn sidecar_spawner(app: AppHandle, local_port: u16) -> SpawnNode {
             .arg("--port")
             .arg(local_port.to_string());
 
-        let (mut events, child) = command
-            .spawn()
-            .map_err(|error| format!("failed to spawn bundled Imp node: {error}"))?;
+        let command: std::process::Command = command.into();
+        let mut child = owner
+            .spawn(
+                command.get_program(),
+                command.get_args(),
+                runtime::RuntimeStdout::Piped,
+            )
+            .map_err(|error| format!("failed to spawn owned bundled Imp node: {error}"))?;
+        eprintln!("imp: owned node pid={}", child.id());
+        runtime::log_output(&mut child, "node");
 
-        let terminated = Arc::new(AtomicBool::new(false));
-        let event_terminated = Arc::clone(&terminated);
-
-        // Drain the sidecar pipes even though supervision uses `/healthz`.
-        // This prevents a noisy child from ever blocking on a full pipe.
-        tauri::async_runtime::spawn(async move {
-            while let Some(event) = events.recv().await {
-                match event {
-                    CommandEvent::Stdout(bytes) => {
-                        for line in String::from_utf8_lossy(&bytes).lines() {
-                            eprintln!("imp: node: {line}");
-                        }
-                    }
-                    CommandEvent::Stderr(bytes) => {
-                        for line in String::from_utf8_lossy(&bytes).lines() {
-                            eprintln!("imp: node: {line}");
-                        }
-                    }
-                    CommandEvent::Error(error) => {
-                        eprintln!("imp: node process event error: {error}");
-                    }
-                    CommandEvent::Terminated(payload) => {
-                        eprintln!(
-                            "imp: node process terminated (code={:?}, signal={:?})",
-                            payload.code, payload.signal
-                        );
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            event_terminated.store(true, Ordering::SeqCst);
-        });
-
-        Ok(Box::new(SidecarNode { child, terminated }) as Box<dyn OwnedNode>)
+        Ok(Box::new(child) as Box<dyn OwnedNode>)
     })
 }
 
@@ -397,7 +362,7 @@ mod tests {
     }
 
     impl OwnedNode for FakeNode {
-        fn terminated(&self) -> bool {
+        fn terminated(&mut self) -> bool {
             false
         }
 
