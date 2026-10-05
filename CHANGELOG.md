@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.8] - 2026-10-05
+
+### Bug Fixes
+
+- validate action broker result timeout ([a98d1ca](https://github.com/i-mud/imp/commit/a98d1ca43028ed698ebf8a0373f0ab640a56aa8c))
+
 ## [0.2.7] - 2026-10-05
 
 ### Bug Fixes
