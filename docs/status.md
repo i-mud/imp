@@ -379,11 +379,19 @@ each is the kind that comes back.
 3. **Raw/ANSI GMCP parsing robustness.** Some captured GMCP material with raw
    ANSI/control bytes has produced `invalid_raw_json`. The correct
    capture/parsing/normalization boundary remains to be investigated.
-4. **ActionBroker timeout validation.** The separately deferred finite-positive
-   timeout-validation gap remains outstanding; Slice 22 does not close the
-   whole historical audit.
 
 ## Completed implementation
+
+Slice 23, `actionbroker-timeout-validation`, resolves the separately deferred
+ActionBroker finite-positive result-timeout validation gap, not an F01–F11
+finding. Direct construction now rejects zero, negative, infinite, and NaN
+timeouts with `ValueError`; finite positive values and the production 5-second
+default remain accepted. Direct-broker loopback coverage verifies that a missing
+consumer result still returns `unknown` with `consumer result timed out`, rejects
+a late result, and releases in-flight ownership for a subsequent successful
+action. Higher-level timing validation and action routing/result semantics are
+unchanged. The historical audit is unchanged; this does not claim broader audit
+closure.
 
 Slices 5 (`hud-ui-refinement`) and 6 (`alerts-window-polish`) are complete.
 Their native Windows evidence is recorded above. Slice 6 delivered

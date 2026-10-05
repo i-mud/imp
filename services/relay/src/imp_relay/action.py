@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from typing import Final
 from uuid import uuid4
@@ -28,6 +29,8 @@ class ActionBroker:
         self,
         result_timeout: float = DEFAULT_ACTION_RESULT_TIMEOUT,
     ) -> None:
+        if not math.isfinite(result_timeout) or result_timeout <= 0:
+            raise ValueError("result_timeout must be finite and positive")
         self._result_timeout = result_timeout
         self._consumer: ConsumerRegistration | None = None
         self._inflight_id: str | None = None
