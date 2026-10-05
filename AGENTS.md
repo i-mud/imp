@@ -1,8 +1,9 @@
 # Imp - agent guide
 
-Imp is a small always-on-top companion HUD for MUDs. It reads character
-vitals from a TinyFugue session on a remote VPS and renders them in a compact
-frameless desktop window.
+Imp is a small always-on-top companion HUD for MUDs. Supported MUD-client
+adapters attach to same-host Imp nodes, publish client-neutral normalized
+state, and handle exact-context trusted actions. The desktop HUD can consume a
+local node or reach a remote node through SSH or authenticated WSS.
 
 ## Start here
 
@@ -43,8 +44,9 @@ changing, then the source it cites.
   the same commit, or the conformance tests will fail - that tripwire is
   intentional.
 - `npm run check` is the platform-independent gate: lint/docs/version checks,
-  TypeScript typechecks and tests, relay and TinyFugue lint/tests, the
-  cross-component end-to-end check, and the frontend production build.
+  TypeScript typechecks and tests, relay/shared-adapter/Mudlet/TinyFugue Python
+  lint, type checks, and tests, the cross-component end-to-end check, and the
+  frontend production build.
 - Conventional Commits are release inputs, not just style. `fix:` is a patch,
   `feat:` is a minor increment, and an explicit breaking change is a major
   increment. While Imp is `0.x`, a normal `feat:` advances the minor version
