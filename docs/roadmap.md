@@ -677,8 +677,20 @@ Integration-specific names and the historical audit are preserved. Browser
 acceptance and focused rendered-semantics coverage are recorded in
 [`status.md`](status.md); no runtime, protocol, or native ownership change.
 
-The separately deferred ActionBroker timeout-validation gap remains outstanding.
-This slice does not claim closure of the full audit.
+Slice 22 does not claim closure of the full audit.
+
+### Slice 23 - ActionBroker timeout validation
+
+Slug: `actionbroker-timeout-validation`. Complete; untagged.
+
+Resolves the separately deferred timeout-validation gap, not an F01–F11 finding.
+The broker constructor requires a finite, strictly positive result timeout and
+raises `ValueError` immediately otherwise. The fixed production default remains
+5 seconds; no setting or upper bound was added. Direct construction and loopback
+timeout/recovery regressions cover invalid/valid values, unchanged `unknown`
+timeout results, late-result rejection, and subsequent successful dispatch.
+Higher-level timing validation, action semantics, and the historical audit remain
+unchanged; no broader action hardening or full audit closure is claimed.
 
 ## Candidate work
 
