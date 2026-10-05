@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.2.6] - 2026-10-05
+
+### Bug Fixes
+
+- contain desktop-owned native runtimes ([dd49555](https://github.com/i-mud/imp/commit/dd49555cec3986ce58f31ba7b8fd562e2c0a057e))
+
 ## [0.2.5] - 2026-10-04
 
 ### Bug Fixes
