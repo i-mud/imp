@@ -2,8 +2,8 @@
 
 Imp uses semantic-release to publish releases automatically from `main`.
 
-The latest published release is `v0.2.1`. Historical milestone tags are not
-part of version calculation.
+Published releases are listed on the repository's GitHub Releases page.
+Historical milestone tags are not part of version calculation.
 
 ## Version semantics
 

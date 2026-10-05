@@ -35,3 +35,4 @@ Do not retroactively modify an audit merely because a finding has subsequently b
 ## Audits
 
 - [`2026-10-03 full repository audit`](audits/2026-10-03-full-repository-audit.md) — Repository-wide review of architecture, state handling, trusted actions, transports, lifecycle, packaging, tests, and documentation. Identified 11 source-backed findings grouped into six remediation slices.
+- [`2026-10-05 remediation closure`](audits/2026-10-05-remediation-closure.md) — Separate closure of the original audit's eleven findings through Slices 17–22 and the independently tracked Slice 23 ActionBroker timeout gap. Records landed remediation identities, current verification, and retained limitations; does not alter the original audit.

@@ -34,17 +34,23 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 14 - Imp rename                                 | ✅ Complete | `imp-rename`                          |
 | Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`            |
 | Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
-| Slice 16 - Mudlet and local client integration        | ✅ Complete | `mudlet-local-integration`            |
+| Slice 16 - Mudlet and local client integration        | ✅ Complete | Untagged; slug below                  |
 | Slice 17 - Input boundary correctness                 | Complete    | Untagged                              |
 | Slice 18 - Freshness correctness                      | Complete    | Untagged                              |
 | Slice 19 - Subscriber isolation                       | Complete    | Untagged                              |
 | Slice 20 - Diagnostic hardening                       | Complete    | Untagged                              |
-| Slice 21 - Native runtime ownership                   | Implemented | Untagged; platform limits below       |
+| Slice 21 - Native runtime ownership                   | Complete    | Untagged; platform limits below       |
 | Slice 22 - Client-neutral UI and docs polish          | Complete    | Untagged                              |
+| Slice 23 - ActionBroker timeout validation            | Complete    | Untagged                              |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
 from Conventional Commits as documented in [`releases.md`](releases.md).
+
+The Slices 17–23 remediation program is complete; see the separate
+[remediation closure](audits/2026-10-05-remediation-closure.md) for landed
+PR identities, verification, and retained limitations. No next slice is selected;
+the candidate work below remains provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -494,7 +500,7 @@ The current release contract and recovery procedure live in
 
 ### Slice 16 - Mudlet and local client integration
 
-Slug: `mudlet-local-integration`. Complete.
+Slug: `mudlet-local-integration`. Complete; untagged.
 
 Slice 16 makes MUD-client choice independent from where the Imp UI runs.
 
@@ -643,7 +649,7 @@ policy, freshness, subscriber isolation, and other audit findings are unchanged.
 
 ### Slice 21 - Native runtime ownership
 
-Slug: `native-runtime-ownership`. Implemented; untagged.
+Slug: `native-runtime-ownership`. Complete within the supported platform contract; untagged.
 
 Addresses F05 for the Windows release target with atomic child Job Object
 membership and kernel kill-on-final-handle-close for owned node, gateway, and
@@ -677,7 +683,8 @@ Integration-specific names and the historical audit are preserved. Browser
 acceptance and focused rendered-semantics coverage are recorded in
 [`status.md`](status.md); no runtime, protocol, or native ownership change.
 
-Slice 22 does not claim closure of the full audit.
+Slice 22 alone did not claim closure of the full audit; the separate
+[closure record](audits/2026-10-05-remediation-closure.md) reconciles the program.
 
 ### Slice 23 - ActionBroker timeout validation
 
@@ -690,7 +697,8 @@ raises `ValueError` immediately otherwise. The fixed production default remains
 timeout/recovery regressions cover invalid/valid values, unchanged `unknown`
 timeout results, late-result rejection, and subsequent successful dispatch.
 Higher-level timing validation, action semantics, and the historical audit remain
-unchanged; no broader action hardening or full audit closure is claimed.
+unchanged. Program closure is recorded separately; no broader action hardening
+is claimed.
 
 ## Candidate work
 
