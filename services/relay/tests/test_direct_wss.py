@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import base64
+import errno
+import grp
 import hashlib
 import http.server
 import io
 import os
+import pwd
 import secrets
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -548,9 +552,305 @@ def test_status_reports_malformed_config_without_exposing_content(
     monkeypatch.setattr(sys, "stdout", out)
 
     assert direct_wss.main(["status"]) == 0
+    assert "gateway.env path: supported" in out.getvalue()
     assert "gateway.env syntax: invalid" in out.getvalue()
     assert "SECRETISH" not in out.getvalue()
     assert not (config.parent / direct_wss._LOCK_NAME).exists()
+
+
+SHARED_GROUP = "is group-writable by a group not shown private to the target user"
+ACL = "is group-writable and has an extended access ACL that could not be excluded"
+
+
+def _accounts(
+    monkeypatch: pytest.MonkeyPatch,
+    gid: int,
+    *,
+    primary_gid: int | None = None,
+    others: tuple[tuple[str, int, int], ...] = (),
+    members: tuple[str, ...] = ("imp-user",),
+    listed: bool = True,
+    resolvable: bool = True,
+    aliases: tuple[tuple[str, tuple[str, ...]], ...] = (),
+    groups_enumerable: bool = True,
+) -> None:
+    """Replace the account database deterministically; the runner's passwd/group never matter."""
+    uid = os.geteuid()
+    user = pwd.struct_passwd(
+        ("imp-user", "x", uid, gid if primary_gid is None else primary_gid, "", "/", "/bin/sh")
+    )
+    accounts = [user] if listed else []
+    accounts += [
+        pwd.struct_passwd((name, "x", other_uid, other_gid, "", "/", "/bin/sh"))
+        for name, other_uid, other_gid in others
+    ]
+
+    def getpwuid(value: int) -> pwd.struct_passwd:
+        if not resolvable or value != uid:
+            raise KeyError(value)
+        return user
+
+    def getgrgid(value: int) -> grp.struct_group:
+        if not resolvable or value != gid:
+            raise KeyError(value)
+        return grp.struct_group(("imp-user", "x", gid, list(members)))
+
+    def getgrall() -> list[grp.struct_group]:
+        if not groups_enumerable:
+            raise OSError("group enumeration unavailable")
+        records = [("imp-user", members), *aliases]
+        return [grp.struct_group((name, "x", gid, list(names))) for name, names in records]
+
+    monkeypatch.setattr(direct_wss, "pwd", SimpleNamespace(getpwuid=getpwuid, getpwall=lambda: accounts))
+    monkeypatch.setattr(direct_wss, "grp", SimpleNamespace(getgrgid=getgrgid, getgrall=getgrall))
+
+
+@pytest.mark.parametrize(
+    ("mode", "allow", "accounts", "problem"),
+    [
+        (0o755, True, {"resolvable": False}, None),
+        (0o775, True, {}, None),
+        (0o777, True, {}, "is world-writable"),
+        (0o775, True, {"primary_gid": -1}, SHARED_GROUP),
+        (0o775, True, {"others": (("other", 4242, None),)}, SHARED_GROUP),
+        (0o775, True, {"members": ("imp-user", "other")}, SHARED_GROUP),
+        (0o775, True, {"resolvable": False}, SHARED_GROUP),
+        (0o775, True, {"listed": False}, SHARED_GROUP),
+        (0o775, True, {"aliases": (("shared-alias", ("other",)),)}, SHARED_GROUP),
+        (0o775, True, {"groups_enumerable": False}, SHARED_GROUP),
+        (0o775, False, {}, "must be owned by the target user with mode 0700"),
+    ],
+    ids=[
+        "0755",
+        "0775-private-primary-group",
+        "world-writable",
+        "non-primary-group",
+        "other-primary-account",
+        "other-supplementary-member",
+        "lookup-failure",
+        "target-not-enumerated",
+        "duplicate-gid-record-with-other-member",
+        "group-enumeration-failure",
+        "strict-directory",
+    ],
+)
+def test_ancestor_group_write_requires_proven_private_primary_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: int,
+    allow: bool,
+    accounts: dict[str, Any],
+    problem: str | None,
+) -> None:
+    directory = tmp_path / "ancestor"
+    directory.mkdir()
+    os.chmod(directory, mode)
+    gid = directory.stat().st_gid
+    if "others" in accounts:
+        accounts["others"] = tuple((name, other_uid, gid) for name, other_uid, _ in accounts["others"])
+    if accounts.get("primary_gid") == -1:
+        accounts["primary_gid"] = gid + 1
+    _accounts(monkeypatch, gid, **accounts)
+    parent = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        if problem is None:
+            os.close(
+                direct_wss._open_directory(
+                    parent, "ancestor", os.geteuid(), display="~/a", allow_private_group=allow
+                )
+            )
+        else:
+            with pytest.raises(direct_wss.DirectWssError, match=f"^~/a {problem}$"):
+                direct_wss._open_directory(
+                    parent, "ancestor", os.geteuid(), display="~/a", allow_private_group=allow
+                )
+    finally:
+        os.close(parent)
+
+
+def test_ancestor_owned_by_another_user_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "ancestor").mkdir(mode=0o755)
+    _accounts(monkeypatch, (tmp_path / "ancestor").stat().st_gid)
+    parent = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(direct_wss.DirectWssError, match="^~/a is not owned by the target user$"):
+            direct_wss._open_directory(
+                parent, "ancestor", os.geteuid() + 1, display="~/a", allow_private_group=True
+            )
+    finally:
+        os.close(parent)
+
+
+@pytest.mark.parametrize(
+    ("error", "rejected"),
+    [
+        (None, True),
+        (errno.ENODATA, False),
+        (errno.ENOTSUP, False),
+        (errno.EOPNOTSUPP, False),
+        (errno.EACCES, True),
+        (errno.EIO, True),
+    ],
+    ids=["acl-present", "no-acl", "enotsup", "eopnotsupp", "eacces", "eio"],
+)
+def test_private_group_exception_rejects_present_or_uninspectable_access_acl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: int | None, rejected: bool
+) -> None:
+    directory = tmp_path / "ancestor"
+    directory.mkdir()
+    os.chmod(directory, 0o775)
+    _accounts(monkeypatch, directory.stat().st_gid)
+    inspected: list[Any] = []
+
+    def getxattr(target: Any, name: str) -> bytes:
+        inspected.append((type(target), name))
+        if error is not None:
+            raise OSError(error, os.strerror(error))
+        return b"acl"
+
+    monkeypatch.setattr(os, "getxattr", getxattr)
+    parent = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        if rejected:
+            with pytest.raises(direct_wss.DirectWssError, match=f"^~/a {ACL}$"):
+                direct_wss._open_directory(
+                    parent, "ancestor", os.geteuid(), display="~/a", allow_private_group=True
+                )
+        else:
+            os.close(
+                direct_wss._open_directory(
+                    parent, "ancestor", os.geteuid(), display="~/a", allow_private_group=True
+                )
+            )
+    finally:
+        os.close(parent)
+    assert inspected == [(int, "system.posix_acl_access")]
+
+
+def test_named_user_write_acl_rejects_private_group_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if shutil.which("setfacl") is None:
+        pytest.skip("setfacl unavailable")
+    directory = tmp_path / "ancestor"
+    directory.mkdir()
+    os.chmod(directory, 0o775)
+    _accounts(monkeypatch, directory.stat().st_gid)
+    parent = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.close(
+            direct_wss._open_directory(
+                parent, "ancestor", os.geteuid(), display="~/a", allow_private_group=True
+            )
+        )
+        if subprocess.run(["setfacl", "-m", "u:nobody:rwx", str(directory)], capture_output=True).returncode:
+            pytest.skip("filesystem does not support POSIX ACLs")
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o775
+        with pytest.raises(direct_wss.DirectWssError, match=f"^~/a {ACL}$"):
+            direct_wss._open_directory(
+                parent, "ancestor", os.geteuid(), display="~/a", allow_private_group=True
+            )
+    finally:
+        os.close(parent)
+
+
+def _ubuntu_layout(home: Path) -> int:
+    for relative in (".config", ".config/systemd", ".config/systemd/user"):
+        os.chmod(home / relative, 0o775)
+    return (home / ".config").stat().st_gid
+
+
+def test_status_and_rotate_accept_ubuntu_private_group_ancestors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    config = _write_config(home, f"{_config_line(token_digest(OLD_TOKEN).hex())}\n".encode())
+    service = _fake_systemctl(home, monkeypatch, active=False, enabled=True)
+    _accounts(monkeypatch, _ubuntu_layout(home))
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+
+    assert direct_wss.main(["status"]) == 0
+    for line in (
+        "gateway.env path: supported",
+        "gateway.env syntax: valid",
+        "gateway.env mode: 0600 private",
+        "gateway.env directory mode: 0700 private",
+        "gateway unit policy: supported",
+    ):
+        assert line + "\n" in out.getvalue()
+    assert token_digest(OLD_TOKEN).hex() not in out.getvalue()
+
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda length: TOKEN)
+    stdout, _ = _tty_streams(monkeypatch)
+    assert direct_wss.main(["rotate"]) == 0
+    assert direct_wss._parse_config(config.read_bytes()) == token_digest(TOKEN)
+    assert stat.S_IMODE(config.stat().st_mode) == 0o600
+    assert stat.S_IMODE(config.parent.stat().st_mode) == 0o700
+    assert not service.actions
+
+
+@pytest.mark.parametrize("operation", ["status", "setup", "rotate"])
+def test_shared_group_config_ancestor_is_a_path_failure_not_syntax(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    content = f"{_config_line(token_digest(OLD_TOKEN).hex())}\n".encode()
+    config = _write_config(home, content)
+    service = _fake_systemctl(home, monkeypatch, active=True, enabled=True)
+    _accounts(monkeypatch, _ubuntu_layout(home), members=("imp-user", "other"))
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda length: pytest.fail("generated token"))
+    stdout, stderr = _tty_streams(monkeypatch)
+
+    assert direct_wss.main([operation]) == (0 if operation == "status" else 1)
+    output = stdout.getvalue() + stderr.getvalue()
+    reason = f"~/.config {SHARED_GROUP}"
+    if operation == "status":
+        assert f"gateway.env path: unsafe ({reason})\n" in output
+        assert "gateway.env syntax: not inspected\n" in output
+        assert f"gateway unit policy: unsupported ({reason})\n" in output
+    else:
+        assert output == f"error: {reason}\n"
+    assert token_digest(OLD_TOKEN).hex() not in output and OLD_TOKEN not in output
+    assert config.read_bytes() == content
+    assert not (config.parent / direct_wss._LOCK_NAME).exists()
+    assert not service.actions
+
+
+def test_unsafe_systemd_ancestor_is_reported_as_unit_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    _write_config(home, f"{_config_line(token_digest(OLD_TOKEN).hex())}\n".encode())
+    _fake_systemctl(home, monkeypatch)
+    _accounts(monkeypatch, _ubuntu_layout(home))
+    os.chmod(home / ".config/systemd/user", 0o777)
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+
+    assert direct_wss.main(["status"]) == 0
+    assert "gateway.env path: supported\n" in out.getvalue()
+    assert "gateway.env syntax: valid\n" in out.getvalue()
+    assert "gateway unit policy: unsupported (~/.config/systemd/user is world-writable)\n" in out.getvalue()
+    assert token_digest(OLD_TOKEN).hex() not in out.getvalue()
+
+
+def test_private_group_exception_never_applies_to_imp_config_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    config = _write_config(home, f"{_config_line(token_digest(OLD_TOKEN).hex())}\n".encode())
+    _fake_systemctl(home, monkeypatch)
+    _accounts(monkeypatch, _ubuntu_layout(home))
+    os.chmod(config.parent, 0o770)
+    stdout, stderr = _tty_streams(monkeypatch)
+
+    assert direct_wss.main(["status"]) == 0
+    assert "gateway.env path: unsafe (~/.config/imp must be owned by the target user with mode 0700)\n" in (
+        stdout.getvalue()
+    )
+    assert direct_wss.main(["setup"]) == 1
+    assert stderr.getvalue() == "error: ~/.config/imp must be owned by the target user with mode 0700\n"
 
 
 def test_systemd_preflight_accepts_only_shipped_manager_and_disk_policy(
