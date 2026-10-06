@@ -209,6 +209,23 @@ handles exited.` before accepting that negative run. The original failure is
 reported only after all retained desktop/runtime/external fixture handles have
 been stopped, waited, and checked.
 
+The ownership script runs the build-tree executable, whose resources sit beside
+it in the Cargo release output, so it does not exercise the installed layout. Windows CI
+additionally installs the built NSIS artifact into the default per-user
+`%LOCALAPPDATA%\Imp` directory and runs
+`scripts/test-installed-first-launch.ps1`. It requires the installed desktop to
+stay alive and to provision `%LOCALAPPDATA%\Imp\mudlet\versions\<version>`,
+including the helper, runtime, and `Imp.mpackage`, from the separately
+installed `mudlet-bundle` resource.
+
+The installed desktop runs under the real application identifier from
+`tauri.conf.json`, so it would load that identifier's settings (Direct URL and
+pairing token, SSH target) and WebView data. The script therefore requires a
+genuinely fresh Windows profile: it refuses an existing `%LOCALAPPDATA%\Imp`,
+an existing `%APPDATA%\<identifier>` or `%LOCALAPPDATA%\<identifier>`, or a
+running Imp desktop, and never deletes that state. Run it only on a CI runner or
+a disposable Windows user, never on a profile with real Imp settings.
+
 For authenticated SSH acceptance on Linux, build the frozen desktop node and
 the feature harness, then run:
 
