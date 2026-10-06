@@ -215,16 +215,34 @@ Check without changing files, locks, credentials, or service state:
 ~/.local/bin/imp-direct-wss status
 ```
 
-Status reports configuration syntax validity, private-file safety, systemd
-enabled/active state, and minimal health without disclosing credential
-material. The fixed paths are `~/.config/imp/gateway.env`,
+Status separately reports configuration path safety, syntax validity, file and
+directory modes, gateway unit policy, systemd enabled/active state, and minimal
+health without disclosing credential material. An unsafe path names the
+offending directory and reason. The fixed paths are `~/.config/imp/gateway.env`,
 `~/.config/systemd/user/imp-gateway.service`, and
 `~/.local/share/imp/current/.venv/bin/imp-gateway`. The config's only accepted
 content is exactly one `IMP_GATEWAY_TOKEN_SHA256=<64 hex characters>`
 assignment, with full-line comments and surrounding whitespace allowed; NUL
 bytes are rejected anywhere, including comments. It is not a general environment
 file. The config directory and file must be owned by the target user with modes
-`0700` and `0600`, respectively.
+exactly `0700` and `0600`, respectively.
+
+The ancestors `~/.config`, `~/.config/systemd`, and `~/.config/systemd/user`
+must be owned by the target user and never world-writable. They may be
+group-writable only when their group is the target user's primary group and the
+system account database enumeration (`getent passwd`/`getent group`) lists the
+target user, no other account with that primary group, and no other
+supplementary member in any group record with that GID. A group-writable
+ancestor that also carries an extended access ACL is rejected. That covers the
+ordinary Ubuntu local user-private-group layout (`0775` with umask `002`), so
+those directories need no permission change. A group-writable ancestor whose
+group is shared, or cannot be resolved or enumerated, is rejected.
+
+This check sees only enumerable accounts and groups. On hosts whose account
+sources do not fully enumerate users and groups, such as some SSSD or LDAP
+configurations, it is not proof that no other principal shares the group. If any
+other account can write such an ancestor through directory-service membership
+or another mechanism, remove group write from that ancestor.
 
 The normal release installer does not create pairing credentials or enable
 `imp-gateway.service`. Upgrade preserves the gateway's existing enablement and
@@ -658,6 +676,7 @@ curl -s http://127.0.0.1:8788/healthz
 | `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                                                 |
 | Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.                                   |
 | Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging.                         |
+| Direct WSS path is unsafe or unit policy unsupported           | `imp-direct-wss status` names the directory and reason. For a shared group-writable or world-writable ancestor, remove that write access or give the directory the user's private group; do not loosen `~/.config/imp` or `gateway.env`.                                |
 | TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                                                      |
 | Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                                                   |
 | Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                                          |

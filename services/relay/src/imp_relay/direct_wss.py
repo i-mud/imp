@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import http.client
 import json
 import os
@@ -27,6 +28,8 @@ from .websocket_logging import websocket_logger
 
 try:
     import fcntl
+    import grp
+    import pwd
 except ImportError:  # Keep desktop imports/builds working outside Linux.
     fcntl = None  # type: ignore[assignment]
 
@@ -97,6 +100,7 @@ class ConfigInspection:
     digest: bytes | None
     data: bytes | None
     exists: bool
+    path: str = "supported"
 
 
 def _supported_platform() -> None:
@@ -139,7 +143,47 @@ def _open_home_component(parent_fd: int, name: str, uid: int) -> int:
     return fd
 
 
-def _open_directory(parent_fd: int, name: str, uid: int, *, create: bool = False) -> int:
+def _private_primary_group(gid: int, uid: int) -> bool:
+    """Whether the enumerable account database shows gid as the target user's unshared primary group.
+
+    Only accounts and groups visible through pwd/grp enumeration are considered; account sources
+    that do not enumerate fully can still grant access this check cannot see.
+    """
+    try:
+        user = pwd.getpwuid(uid)
+        grp.getgrgid(gid)
+        groups = [group for group in grp.getgrall() if group.gr_gid == gid]
+        accounts = pwd.getpwall()
+    except (KeyError, OSError):
+        return False
+    # Requiring the target user in the enumeration rejects account sources getpwall cannot list.
+    return (
+        user.pw_gid == gid
+        and bool(groups)
+        and any(account.pw_uid == uid and account.pw_gid == gid for account in accounts)
+        and all(account.pw_uid == uid for account in accounts if account.pw_gid == gid)
+        and all(member == user.pw_name for group in groups for member in group.gr_mem)
+    )
+
+
+def _access_acl(fd: int) -> bool:
+    """Whether the directory carries an extended access ACL; inspection errors fail closed."""
+    try:
+        os.getxattr(fd, "system.posix_acl_access")
+    except OSError as error:
+        return error.errno not in {errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP}
+    return True
+
+
+def _open_directory(
+    parent_fd: int,
+    name: str,
+    uid: int,
+    *,
+    display: str,
+    create: bool = False,
+    allow_private_group: bool = False,
+) -> int:
     created = False
     try:
         fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
@@ -154,18 +198,32 @@ def _open_directory(parent_fd: int, name: str, uid: int, *, create: bool = False
         try:
             fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
         except OSError:
-            raise DirectWssError("configuration path contains an unsafe directory") from None
+            raise DirectWssError(f"{display} is not a safe directory") from None
     except OSError:
-        raise DirectWssError("configuration path contains an unsafe directory") from None
+        raise DirectWssError(f"{display} is not a safe directory") from None
     try:
         info = os.fstat(fd)
     except OSError:
         os.close(fd)
-        raise DirectWssError("configuration path contains an unsafe directory") from None
+        raise DirectWssError(f"{display} is not a safe directory") from None
     mode = stat.S_IMODE(info.st_mode)
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or mode & 0o022:
+    problem = None
+    if not stat.S_ISDIR(info.st_mode):
+        problem = "is not a safe directory"
+    elif info.st_uid != uid:
+        problem = "is not owned by the target user"
+    elif mode & 0o002:
+        problem = "is world-writable"
+    elif mode & 0o020 and not allow_private_group:
+        # Only ~/.config/imp opens without the exception; its policy is exactly 0700.
+        problem = "must be owned by the target user with mode 0700"
+    elif mode & 0o020 and not _private_primary_group(info.st_gid, uid):
+        problem = "is group-writable by a group not shown private to the target user"
+    elif mode & 0o020 and _access_acl(fd):
+        problem = "is group-writable and has an extended access ACL that could not be excluded"
+    if problem is not None:
         os.close(fd)
-        raise DirectWssError("configuration path contains an unsafe directory")
+        raise DirectWssError(f"{display} {problem}")
     if created:
         try:
             os.fchmod(fd, 0o700)
@@ -194,9 +252,11 @@ def _open_home() -> Iterator[tuple[int, str, int]]:
 
 
 def _config_directory(home_fd: int, uid: int, *, create: bool, private: bool = True) -> int:
-    config_fd = _open_directory(home_fd, ".config", uid, create=create)
+    config_fd = _open_directory(
+        home_fd, ".config", uid, display="~/.config", create=create, allow_private_group=True
+    )
     try:
-        imp_fd = _open_directory(config_fd, "imp", uid, create=create)
+        imp_fd = _open_directory(config_fd, "imp", uid, display="~/.config/imp", create=create)
     finally:
         os.close(config_fd)
     if private and stat.S_IMODE(os.fstat(imp_fd).st_mode) != 0o700:
@@ -385,13 +445,17 @@ def _property_map(output: str) -> dict[str, str]:
 
 def _unit_file(home_fd: int, uid: int, home: str) -> str:
     try:
-        config_fd = _open_directory(home_fd, ".config", uid)
+        config_fd = _open_directory(home_fd, ".config", uid, display="~/.config", allow_private_group=True)
         try:
-            systemd_fd = _open_directory(config_fd, "systemd", uid)
+            systemd_fd = _open_directory(
+                config_fd, "systemd", uid, display="~/.config/systemd", allow_private_group=True
+            )
         finally:
             os.close(config_fd)
         try:
-            user_fd = _open_directory(systemd_fd, "user", uid)
+            user_fd = _open_directory(
+                systemd_fd, "user", uid, display="~/.config/systemd/user", allow_private_group=True
+            )
         finally:
             os.close(systemd_fd)
     except FileNotFoundError:
@@ -714,8 +778,10 @@ def _status_config(home_fd: int, uid: int) -> ConfigInspection:
         config_fd = _config_directory(home_fd, uid, create=False, private=False)
     except FileNotFoundError:
         return ConfigInspection("missing", "unavailable", "unavailable", None, None, False)
-    except DirectWssError:
-        return ConfigInspection("unsafe", "unavailable", "unavailable", None, None, False)
+    except DirectWssError as error:
+        return ConfigInspection(
+            "not inspected", "unavailable", "unavailable", None, None, False, f"unsafe ({error})"
+        )
     try:
         directory_value = stat.S_IMODE(os.fstat(config_fd).st_mode)
         directory_mode = f"{directory_value:04o} {'private' if directory_value == 0o700 else 'not private'}"
@@ -723,14 +789,16 @@ def _status_config(home_fd: int, uid: int) -> ConfigInspection:
             data, info = _read_regular_file(config_fd, _CONFIG_NAME, uid, max_bytes=_MAX_CONFIG_BYTES)
         except FileNotFoundError:
             return ConfigInspection("missing", "unavailable", directory_mode, None, None, False)
-        except DirectWssError:
+        except DirectWssError as error:
             try:
                 info = os.stat(_CONFIG_NAME, dir_fd=config_fd, follow_symlinks=False)
                 mode = stat.S_IMODE(info.st_mode)
                 mode_text = f"{mode:04o} {'private' if mode == 0o600 else 'not private'}"
             except OSError:
                 mode_text = "unavailable"
-            return ConfigInspection("unsafe", mode_text, directory_mode, None, None, True)
+            return ConfigInspection(
+                "not inspected", mode_text, directory_mode, None, None, True, f"unsafe ({error})"
+            )
         mode = stat.S_IMODE(info.st_mode)
         mode_text = f"{mode:04o} {'private' if mode == 0o600 else 'not private'}"
         try:
@@ -751,7 +819,8 @@ def _status_service(home_fd: int, home: str) -> tuple[str, str, str]:
         enabled = "yes" if state.enabled else "no"
         active = "yes" if state.active else "no"
         policy = "supported"
-    except DirectWssError:
+    except DirectWssError as error:
+        policy = f"unsupported ({error})"
         try:
             shown = _systemctl("show", _UNIT, "--property=" + ",".join(_PROPERTIES))
         except DirectWssError:
@@ -773,6 +842,7 @@ def _status(stdout: IO[str]) -> None:
         inspection = _status_config(home_fd, uid)
         enabled, active, policy = _status_service(home_fd, home)
         health = "healthy" if active == "yes" and _gateway_health() else "unavailable"
+        stdout.write(f"gateway.env path: {inspection.path}\n")
         stdout.write(f"gateway.env syntax: {inspection.syntax}\n")
         stdout.write(f"gateway.env mode: {inspection.mode}\n")
         stdout.write(f"gateway.env directory mode: {inspection.directory_mode}\n")

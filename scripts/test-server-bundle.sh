@@ -761,6 +761,69 @@ try:
     assert inactive_token not in status.stdout and inactive_token not in status.stderr
     assert config_path.stat().st_mtime_ns == status_before.st_mtime_ns
     assert (config_path.parent / "gateway.env.lock").stat().st_mtime_ns == lock_before.st_mtime_ns
+
+    # Ubuntu user-private-group layout: 0775 ancestors under a 0700 ~/.config/imp.
+    # The account database is substituted inside the installed interpreter so the
+    # verdict cannot depend on the runner's real passwd/group contents.
+    ancestors = {path: path.stat().st_mode & 0o7777 for path in (home / ".config", home / ".config/systemd", home / ".config/systemd/user")}
+    account_cli = (
+        "import grp, os, pwd, sys\n"
+        "from imp_relay import direct_wss\n"
+        "uid, gid = os.geteuid(), os.stat(os.path.expanduser('~/.config')).st_gid\n"
+        "user = pwd.struct_passwd(('imp-user', 'x', uid, gid, '', '', ''))\n"
+        "group = grp.struct_group(('imp-user', 'x', gid, sys.argv[2:]))\n"
+        "pwd.getpwuid = lambda value: {uid: user}[value]\n"
+        "pwd.getpwall = lambda: [user]\n"
+        "grp.getgrgid = lambda value: {gid: group}[value]\n"
+        "grp.getgrall = lambda: [group]\n"
+        "raise SystemExit(direct_wss.main([sys.argv[1]]))\n"
+    )
+    shared = "~/.config is group-writable by a group not shown private to the target user"
+    try:
+        for directory in ancestors:
+            directory.chmod(0o775)
+        for members, path_line, syntax_line, policy_line in (
+            (
+                ["imp-user"],
+                "gateway.env path: supported",
+                "gateway.env syntax: valid",
+                "gateway unit policy: supported",
+            ),
+            (
+                ["imp-user", "other"],
+                f"gateway.env path: unsafe ({shared})",
+                "gateway.env syntax: not inspected",
+                f"gateway unit policy: unsupported ({shared})",
+            ),
+        ):
+            private_status = subprocess.run(
+                [str(runtime / "python"), "-c", account_cli, "status", *members],
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            assert private_status.returncode == 0, private_status.stderr
+            lines = private_status.stdout.splitlines()
+            assert path_line in lines and syntax_line in lines and policy_line in lines, lines
+            assert inactive_token.decode() not in private_status.stdout + private_status.stderr
+        assert config_path.stat().st_mtime_ns == status_before.st_mtime_ns
+
+        # Installed-code rotate under the same layout (gateway enabled + stopped here).
+        before_rotate = config_path.read_bytes()
+        private_token = token_from(run_tty([runtime / "python", "-c", account_cli, "rotate", "imp-user"]))
+        assert private_token != inactive_token
+        assert config_path.read_bytes() != before_rotate
+        assert private_token not in config_path.read_bytes()
+        assert config_path.stat().st_mode & 0o7777 == 0o600
+        assert config_path.parent.stat().st_mode & 0o7777 == 0o700
+        assert not active("imp-gateway.service") and state["enabled"]
+    finally:
+        for directory, mode in ancestors.items():
+            directory.chmod(mode)
+    print("private-group ancestor status and rotate: OK")
 finally:
     with state_lock:
         stop_gateway()
