@@ -1,6 +1,6 @@
 {
   "name": "imp",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "A cross-platform MUD companion for live state, alerts, and trusted actions.",
   "type": "module",

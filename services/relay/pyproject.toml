@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "imp-relay"
-version = "0.3.1"
+version = "0.3.2"
 description = "Loopback WebSocket state relay for Imp"
 readme = "README.md"
 requires-python = ">=3.12"

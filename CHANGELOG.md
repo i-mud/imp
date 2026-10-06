@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.3.2] - 2026-10-06
+
+### Bug Fixes
+
+- prevent Windows Mudlet provisioning recursion ([18844cf](https://github.com/i-mud/imp/commit/18844cfee7e27a32d421156f5d61d9bf21f34fc0))
+
 ## [0.3.1] - 2026-10-06
 
 ### Bug Fixes
