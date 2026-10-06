@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.3.1] - 2026-10-06
+
+### Bug Fixes
+
+- support private-group Direct WSS parents ([30cb46c](https://github.com/i-mud/imp/commit/30cb46ca1fb157ce8b28e155b92bdaacf0ebda87))
+
 ## [0.3.0] - 2026-10-06
 
 ### Features
