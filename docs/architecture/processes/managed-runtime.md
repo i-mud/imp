@@ -28,6 +28,12 @@ client-adapter transport.
 | healthy pre-existing relay on `8789`        | whoever started it              | Managed mode may adopt and monitor it; never owns or signals it |
 | WebSocket reconnect and HUD state           | `RelayStateSource` / HUD model  | transport-independent freshness presentation                    |
 
+The installed-bundle `imp-direct-wss` command provisions the VPS gateway under
+the same target user's `systemd --user` manager; it does not configure the
+public hostname, DNS, TLS certificate, or reverse proxy. A clean bundle install
+leaves this service disabled; upgrades preserve its existing enablement and
+active state.
+
 A pre-existing listener on the desktop node port `8787` is never adopted,
 regardless of whether it looks like an Imp relay. The desktop node supervisor
 either owns the child itself or reports the port unavailable.

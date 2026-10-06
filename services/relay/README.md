@@ -23,3 +23,20 @@ snapshot/text state and performs no action retry or replay.
 
 `GET /healthz` on the relay returns feed/state health.
 `GET /healthz` on the gateway returns only `{"status":"ok"}`.
+
+## Installed gateway provisioning
+
+The bundled Linux target-user CLI `imp-direct-wss setup|rotate|status` manages
+only the supported user-systemd gateway installation and fixed user paths.
+Invoke the stable installed link `~/.local/bin/imp-direct-wss`; from a source
+checkout invoke `uv run --directory services/relay imp-direct-wss OPERATION`,
+replacing `OPERATION` with one of `setup`, `rotate`, or `status` (for example,
+`uv run --directory services/relay imp-direct-wss setup`). Setup and rotation
+require interactive stdin/stdout before mutation and show a newly issued token
+only for intentional terminal handoff. Status does not write or reveal
+credentials.
+
+The normal installer leaves the gateway disabled; upgrades preserve
+enablement and restart it only if already active. The operator remains
+responsible for public hostname, DNS, TLS, and the reverse-proxy route allowlist.
+See the [deployment guide](../../deploy/README.md#direct-wss-gateway-advanced).

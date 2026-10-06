@@ -154,7 +154,14 @@ gateway:
   direct WSS connection;
 - possession of the token grants remote state observation and context-bound
   action requests for that Imp installation, so compromise requires
-  rotation.
+  rotation;
+- installed Linux bundle provisioning reads no token from argv or environment
+  and stores only the digest in `~/.config/imp/gateway.env`; plaintext is
+  emitted only for deliberate terminal handoff during successful setup or
+  rotation;
+- a handled rotation failure may restore the prior digest, in which case the
+  prior token authenticates again and must be treated as immediate containment
+  work.
 
 The relay itself remains unauthenticated and permanently loopback-only.
 `/ingest` and `/action-consumer` are not exposed by the gateway. See

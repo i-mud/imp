@@ -3,8 +3,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import io
 import json
+import logging
+import os
+import secrets
 import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -12,6 +21,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, InvalidStatus
 from websockets.typing import Origin
 
+import imp_relay.direct_wss as direct_wss
 import imp_relay.gateway as gateway_module
 from imp_relay.gateway import (
     AUTH_POLICY_CLOSE_CODE,
@@ -601,3 +611,235 @@ def test_authenticated_gateway_upstream_isolated_from_slow_remote_client(
             await relay.close()
 
     asyncio.run(scenario())
+
+
+class _InteractiveStream(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+class _GatewayHarness:
+    def __init__(self, gateway_port: int, relay_port: int) -> None:
+        self.gateway_port = gateway_port
+        self.relay_port = relay_port
+        self.loop = asyncio.new_event_loop()
+        self.ready = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.relay: RelayServer | None = None
+        self.gateway: GatewayServer | None = None
+
+    def _run(self) -> None:
+        asyncio.set_event_loop(self.loop)
+        self.ready.set()
+        self.loop.run_forever()
+
+    def call(self, coroutine: Any) -> Any:
+        return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout=5)
+
+    def start(self, digest: bytes, context: StateContext) -> None:
+        self.thread.start()
+        assert self.ready.wait(timeout=5)
+        self.call(self._start(digest, context))
+
+    async def _start(self, digest: bytes, context: StateContext) -> None:
+        self.relay = RelayServer(port=self.relay_port)
+        self.relay.state.apply_select(context, _state("Before rotation"), now=1.0)
+        await self.relay.start()
+        await self._replace_gateway(digest)
+
+    async def _replace_gateway(self, digest: bytes) -> None:
+        if self.gateway is not None:
+            await self.gateway.close()
+        self.gateway = GatewayServer(
+            digest,
+            port=self.gateway_port,
+            relay_url=f"ws://127.0.0.1:{self.relay_port}",
+        )
+        await self.gateway.start()
+
+    async def replace_digest(self, digest: bytes) -> None:
+        await self._replace_gateway(digest)
+
+    async def select(self, context: StateContext) -> None:
+        assert self.relay is not None
+        self.relay.state.apply_select(context, _state("After rotation"), now=2.0)
+
+    async def _close(self) -> None:
+        if self.gateway is not None:
+            await self.gateway.close()
+        if self.relay is not None:
+            await self.relay.close()
+
+    def close(self) -> None:
+        self.call(self._close())
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=5)
+        self.loop.close()
+
+
+def test_direct_wss_rotation_replaces_gateway_auth_session_and_preserves_relay_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relay_blocker, relay_port = _reserve_unavailable_port()
+    gateway_blocker, gateway_port = _reserve_unavailable_port()
+    relay_blocker.close()
+    gateway_blocker.close()
+    old_context = StateContext("old_session", 1, 1)
+    new_context = StateContext("new_session", 2, 2)
+    harness = _GatewayHarness(gateway_port, relay_port)
+    home = tmp_path / "home"
+    home.mkdir()
+    config_dir = home / ".config" / "imp"
+    config_dir.mkdir(parents=True)
+    os.chmod(home / ".config", 0o700)
+    os.chmod(config_dir, 0o700)
+    config = config_dir / "gateway.env"
+    config.write_text(f"IMP_GATEWAY_TOKEN_SHA256={token_digest(WRONG_TOKEN).hex()}\n")
+    os.chmod(config, 0o600)
+
+    monkeypatch.setattr(direct_wss, "_supported_platform", lambda: None)
+    monkeypatch.setattr(direct_wss, "_user_home", lambda: (os.geteuid(), str(home)))
+    monkeypatch.setattr(direct_wss, "_GATEWAY_PORT", gateway_port)
+    monkeypatch.setattr(direct_wss, "_RELAY_PORT", relay_port)
+    monkeypatch.setattr(
+        direct_wss,
+        "_service_preflight",
+        lambda home_fd, path: direct_wss.ServiceState(True, True),
+    )
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda length: TOKEN)
+    monkeypatch.setattr(sys, "stdin", _InteractiveStream())
+    output = _InteractiveStream()
+    monkeypatch.setattr(sys, "stdout", _InteractiveStream())
+
+    def restart_gateway(*args: str) -> subprocess.CompletedProcess[str]:
+        if args[0] == "restart":
+            harness.call(harness.replace_digest(direct_wss._parse_config(config.read_bytes())))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(direct_wss, "_systemctl", restart_gateway)
+
+    async def scenario() -> None:
+        try:
+            await asyncio.to_thread(harness.start, token_digest(WRONG_TOKEN), old_context)
+        except BaseException:
+            await asyncio.to_thread(harness.close)
+            raise
+        try:
+            async with connect(f"ws://127.0.0.1:{gateway_port}/state") as previous_session:
+                await previous_session.send(_auth(WRONG_TOKEN))
+                initial_hello = await _receive_type(previous_session, "hello")
+                initial_snapshot = await _receive_type(previous_session, "snapshot")
+                assert initial_hello["protocol"] == 2
+                assert initial_snapshot["context"] == {
+                    "session": "old_session",
+                    "foreground": 1,
+                    "connection": 1,
+                }
+                await asyncio.to_thread(harness.call, harness.select(new_context))
+
+                await asyncio.to_thread(direct_wss._mutate, "rotate", output)
+                rotated_token = output.getvalue().strip().splitlines()[-1]
+                assert valid_pairing_token(rotated_token)
+                assert config.read_text() == (
+                    f"IMP_GATEWAY_TOKEN_SHA256={token_digest(rotated_token).hex()}\n"
+                )
+
+                async with asyncio.timeout(5):
+                    while True:
+                        try:
+                            await previous_session.recv()
+                        except ConnectionClosed:
+                            break
+
+                async with connect(f"ws://127.0.0.1:{gateway_port}/state") as rejected:
+                    await rejected.send(_auth(WRONG_TOKEN))
+                    with pytest.raises(ConnectionClosed):
+                        await rejected.recv()
+                    assert rejected.close_code == AUTH_POLICY_CLOSE_CODE
+
+                async with connect(f"ws://127.0.0.1:{gateway_port}/state") as current:
+                    await current.send(_auth(rotated_token))
+                    hello = await _receive_type(current, "hello")
+                    snapshot = await _receive_type(current, "snapshot")
+                    assert hello["protocol"] == 2
+                    assert snapshot["context"] == {
+                        "session": "new_session",
+                        "foreground": 2,
+                        "connection": 2,
+                    }
+                    state = cast(dict[str, object], snapshot["state"])
+                    character = cast(dict[str, object], state["character"])
+                    assert character["name"] == "After rotation"
+
+                async with connect(f"ws://127.0.0.1:{gateway_port}/action") as rejected_action:
+                    await rejected_action.send(_auth(WRONG_TOKEN))
+                    with pytest.raises(ConnectionClosed):
+                        await rejected_action.recv()
+                    assert rejected_action.close_code == AUTH_POLICY_CLOSE_CODE
+
+                async with connect(f"ws://127.0.0.1:{gateway_port}/action") as stale_action:
+                    await stale_action.send(_auth(rotated_token))
+                    await stale_action.send(encode_action(old_context, "look"))
+                    stale_result = await _receive_type(stale_action, "action-result")
+                    assert stale_result["status"] == "rejected"
+
+                async with connect(f"ws://127.0.0.1:{relay_port}/action-consumer") as consumer:
+                    await consumer.send(encode_consumer(new_context))
+                    await _receive_type(consumer, "consumer-ready")
+                    async with connect(f"ws://127.0.0.1:{gateway_port}/action") as current_action:
+                        await current_action.send(_auth(rotated_token))
+                        await current_action.send(encode_action(new_context, "look"))
+                        dispatch = await _receive_type(consumer, "dispatch")
+                        assert dispatch["command"] == "look"
+                        await consumer.send(encode_consumer_result(cast(str, dispatch["id"]), "forwarded"))
+                        result = await _receive_type(current_action, "action-result")
+                        assert result["status"] == "forwarded"
+
+                status_output = _InteractiveStream()
+                monkeypatch.setattr(sys, "stdout", status_output)
+                assert direct_wss.main(["status"]) == 0
+                assert "gateway service active: yes" in status_output.getvalue()
+                assert "gateway health: healthy" in status_output.getvalue()
+                assert token_digest(rotated_token).hex() not in status_output.getvalue()
+        finally:
+            await asyncio.to_thread(harness.close)
+
+    asyncio.run(scenario())
+
+
+def test_direct_wss_readiness_waits_for_startup_without_logging_credentials(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    relay_blocker, relay_port = _reserve_unavailable_port()
+    gateway_blocker, gateway_port = _reserve_unavailable_port()
+    relay_blocker.close()
+    gateway_blocker.close()
+    harness = _GatewayHarness(gateway_port, relay_port)
+    monkeypatch.setattr(direct_wss, "_GATEWAY_PORT", gateway_port)
+    monkeypatch.setattr(direct_wss, "_TIMEOUT", 1)
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="websockets.client")
+    errors: list[BaseException] = []
+
+    def delayed_start() -> None:
+        try:
+            time.sleep(0.15)
+            harness.start(token_digest(TOKEN), CONTEXT)
+        except BaseException as error:
+            errors.append(error)
+
+    starter = threading.Thread(target=delayed_start)
+    starter.start()
+    try:
+        direct_wss._verify_gateway(TOKEN)
+        assert not errors
+        assert asyncio.run(direct_wss._state_hello(gateway_port, TOKEN))
+        assert TOKEN not in caplog.text
+    finally:
+        starter.join(timeout=5)
+        if harness.thread.is_alive():
+            harness.close()
+    monkeypatch.setattr(direct_wss, "_TIMEOUT", 0.1)
+    with pytest.raises(direct_wss.DirectWssError):
+        direct_wss._verify_gateway(TOKEN)

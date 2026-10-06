@@ -80,10 +80,13 @@ reach every forwarded relay route.
 
 ## Direct WSS
 
-Direct mode does not use SSH. It requires an Imp authenticated gateway
-behind a publicly trusted TLS reverse proxy.
+Direct mode does not use SSH. It requires an Imp authenticated gateway behind
+a publicly trusted TLS reverse proxy. On the Linux VPS, provision its pairing
+token with the installed bundle's `imp-direct-wss setup` command. The command
+prints the token only for deliberate one-time terminal handoff; never capture
+or redirect its output. Normal installation does not enable the gateway.
 
-In **Settings -> Connection**:
+In **Settings -> Connection -> Direct**:
 
 1. Select **Direct**.
 2. Enter the public `wss:` state endpoint, ending in `/state`.
@@ -91,8 +94,9 @@ In **Settings -> Connection**:
 4. Save.
 5. Restart Imp.
 
-Gateway deployment and pairing-token setup are documented in
-[`../deploy/README.md`](../deploy/README.md).
+Gateway setup/rotation, safe public verification, and operator-owned
+hostname/DNS/TLS/proxy boundaries are documented in
+[`../deploy/README.md`](../deploy/README.md#direct-wss-gateway-advanced).
 
 ## Mudlet integration
 

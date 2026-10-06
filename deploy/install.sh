@@ -164,6 +164,7 @@ BIN_DIR="$HOME/.local/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 
 ACTION_LINK="$BIN_DIR/imp-action-consumer"
+DIRECT_WSS_LINK="$BIN_DIR/imp-direct-wss"
 
 if [[ -e "$CURRENT_LINK" && ! -L "$CURRENT_LINK" ]]; then
   die "$CURRENT_LINK exists but is not a symlink"
@@ -171,6 +172,15 @@ fi
 
 if [[ -e "$ACTION_LINK" && ! -L "$ACTION_LINK" ]]; then
   die "$ACTION_LINK exists but is not a symlink"
+fi
+
+if [[ -e "$DIRECT_WSS_LINK" && ! -L "$DIRECT_WSS_LINK" ]]; then
+  die "$DIRECT_WSS_LINK exists but is not a symlink"
+fi
+
+if [[ -L "$DIRECT_WSS_LINK" &&
+      "$(readlink "$DIRECT_WSS_LINK")" != "$CURRENT_LINK/.venv/bin/imp-direct-wss" ]]; then
+  die "$DIRECT_WSS_LINK points somewhere other than this install's runtime"
 fi
 
 mkdir -p \
@@ -251,7 +261,7 @@ for package in ("imp-relay", "imp-adapter", "imp-tinyfugue"):
         )
 PY_VERIFY_RUNTIME
 
-  for entry in imp-relay imp-gateway imp-feed imp-action-consumer; do
+  for entry in imp-relay imp-gateway imp-feed imp-action-consumer imp-direct-wss; do
     script="$release/.venv/bin/$entry"
 
     [[ -x "$script" ]] ||
@@ -325,6 +335,7 @@ cleanup() {
       restore_path "$SYSTEMD_DIR/imp-relay.service" imp-relay.service
       restore_path "$SYSTEMD_DIR/imp-feed.service" imp-feed.service
       restore_path "$SYSTEMD_DIR/imp-gateway.service" imp-gateway.service
+      restore_path "$DIRECT_WSS_LINK" direct-wss
     fi
 
     if ((TF_STARTUP_CHANGED)) &&
@@ -424,6 +435,8 @@ rm -rf -- "$FILES_BACKUP_DIR"
 mkdir -p "$FILES_BACKUP_DIR"
 
 backup_path "$ACTION_LINK" action-consumer
+backup_path "$DIRECT_WSS_LINK" direct-wss
+
 backup_path "$CONFIG_DIR/capture.tf" capture.tf
 backup_path "$SYSTEMD_DIR/imp-relay.service" imp-relay.service
 backup_path "$SYSTEMD_DIR/imp-feed.service" imp-feed.service
@@ -434,6 +447,9 @@ FILES_BACKUP_READY=1
 ln -sfn \
   "$CURRENT_LINK/.venv/bin/imp-action-consumer" \
   "$ACTION_LINK"
+ln -sfn \
+  "$CURRENT_LINK/.venv/bin/imp-direct-wss" \
+  "$DIRECT_WSS_LINK"
 
 install -m 600 \
   "$BUNDLE_DIR/capture.tf" \
@@ -524,4 +540,5 @@ if command -v loginctl >/dev/null 2>&1; then
   fi
 fi
 
-printf '\nDirect WSS gateway enablement was not changed.\n'
+printf '\nDirect WSS setup is off on a clean install; existing gateway enablement is unchanged.\n'
+printf 'To configure it interactively, run: %s setup\n' "$DIRECT_WSS_LINK"

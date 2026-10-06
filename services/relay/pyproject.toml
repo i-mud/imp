@@ -13,6 +13,7 @@ dependencies = ["websockets>=16.0,<17"]
 [project.scripts]
 imp-relay = "imp_relay.__main__:main"
 imp-gateway = "imp_relay.gateway_main:main"
+imp-direct-wss = "imp_relay.direct_wss:main"
 
 [dependency-groups]
 dev = [
