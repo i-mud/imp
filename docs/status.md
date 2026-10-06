@@ -1075,11 +1075,12 @@ TypeScript/Svelte checks with no warnings, the frontend production build, all
 101 TinyFugue tests, formatting/lint/docs/version checks,
 `git diff --check origin/main`, and the complete `npm run check` gate.
 
-### Slice 24 - Direct WSS provisioning (in progress)
+### Slice 24 - Direct WSS provisioning
 
-The installed-bundle `imp-direct-wss setup|rotate|status` CLI, stable installer
-link, Direct WSS onboarding text, and operator documentation are implemented.
-Observed local validation: 79 focused provisioning/gateway tests passed, and
+Slice 24 is complete. The installed-bundle `imp-direct-wss setup|rotate|status`
+CLI, stable installer link, Direct WSS onboarding text, and operator
+documentation shipped and completed published-artifact live acceptance.
+Initial local validation: 79 focused provisioning/gateway tests passed, and
 the rebuilt server bundle passed its acceptance script. The latter exercises
 the installed CLI through a PTY with real relay/gateway processes and a
 stateful fake user-systemd manager: setup, idempotence, active/inactive rotation,
@@ -1095,9 +1096,82 @@ locally trusted TLS edge with real relay/gateway processes, including old-token
 rejection and privileged-route 404s without sending an action. Neither check
 establishes Windows-native persistence, public-CA TLS, or public deployment.
 
-The separate 17-step live acceptance plan remains unauthorized and pending.
-Do not infer Slice 24 live success from the historical Slice 11 WSS evidence
-or Slice 15 bundle acceptance above. No live VPS, DNS, proxy, certificate, or
-native Windows changes were made.
+#### Published-artifact live acceptance
+
+Overall result: **PASS WITH LIMITATIONS**. The actual published `v0.3.2`
+artifacts were accepted; final desktop and server versions were both `0.3.2`.
+No branch, CI, synthetic-version, or locally rebuilt artifact substituted for
+either release artifact. Verified SHA-256 values:
+
+- `Imp_0.3.2_x64-setup.exe`:
+  `4e9879983373329eaff0d3d83efb89ad50ccd84df50ea3e70da56f6299df3030`
+- `imp-server-0.3.2-linux-x86_64.tar.gz`:
+  `bf1f5252976adf275658c32f188ee362a3838d383cc5f0cecf292086583f7a57`
+
+The Windows installer's **Start Imp** path opened the HUD and kept it running,
+with no new desktop crash event and no recurrence of
+`STATUS_STACK_OVERFLOW / 0xC00000FD`. Mudlet's bundled source
+`%LOCALAPPDATA%\Imp\mudlet-bundle\` and writable destination
+`%LOCALAPPDATA%\Imp\mudlet\` were distinct. The destination's `current.txt`
+contained the relative pointer **versions/0.3.2**; that version directory contained
+`imp-mudlet-helper.exe`, `Imp.mpackage`, and `imp-mudlet-runtime\`, with
+`Imp.mpackage` also at the writable root. No new `v0.3.2` staging debris
+remained. Historical `.staging-0.3.1-*` directories remain intentionally
+preserved as crash evidence, not automatic-cleanup scope.
+
+The published server bundle upgraded the real VPS while preserving the active
+Direct credential and parked original credential until final cleanup. The
+released public verifier passed valid-token authentication, missing/wrong-token
+rejection, privileged HTTP/WebSocket route isolation, and health policy with
+TLS validation enabled and no bypass. Public routing remained gateway-backed,
+not relay-backed. The released desktop paired through Direct WSS and received
+character identity and vitals/state.
+
+Exactly three authorized `look` actions were delivered successfully, each
+exactly once: after initial pairing, after active rotation and re-pairing, and
+after final reinstall verification. No additional MUD actions were sent.
+
+- **Active rotation:** succeeded, preserved enabled/active gateway state, and
+  disconnected the existing desktop session. The new token authenticated;
+  the preceding token was rejected on both `/state` and `/action`. Desktop
+  re-pairing succeeded.
+- **Stopped rotation:** with the gateway enabled but intentionally inactive,
+  succeeded without activation or changing enablement. After explicit start,
+  the newest token authenticated and the preceding token was rejected.
+- **Exact-release Windows reinstall:** preserved Direct desktop settings
+  byte-for-byte and reconnected automatically without re-pairing. Mudlet
+  provisioning remained correct, recursion did not recur, and server Direct
+  configuration was unchanged.
+
+Final VPS relay, feed, and gateway services were enabled and active. Only
+loopback `127.0.0.1:8787` (relay) and `127.0.0.1:8788` (gateway) listened on
+the checked Imp ports; there was no `8789` listener or public Imp relay
+listener. Relay health showed a live feed, one producer, and a snapshot.
+Gateway health and path/unit policy were supported, with digest-only config,
+`0600` file mode, and `0700` private-directory mode. Windows had one desktop
+running in Direct mode and a local `imp-node` owning `127.0.0.1:8787`.
+
+Bounded acceptance-window service-journal inspection found zero
+warning-or-higher entries and zero standalone token-shaped message matches.
+This is not a whole-host secrecy audit. Only after all final checks passed,
+`~/imp-acceptance/parked-gateway.env` was deleted; absence was verified and the
+active credential remained unchanged.
+
+#### Non-blocking limitations
+
+- The Windows build workflow's installed-first-launch gate on clean PR/push
+  runners caught issues during remediation. The release workflow still builds
+  its NSIS installer without itself executing
+  `scripts/test-installed-first-launch.ps1`. The exact published `v0.3.2`
+  installer passed live acceptance, so this is not a Slice 24 blocker.
+  [Release installed-first-launch validation](roadmap.md#release-installed-first-launch-validation)
+  remains open candidate work.
+- The first verifier attempt after active rotation returned a generic failure
+  whose cause was not established. A diagnostic rerun passed all unchanged
+  checks; the same released verifier later passed final-token acceptance and
+  previous-token rejection. This is not evidence of a Direct WSS correctness
+  failure or a Slice 24 blocker.
+  [Public verifier failure diagnostics](roadmap.md#public-verifier-failure-diagnostics)
+  remains a low-priority open follow-up, without token or secret logging.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).
