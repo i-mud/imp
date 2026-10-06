@@ -227,9 +227,14 @@ Direct mode does not use SSH. It requires Imp's authenticated gateway behind a
 publicly trusted TLS reverse proxy plus a pairing token.
 
 Direct WSS is deliberately not enabled by the normal server installation.
+Provision pairing with the installed bundle's
+[`imp-direct-wss`](deploy/README.md#direct-wss-gateway-advanced) `setup`,
+`rotate`, and `status` commands. The command prints a token only for deliberate
+one-time terminal handoff; never capture or redirect that output.
 
-See [VPS deployment](deploy/README.md#direct-wss-gateway-advancedmanual) for
-gateway, TLS, and pairing setup.
+See [VPS deployment](deploy/README.md#direct-wss-gateway-advanced) for the
+supported service boundary, TLS/proxy operator responsibilities, bounded
+public verification, and separately authorized live acceptance plan.
 
 ## What Imp provides
 

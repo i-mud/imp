@@ -1075,4 +1075,29 @@ TypeScript/Svelte checks with no warnings, the frontend production build, all
 101 TinyFugue tests, formatting/lint/docs/version checks,
 `git diff --check origin/main`, and the complete `npm run check` gate.
 
+### Slice 24 - Direct WSS provisioning (in progress)
+
+The installed-bundle `imp-direct-wss setup|rotate|status` CLI, stable installer
+link, Direct WSS onboarding text, and operator documentation are implemented.
+Observed local validation: 79 focused provisioning/gateway tests passed, and
+the rebuilt server bundle passed its acceptance script. The latter exercises
+the installed CLI through a PTY with real relay/gateway processes and a
+stateful fake user-systemd manager: setup, idempotence, active/inactive rotation,
+credential retention across distinct releases, read-only status, and rollback.
+It does not establish real user-systemd acceptance.
+The full `npm run check` gate also passed: 64 protocol, 152 desktop, 271 relay,
+31 shared-adapter, 32 Mudlet, and 101 TinyFugue tests, strict typing/lint/docs
+checks, cross-component roundtrip, and the production frontend build.
+
+The Direct connection dialog was inspected in a browser at desktop and narrow
+viewport widths. The documented bounded verifier passed against a disposable
+locally trusted TLS edge with real relay/gateway processes, including old-token
+rejection and privileged-route 404s without sending an action. Neither check
+establishes Windows-native persistence, public-CA TLS, or public deployment.
+
+The separate 17-step live acceptance plan remains unauthorized and pending.
+Do not infer Slice 24 live success from the historical Slice 11 WSS evidence
+or Slice 15 bundle acceptance above. No live VPS, DNS, proxy, certificate, or
+native Windows changes were made.
+
 For future candidate work, see [`roadmap.md`](roadmap.md).

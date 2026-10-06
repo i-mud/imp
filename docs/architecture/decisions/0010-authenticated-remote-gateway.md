@@ -194,8 +194,8 @@ TLS alone is not authentication to Imp.
 - The reverse proxy never needs the Imp pairing token; it forwards the
   WebSocket traffic without interpreting Imp authentication.
 - Protocol-v2 remains unchanged.
-- Automated reverse-proxy provisioning, token generation/rotation UX, VPS
-  installation scripts, and end-user onboarding belong to the following
-  deployment/distribution slice.
+- The installed Linux bundle provides target-user gateway setup, rotation, and
+  status commands; hostname, DNS, public TLS, and reverse-proxy provisioning
+  remain operator-owned.
 - Multi-user hosting and mutually untrusted local users remain outside the
   current supported trust boundary.

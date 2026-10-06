@@ -42,6 +42,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 21 - Native runtime ownership                   | Complete    | `native-runtime-ownership`            |
 | Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`              |
 | Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
+| Slice 24 - Direct WSS provisioning and onboarding     | In progress | No marker; live acceptance pending    |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -49,8 +50,8 @@ from Conventional Commits as documented in [`releases.md`](releases.md).
 
 The Slices 17–23 remediation program is complete; see the separate
 [remediation closure](audits/2026-10-05-remediation-closure.md) for landed
-PR identities, verification, and retained limitations. No next slice is selected;
-the candidate work below remains provisional.
+PR identities, verification, and retained limitations. Slice 24 is selected
+and in progress; candidate work remains provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -700,6 +701,20 @@ Higher-level timing validation, action semantics, and the historical audit remai
 unchanged. Program closure is recorded separately; no broader action hardening
 is claimed.
 
+### Slice 24 - Direct WSS provisioning and onboarding
+
+In progress; no completion marker. Implement installed-bundle-only
+`imp-direct-wss setup|rotate|status` for the Linux target user's fixed config
+and user-systemd service paths. The normal installer stays default-off and
+upgrades preserve existing gateway enablement and active state. Terminal-only
+token handoff, safe existing-config handling, active/inactive rotation,
+credential-free status, and handled rollback are in scope.
+
+Public hostname, DNS, TLS certificate lifecycle, and reverse-proxy
+configuration remain operator-owned. The separately authorized live acceptance
+plan is in the [deployment guide](../deploy/README.md#separate-live-acceptance-authorization).
+Live acceptance is pending; no native or live completion is claimed.
+
 ## Candidate work
 
 Unordered, deliberately without slice numbers, and provisional. Live evidence
@@ -786,17 +801,14 @@ schemas.
 
 ### Distribution and onboarding
 
-#### Direct WSS provisioning and onboarding
+#### Direct WSS public-edge automation
 
-Reduce the operator-owned setup around the authenticated Direct WSS transport.
+Slice 24 is adding target-user setup, rotation, and status commands while
+leaving the normal installer default-off. Public hostname/DNS configuration,
+TLS certificate lifecycle, and reverse-proxy setup remain operator-owned.
+Automating those public-edge responsibilities is separate future work.
 
-Today the released server installer deliberately does not enable Direct WSS,
-pairing-token generation and rotation are manual, and the public TLS reverse
-proxy and certificate lifecycle remain operator-owned.
-
-A future design can evaluate how much of gateway enablement, token lifecycle,
-reverse-proxy/TLS setup, and first-run guidance Imp should automate while
-preserving the existing boundaries:
+A future design must preserve the existing boundaries:
 
 - the relay remains loopback-only;
 - the gateway exposes only the intended remote capabilities;

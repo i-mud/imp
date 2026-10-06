@@ -11,6 +11,14 @@ The gateway does not replace the relay and does not make the relay public. It
 authenticates a remote desktop before opening any connection to the existing
 loopback relay.
 
+The installed Linux bundle's `imp-direct-wss setup|rotate|status` command
+manages only the supported target-user service and fixed configuration paths.
+Setup and rotation require terminal stdin/stdout before mutation; plaintext
+token output is reserved for deliberate one-time handoff. Status does not
+mutate or disclose credentials. The normal installer leaves the gateway
+disabled, and upgrades preserve its prior enablement, restarting it only when
+it was active. The operator owns hostname, DNS, TLS, and public proxy setup.
+
 ## Source
 
 - `services/relay/src/imp_relay/gateway.py` - listener, authentication,
@@ -19,6 +27,8 @@ loopback relay.
   listener/upstream configuration and pairing-token digest input.
 - `services/relay/src/imp_relay/gateway_main.py` - process entry point and
   bounded lifecycle logging.
+- `services/relay/src/imp_relay/direct_wss.py` - installed-bundle setup,
+  rotation, and read-only status for the target user's gateway.
 - `deploy/systemd/imp-gateway.service` - VPS user-service shape.
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - native Direct-WSS endpoint
   and pairing-token configuration.

@@ -209,9 +209,17 @@
           </label>
 
           <p class="mode-help">
+            Obtain a token with <code>imp-direct-wss setup</code> on the server. Enter the public WSS URL and token
+            separately; never append the token to the URL.
+          </p>
+
+          <p class="mode-help">
             {settings.hasPairingToken
               ? 'Leave the token blank to keep the currently stored credential.'
-              : 'Paste the 43-character pairing token supplied by the gateway operator.'}
+              : 'Paste the 43-character pairing token from the server setup command.'}
+          </p>
+          <p class="mode-help">
+            After server rotation, paste the replacement token. Save and restart Imp to use it.
           </p>
         {/if}
 

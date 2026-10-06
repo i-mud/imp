@@ -145,56 +145,91 @@ sudo loginctl enable-linger "$USER"
 The installer reports a warning when lingering is not enabled; it does not
 silently perform privileged system configuration.
 
-## Direct WSS gateway (advanced/manual)
+## Direct WSS gateway (advanced)
 
-Direct WSS access uses one 256-bit pairing token. Imp's gateway stores only
-the SHA-256 digest of the token. The plaintext token is entered once in the
-desktop Connection settings later; do not put it in a URL, shell history,
-service unit, repository file, or reverse-proxy configuration.
+Direct WSS uses one 256-bit pairing token. The gateway stores only its
+SHA-256 digest. The plaintext token is shown once by the bundle's provisioning
+command for deliberate terminal handoff to the desktop. On the VPS, never put
+the plaintext token in arguments, environment variables, files, URLs, service
+units, reverse-proxy configuration, or logs.
 
-Until pairing/rotation UX is automated, generate a token and its digest
-manually:
+The bundled `imp-direct-wss` command is installed at the stable user link
+`~/.local/bin/imp-direct-wss`. Invoke that link from the installed Linux
+target user with a working user systemd manager; it operates only on that
+user's installed bundle and fixed HOME paths. From a source checkout, invoke
+`uv run --directory services/relay imp-direct-wss OPERATION`, replacing
+`OPERATION` with exactly one of `setup`, `rotate`, or `status` (for example,
+`uv run --directory services/relay imp-direct-wss setup`). Both forms retain
+the installed-target-user safety boundary; this is not a general systemd manager.
 
-```bash
-mkdir -p ~/.config/imp
-chmod 700 ~/.config/imp
-
-read -r token digest <<EOF
-$(python3 - <<'PY2'
-import base64
-import hashlib
-import secrets
-
-token = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
-digest = hashlib.sha256(token.encode("ascii")).hexdigest()
-print(token, digest)
-PY2
-)
-EOF
-
-printf 'IMP_GATEWAY_TOKEN_SHA256=%s\n' "$digest" > ~/.config/imp/gateway.env
-chmod 600 ~/.config/imp/gateway.env
-
-printf 'Pairing token: %s\n' "$token"
-```
-
-Record the displayed pairing token securely for the desktop Connection step,
-then clear the shell variables:
+Run setup from an interactive terminal:
 
 ```bash
-unset token digest
+~/.local/bin/imp-direct-wss setup
 ```
 
-`gateway.env` contains only the digest, not the plaintext pairing token. The
-gateway refuses to start without a valid 64-hex-character digest.
+Setup requires stdin and stdout terminals before mutation. With no existing
+configuration it securely generates a token, writes only its digest to
+`~/.config/imp/gateway.env` (private `0700` config directory and `0600` file),
+enables/starts the supported gateway user service, checks exact minimal HTTP
+health `{"status":"ok"}`, and authenticates `/state` requiring the first
+protocol-v2 `hello`. The token is printed once to the terminal only after
+success; do not capture or redirect command output. If a secure, syntactically
+valid single-digest configuration already exists, setup is idempotent: it
+generates no token, makes no service/network calls, and changes nothing.
+If configuration is missing while the gateway is already active, setup refuses
+before mutation; use `rotate` only when rotation is deliberate. Unsafe existing
+files or service arrangements are rejected without modification. Paths must not
+be symlinks; unsupported custom gateway unit files, systemd drop-ins, linked or
+masked units, and manager state requiring daemon reload are rejected rather
+than adopted. The supported unit must match the installed shipped service;
+systemd's resolved fragment, executable, environment-file, and restart policy
+must agree with that unit.
 
-The release installer does not enable Direct WSS. After deliberately
-configuring `gateway.env`, enable the gateway separately:
+Rotate a compromised or otherwise replaced token using:
 
 ```bash
-systemctl --user enable --now imp-gateway.service
-systemctl --user status imp-gateway.service
+~/.local/bin/imp-direct-wss rotate
 ```
+
+Rotate has the same terminal requirement and handoff discipline. If the
+gateway was active, it is restarted and its exact minimal HTTP health plus
+authenticated `/state` protocol-v2 hello are verified. If it was inactive, it
+remains inactive (and retains its previous enabled/disabled state); no
+network preflight or activation occurs.
+
+Handled failures attempt to restore the previous configuration bytes and
+enabled/active service state. Rollback is best effort: if recovery is incomplete,
+the command reports recovery-required and attempts to stop the gateway, rather
+than claiming success. These protections cover handled operation failures, not
+power loss or cross-filesystem/systemd atomicity.
+
+If the prior digest is restored after a failed rotation, the old token
+authenticates again. Treat that as immediate containment work: stop the gateway
+and address the failure before retrying rotation. Do not assume failed rotation
+invalidated a compromised credential.
+
+Check without changing files, locks, credentials, or service state:
+
+```bash
+~/.local/bin/imp-direct-wss status
+```
+
+Status reports configuration syntax validity, private-file safety, systemd
+enabled/active state, and minimal health without disclosing credential
+material. The fixed paths are `~/.config/imp/gateway.env`,
+`~/.config/systemd/user/imp-gateway.service`, and
+`~/.local/share/imp/current/.venv/bin/imp-gateway`. The config's only accepted
+content is exactly one `IMP_GATEWAY_TOKEN_SHA256=<64 hex characters>`
+assignment, with full-line comments and surrounding whitespace allowed; NUL
+bytes are rejected anywhere, including comments. It is not a general environment
+file. The config directory and file must be owned by the target user with modes
+`0700` and `0600`, respectively.
+
+The normal release installer does not create pairing credentials or enable
+`imp-gateway.service`. Upgrade preserves the gateway's existing enablement and
+restarts it only if it was already active; see the installer behavior above.
+Provision the gateway separately and deliberately with `setup`.
 
 The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
 `ws://127.0.0.1:8787`. Never proxy port 8787 or the relay's `/ingest` or
@@ -202,13 +237,10 @@ The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
 
 ### Public TLS/WSS edge for Direct mode
 
-Direct WSS requires a publicly trusted TLS endpoint. TLS termination belongs to
-a normal reverse proxy such as Caddy or nginx, not to Imp's Python
-gateway.
-
-The public proxy must expose only `/state`, `/action`, and optionally
-`/healthz`, forwarding them to `127.0.0.1:8788`. All other paths should be
-rejected.
+The operator owns the public hostname, DNS, publicly trusted TLS certificate
+acquisition/renewal, and reverse-proxy lifecycle. Imp's Python gateway does
+not terminate TLS. The reverse proxy must forward only `/state`, `/action`,
+and optionally `/healthz` to `127.0.0.1:8788`; reject every other path.
 
 A minimal Caddy route shape is:
 
@@ -226,33 +258,258 @@ https://imp.example {
 }
 ```
 
-Certificate acquisition and renewal are currently operator-owned. If
-certificates are provisioned outside the reverse proxy, renewal must also reload
-the proxy after replacing its readable certificate/key copies.
+If certificates are provisioned outside the reverse proxy, renewal must also
+reload the proxy after replacing its readable certificate/key copies.
 
 The Slice 11 live acceptance used Caddy and a publicly trusted certificate and
 verified the public `/healthz`, `/state`, and `/action` path while
-`/ingest` and `/action-consumer` remained unreachable. Automated
-reverse-proxy/certificate provisioning remains future distribution work.
+`/ingest` and `/action-consumer` remained unreachable. This is historical
+evidence only; it does not verify Slice 24 provisioning or current live
+acceptance.
+
+### Bounded public verification
+
+Run this from a machine with network reachability to the public hostname, using
+the installed bundle's CPython 3.12 environment (which includes the Imp relay
+package and `websockets`), or another environment that already has both
+dependencies on its import path. It probes authenticated state, auth
+rejection, and HTTP plus WebSocket 404s for privileged/unknown routes without
+an `Origin` header, and optionally minimal health. It sends no action frame.
+The token is read from /dev/tty using `getpass`, never argv or environment.
+Both secret prompts fail closed if terminal echo control is unavailable, before
+reading fallback input or starting network activity. Errors are intentionally
+generic so exception text cannot expose credentials or response payloads.
+
+Save the snippet as a local script (not in a repository or shared location),
+then run it interactively with the approved WSS state endpoint as its sole
+argument. It rejects credentials, query/fragment, non-WSS URLs, and endpoints
+not ending in `/state`; derives sibling routes while retaining any path prefix.
+The optional previous-token prompt proves revocation after rotation; its value
+is read only from /dev/tty and never appears in output. TLS verification stays
+enabled, redirects are refused, and no insecure TLS options are used. Each HTTP
+probe has a five-second monotonic elapsed deadline covering headers and body,
+in addition to the socket timeout. It uses `SIGALRM` to interrupt even a
+drip-fed response, so it requires Unix, the main thread, and an unarmed
+`ITIMER_REAL`; it refuses to probe if a real-time timer is already armed.
+
+For example, after saving the snippet as `public_wss_check.py`:
+
+```bash
+~/.local/share/imp/current/.venv/bin/python public_wss_check.py 'wss://imp.example/state'
+```
+
+```python
+import base64
+import getpass
+import json
+import secrets
+import signal
+import sys
+import time
+import warnings
+from urllib.parse import urlsplit, urlunsplit
+from urllib.error import HTTPError
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+from imp_relay.websocket_logging import websocket_logger
+from websockets.exceptions import ConnectionClosed, InvalidStatus
+from websockets.sync.client import connect
+
+logger = websocket_logger()
+HTTP_DEADLINE = 5
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, new_url):
+        return None
+
+
+def http_get(url):
+    def expired(signum, frame):
+        raise TimeoutError
+
+    if any(signal.getitimer(signal.ITIMER_REAL)):
+        fail()
+    deadline = time.monotonic() + HTTP_DEADLINE
+    previous_handler = signal.signal(signal.SIGALRM, expired)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, max(deadline - time.monotonic(), 0.000001))
+        with opener.open(Request(url, method="GET"), timeout=5) as response:
+            return response.status, response.read(128)
+    except HTTPError as exc:
+        exc.close()
+        return exc.code, b""
+    except Exception:
+        fail()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
+def fail():
+    print("Verification failed.")
+    raise SystemExit(1)
+
+
+def endpoint(path):
+    return urlunsplit(("wss", parts.netloc, path, "", ""))
+
+
+def canonical_token(value):
+    try:
+        raw = base64.urlsafe_b64decode(value + "=")
+        return (len(value) == 43 and len(raw) == 32
+                and base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii") == value)
+    except Exception:
+        return False
+
+
+def rejection(path, token):
+    try:
+        with connect(endpoint(path), proxy=None, open_timeout=5, logger=logger) as ws:
+            if token is not None:
+                ws.send('{"type":"auth","token":"' + token + '"}')
+            ws.recv(timeout=10)
+    except ConnectionClosed as exc:
+        if exc.code == 1008:
+            return
+    except Exception:
+        pass
+    fail()
+
+
+def hidden(path):
+    try:
+        with connect(endpoint(path), proxy=None, open_timeout=5, logger=logger):
+            pass
+    except InvalidStatus as exc:
+        if exc.response.status_code == 404:
+            return
+    except Exception:
+        pass
+    fail()
+
+
+if len(sys.argv) != 2:
+    fail()
+try:
+    parts = urlsplit(sys.argv[1])
+    valid_url = (parts.scheme == "wss" and parts.hostname
+                 and parts.username is None and parts.password is None
+                 and not parts.query and not parts.fragment
+                 and parts.path.endswith("/state"))
+    parts.port
+except ValueError:
+    fail()
+if (not valid_url or "?" in sys.argv[1] or "#" in sys.argv[1]):
+    fail()
+prefix = parts.path[:-len("/state")]
+state_path = prefix + "/state"
+action_path = prefix + "/action"
+health_path = prefix + "/healthz"
+try:
+    with open("/dev/tty", "w") as tty, warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        token = getpass.getpass("Pairing token: ", stream=tty)
+        previous_token = getpass.getpass(
+            "Previous token to verify revocation (optional): ", stream=tty)
+    if not canonical_token(token) or (previous_token and not canonical_token(previous_token)):
+        fail()
+except Exception:
+    fail()
+
+try:
+    with connect(endpoint(state_path), proxy=None, open_timeout=5, logger=logger) as ws:
+        ws.send('{"type":"auth","token":"' + token + '"}')
+        hello = json.loads(ws.recv(timeout=5))
+        if hello.get("type") != "hello" or hello.get("protocol") != 2:
+            fail()
+except SystemExit:
+    raise
+except Exception:
+    fail()
+
+wrong_token = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+while wrong_token in (token, previous_token):
+    wrong_token = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+for route in (state_path, action_path):
+    rejection(route, wrong_token)
+    rejection(route, None)
+    if previous_token:
+        rejection(route, previous_token)
+
+opener = build_opener(ProxyHandler({}), HTTPSHandler(), NoRedirect())
+for route in ("/ingest", "/action-consumer", "/unknown"):
+    status, _ = http_get(f"https://{parts.netloc}{prefix}{route}")
+    if status != 404:
+        fail()
+    hidden(prefix + route)
+
+status, body = http_get(f"https://{parts.netloc}{health_path}")
+if status not in (200, 404):
+    fail()
+if status == 200:
+    try:
+        if json.loads(body) != {"status": "ok"}:
+            fail()
+    except Exception:
+        fail()
+
+print("Public gateway verification passed.")
+```
+
+Use only a disposable local copy of the script and remove it after use. Do not
+enable websocket protocol/frame logging. The configured Imp `websockets`
+logger's INFO security floor is part of the credential confidentiality
+boundary.
+
+### Separate live acceptance authorization
+
+This is an operator-run acceptance plan only; no live change is authorized by
+this document, and none is being performed now. Before any mutation, obtain
+explicit approval naming the existing VPS, desktop, public hostname,
+maintenance window, and one harmless MUD action. Approval must specifically
+cover securely parking the exact existing `gateway.env` bytes in a mode-`0600`
+backup containing only the digest assignment plus permitted comments/whitespace,
+stopping/disabling the gateway to establish the clean initial state,
+setup/rotation/reinstall and desktop changes, and restoring the prior approved
+configuration and service state. Any old plaintext token
+may be held only in the operator's approved secure terminal/native credential
+store, never in a VPS file or log. If approval or the existing Caddy
+environment is absent, stop before mutation. Reuse the existing service and
+port `8788`; do not provision infrastructure or change Caddy, DNS, or TLS.
+
+1. Establish and record the installed-bundle baseline with `~/.local/bin/imp-direct-wss status`: no gateway digest, service disabled/inactive, and Direct WSS not enabled; preserve the prior digest-only configuration and enabled/active state as authorized.
+2. Run the supported setup command `~/.local/bin/imp-direct-wss setup` interactively.
+3. Receive the newly generated token once through the intentional terminal handoff; never redirect, capture, or log output.
+4. Confirm `~/.config/imp/gateway.env` contains only the SHA-256 digest assignment, with the supported private ownership/modes and no plaintext token.
+5. Confirm `imp-gateway.service` is enabled and active on the existing user manager.
+6. Confirm setup completed its local minimal-health check and authenticated `/state` protocol-v2 hello; record `~/.local/bin/imp-direct-wss status`.
+7. Run the bounded verifier against the existing public `wss:` `/state` URL and confirm trusted TLS plus authenticated state access.
+8. Confirm the verifier receives 404 for privileged/unknown HTTP and WebSocket routes without an `Origin` header.
+9. Configure the existing desktop's Direct pairing through Settings with the public `/state` URL and the new token; save and restart.
+10. Confirm live MUD state arrives over Direct WSS.
+11. Send only the separately approved action through the desktop UI and independently observe its execution; do not synthesize an action in a probe.
+12. While the gateway is active, run `~/.local/bin/imp-direct-wss rotate`; receive the replacement token only by terminal handoff and confirm the service remains active.
+13. Rerun the bounded verifier, entering the replacement token and old token at its secure prompts; confirm the old credential and missing/wrong credentials close with `1008`, while the replacement succeeds.
+14. Save the replacement token in the existing desktop Direct settings, restart, and confirm Direct state succeeds.
+15. Stop and restart the gateway once; confirm the desktop's existing reconnect behavior recovers state without action replay.
+16. Reinstall/upgrade from the already-approved extracted bundle on the same VPS by running `./install.sh`; confirm the digest, enabled state, and active state are preserved and the active gateway is restarted as expected.
+17. Confirm `ss -ltnp` shows relay `8787` and gateway `8788` listening only on loopback; restore the parked digest-only configuration, prior service enablement/active state, and approved desktop credential, then record only observed results and restore outcome.
 
 ### Direct desktop configuration
 
 On the workstation, open Imp and use **Settings -> Connection -> Direct**.
 
-Enter:
-
-- the public `wss:` state endpoint, for example
-  `wss://imp.example/state`; and
-- the exact 43-character plaintext pairing token whose SHA-256 digest is stored
-  in `gateway.env`.
-
-Save the connection and restart Imp. The URL must use `wss:`, contain no
+Enter the public `wss:` state endpoint (for example `wss://imp.example/state`)
+and the 43-character pairing token displayed by `imp-direct-wss setup` or
+`rotate`. Save and restart Imp. The URL must use `wss:`, contain no
 credentials, query, or fragment, and end in `/state`.
 
-The pairing token is persisted by the native application. Imp's
-settings-read path does not return the stored plaintext token merely to populate
-the form; an existing Direct token can therefore remain unchanged when editing
-other Direct settings.
+The pairing token is persisted by the native application. Imp's settings-read
+path does not return the stored plaintext token merely to populate the form;
+an existing Direct token can therefore remain unchanged when editing other
+Direct settings.
 
 Do not put the token in a URL, reverse-proxy configuration, `VITE_*`
 environment value, or WebView `localStorage`.
