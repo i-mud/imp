@@ -39,7 +39,7 @@
     "externalBin": ["binaries/imp-node"],
     "resources": {
       "binaries/imp-node-runtime/": "imp-node-runtime/",
-      "resources/mudlet/": "mudlet/"
+      "resources/mudlet/": "mudlet-bundle/"
     }
   }
 }
