@@ -755,6 +755,34 @@ issue outbound actions must be designed explicitly around the existing
 exact-context, operator-trust, no-retry, and no-replay guarantees rather than
 inheriting write access accidentally.
 
+#### Reactions and captured-pattern actions
+
+Extend configurable text triggers beyond the bounded Contains/Wildcard alert
+model from Slice 10 into explicit reactions that can connect matched inbound
+text to trusted outbound actions.
+
+A reaction should be able to:
+
+- match received text using a deliberately designed pattern language;
+- capture selected values from the match;
+- reference those captures from an outbound action template;
+- optionally produce the existing alert effects;
+- optionally issue the resulting trusted action.
+
+For example, a trigger could capture a name, object, direction, or other value
+from received text and substitute that value into the configured action.
+
+This crosses the inbound-text -> outbound-action trust boundary and therefore
+needs its own design rather than extending wildcard matching casually.
+Inbound text must never become an unrestricted command-execution mechanism.
+Reaction execution must preserve exact-context authority, explicit operator
+configuration, bounded interpolation, and the existing no-retry/no-replay
+semantics.
+
+The design should also consider reaction enable/disable controls, match and
+capture previews, action-template previews, cooldown/debounce behavior, and a
+safe way to test a reaction without sending its action.
+
 ### Reliability
 
 #### Character identity reacquisition
@@ -828,18 +856,20 @@ Slice 24 blocker.
 
 #### Direct WSS public-edge automation
 
-Slice 24 shipped target-user setup, rotation, and status commands while
-leaving the normal installer default-off. Public hostname/DNS configuration,
-TLS certificate lifecycle, and reverse-proxy setup remain operator-owned.
-Automating those public-edge responsibilities is separate future work.
+Extend the server installer so users can choose a connection path directly,
+for example SSH, Direct WSS, or install-only, with an interactive prompt when
+no mode is supplied.
 
-A future design must preserve the existing boundaries:
+The SSH path should keep the existing relay/feed setup and leave Managed versus
+External SSH as a desktop choice. The Direct path should guide or automate the
+supported public-edge setup: gateway provisioning, hostname/DNS validation,
+TLS/reverse-proxy configuration, route isolation, and public endpoint
+verification, finishing with the WSS URL and one-time pairing token needed by
+the desktop.
 
-- the relay remains loopback-only;
-- the gateway exposes only the intended remote capabilities;
-- Imp authentication remains separate from TLS; and
-- plaintext pairing tokens do not leak into URLs, logs, or server-side stored
-  configuration.
+Prefer a deliberately narrow supported deployment path over becoming a general
+DNS or infrastructure manager. Preserve the existing loopback relay,
+gateway-only exposure, credential, upgrade, and fail-closed guarantees.
 
 #### Live connection reconfiguration
 
@@ -872,6 +902,26 @@ Linux and macOS desktop artifacts remain potential future work and should only
 be called supported releases after their native packaging and acceptance paths
 are established.
 
+#### Installation and onboarding friction
+
+Use real first-user installation experience to simplify the setup path,
+especially for users who are not already comfortable with Python environments,
+SSH configuration, or port forwarding.
+
+Observed friction includes:
+
+- distributions providing an older Python than Imp currently requires;
+- confusion between an SSH config alias and a hostname or IP address;
+- password-based SSH versus key-based SSH;
+- custom SSH ports;
+- understanding when an explicit tunnel is required; and
+- diagnosing a working MUD/GMCP integration when the HUD still cannot reach the
+  remote Imp node.
+
+Prefer removing unnecessary prerequisites or detecting/configuring them
+automatically over adding more documentation, while preserving the existing
+transport and credential boundaries.
+
 ### Platforms
 
 #### Mobile feasibility
@@ -885,3 +935,39 @@ topology.
 Any mobile work should first evaluate Tauri/native-runtime constraints, HUD
 interaction design, secure credential storage, notifications, and whether the
 authenticated gateway remains the appropriate transport boundary.
+
+#### Imp-to-Imp and multi-device topology
+
+Slice 16 deliberately did not implement Imp-to-Imp chaining, although its
+architecture was required not to prevent that future topology.
+
+Explore a supported model where one Imp instance can consume state from another
+Imp node or desktop-facing endpoint, enabling scenarios such as:
+
+- a phone consuming an Imp instance already running on a PC;
+- one desktop consuming an Imp node on another machine;
+- multiple Imp UIs consuming the same underlying MUD session; and
+- separating the always-running MUD-side Imp runtime from whichever UI device
+  is currently in use.
+
+This should reuse the existing client-neutral state/action and authenticated
+transport boundaries rather than introducing a second replication protocol.
+Multi-consumer action authority, credential ownership, discovery/pairing, and
+loop prevention need explicit design before implementation.
+
+### Desktop experience
+
+#### Further UI polish
+
+Run another focused desktop UI/UX pass based on issues observed during normal
+use rather than treating the current HUD as finished after the earlier polish
+slices.
+
+The work should begin by collecting concrete observed problems before selecting
+scope. Likely areas include compact/expanded layout behavior, panel sizing and
+consistency, controls and interaction flow, visual hierarchy, keyboard/focus
+behavior, and other rough edges exposed by sustained use.
+
+This should remain candidate work until the observed issues are inventoried and
+grouped into a coherent slice rather than turning individual cosmetic defects
+into separate roadmap items.
