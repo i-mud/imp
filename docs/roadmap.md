@@ -42,7 +42,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 21 - Native runtime ownership                   | Complete    | `native-runtime-ownership`            |
 | Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`              |
 | Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
-| Slice 24 - Direct WSS provisioning and onboarding     | In progress | No marker; live acceptance pending    |
+| Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -50,8 +50,9 @@ from Conventional Commits as documented in [`releases.md`](releases.md).
 
 The Slices 17–23 remediation program is complete; see the separate
 [remediation closure](audits/2026-10-05-remediation-closure.md) for landed
-PR identities, verification, and retained limitations. Slice 24 is selected
-and in progress; candidate work remains provisional.
+PR identities, verification, and retained limitations. Slice 24 is complete
+with non-blocking follow-ups; no next slice is selected. Candidate work remains
+provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -703,17 +704,19 @@ is claimed.
 
 ### Slice 24 - Direct WSS provisioning and onboarding
 
-In progress; no completion marker. Implement installed-bundle-only
+Complete; no slice completion marker. Shipped installed-bundle-only
 `imp-direct-wss setup|rotate|status` for the Linux target user's fixed config
 and user-systemd service paths. The normal installer stays default-off and
 upgrades preserve existing gateway enablement and active state. Terminal-only
 token handoff, safe existing-config handling, active/inactive rotation,
-credential-free status, and handled rollback are in scope.
+credential-free status, and handled rollback are implemented.
 
 Public hostname, DNS, TLS certificate lifecycle, and reverse-proxy
-configuration remain operator-owned. The separately authorized live acceptance
-plan is in the [deployment guide](../deploy/README.md#separate-live-acceptance-authorization).
-Live acceptance is pending; no native or live completion is claimed.
+configuration remain operator-owned. Published `v0.3.2` Windows and server
+artifacts completed live acceptance with **PASS WITH LIMITATIONS**; see
+[Slice 24 evidence](status.md#slice-24---direct-wss-provisioning).
+The release first-launch gate and verifier diagnostics remain non-blocking
+candidate work below, not unfinished Slice 24 scope.
 
 ## Candidate work
 
@@ -801,9 +804,31 @@ schemas.
 
 ### Distribution and onboarding
 
+#### Release installed-first-launch validation
+
+Open, non-blocking follow-up from Slice 24. The Windows build workflow runs
+the installed-first-launch check on clean PR/push runners and caught issues
+during remediation. The release workflow still builds its NSIS installer
+without running `scripts/test-installed-first-launch.ps1`. Add equivalent
+installed-first-launch validation to the release workflow before publication,
+so future published Windows installers are directly tested. The exact published
+`v0.3.2` installer passed live acceptance; this is not a Slice 24 blocker.
+
+#### Public verifier failure diagnostics
+
+Open, low-priority, non-blocking follow-up from Slice 24. Improve the public
+verifier's generic failure report to identify the failing check and distinguish
+authentication rejection, TLS/transport failure, route-policy failure, and
+unexpected response/protocol failure using safe context only. Never log tokens,
+secrets, or credential-bearing payloads. One post-active-rotation failure had
+no established cause; a diagnostic rerun passed unchanged checks, and the
+released verifier later passed final-token acceptance and previous-token
+rejection. This is not evidence of a Direct WSS correctness failure or a
+Slice 24 blocker.
+
 #### Direct WSS public-edge automation
 
-Slice 24 is adding target-user setup, rotation, and status commands while
+Slice 24 shipped target-user setup, rotation, and status commands while
 leaving the normal installer default-off. Public hostname/DNS configuration,
 TLS certificate lifecycle, and reverse-proxy setup remain operator-owned.
 Automating those public-edge responsibilities is separate future work.
