@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.3.0] - 2026-10-06
+
+### Features
+
+- add Direct WSS provisioning ([21ac531](https://github.com/i-mud/imp/commit/21ac531f55398882089b071094b7db64ffb81764))
+
 ## [0.2.8] - 2026-10-05
 
 ### Bug Fixes
