@@ -18,7 +18,7 @@
     "tauri:dev": "npm run tauri --workspace @imp/desktop -- dev",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test": "node --test scripts/test-semantic-release-prepare.mjs && npm run test --workspaces --if-present",
     "lint": "eslint . && prettier --check . && node scripts/check-docs.mjs && node scripts/check-version.mjs",
     "lint:fix": "eslint . --fix && prettier --write .",
     "native:sync": "bash scripts/sync-native.sh",

@@ -15,12 +15,52 @@ The installed Linux bundle's `imp-direct-wss setup|rotate|status` command
 manages only the supported target-user service and fixed configuration paths.
 Setup and rotation require terminal stdin/stdout before mutation; plaintext
 token output is reserved for deliberate one-time handoff. Status does not
-mutate or disclose credentials. The normal installer leaves the gateway
-disabled, and upgrades preserve its prior enablement, restarting it only when
-it was active. The operator owns hostname, DNS, TLS, and public proxy setup.
+mutate or disclose credentials. The connection-oriented installer leaves a fresh
+gateway disabled for SSH/install-only, or delegates verified Direct setup after
+preparing its narrow Caddy edge. Ordinary upgrades preserve prior enablement
+and active state. Existing credentials are never implicitly rotated.
+
+Optional `setup|rotate --public-url wss://HOST[:PORT]/state` verifies the real
+TLS edge with the new in-memory token after local readiness and before handoff.
+It requires trusted TLS, a protocol-v2 state hello, HTTP/WebSocket 404s for
+privileged/unknown routes, and absent or minimal public health; it refuses
+redirects and ignores environment proxies. Public failure uses the existing
+configuration/service rollback. Existing-credential setup remains a no-op and
+explicitly reports that public verification was not performed; public rotation
+requires an already-active gateway. This command does not configure the TLS edge.
+During credential mutation, temporary INT/TERM/HUP handlers enter the same
+digest/service rollback; signals deferred inside a verification exception are
+checked before token output. Original handlers are captured before installation,
+which is protected by `finally`; teardown briefly blocks these signals until all
+original handlers are restored, then restores the previous signal mask.
+User-systemd subprocesses run in separate sessions so repeated terminal-group
+TERM/HUP cannot independently kill rollback operations. Real subprocess
+regressions cover the tested setup/rotation and repeated-group-signal boundaries,
+not generic crash or system-service failure atomicity.
+Public verification uses the existing asyncio WebSocket client/security floor
+to avoid reproduced intermittent sync-client TLS handshake stalls.
+`--verify-via-loopback` (NAT only) changes just the TCP destination to fixed
+`127.0.0.1:443`; URL host, TLS SNI/certificate validation and Host stay public.
+
+Automatic Direct edges are limited to Debian/Ubuntu, direct DNS matching assigned
+global IPs (or explicit `--behind-nat`: one global IPv4 A, no AAAA, operator-owned
+TCP 443 forward), and no operator-owned public deployment. `imp_relay.direct_edge`
+owns the dedicated root-managed `imp-caddy.service`, exact generated config and
+target-user marker, pending service-state rollback, and token-free trusted HTTPS
+404 preflight. Operator edits revoke ownership. Explicit SSH stops/disables the
+gateway while retaining its digest and disables only the unchanged owned edge.
+No-option upgrades and install-only preserve both kinds of public edge. The
+desktop's four connection modes are unchanged; server SSH is shared by Managed
+and External SSH.
 
 ## Source
 
+- `deploy/install.sh` - connection selection, upgrade preservation, direct terminal
+  provisioning invocation, and runtime/user-service rollback.
+- `services/relay/src/imp_relay/direct_edge.py` - DNS preflight, dedicated Caddy ownership and lifecycle,
+  privilege/package policy, and token-free HTTPS readiness.
+- `services/relay/src/imp_relay/public_verifier.py` - bounded manual public
+  verification (`imp-server public-verify`); never sends an action frame.
 - `services/relay/src/imp_relay/gateway.py` - listener, authentication,
   endpoint policy, and relay bridging.
 - `services/relay/src/imp_relay/gateway_config.py` - validated loopback
@@ -165,6 +205,13 @@ Deterministic gateway tests cover token validation, pre-auth relay isolation,
 authentication timeout, binary/malformed/wrong-token rejection, Origin and
 route rejection, loopback restrictions, minimal health output, state/text
 bridging, action round trips, relay loss, and no-proxy/no-retry behavior.
+
+Provisioning tests exercise a disposable TLS edge with normal certificate and
+hostname validation, authenticated hello, HTTP/WebSocket route policy,
+optional public health, credential-safe DEBUG diagnostics, and restoration of
+prior configuration bytes and service state on public failure. A local runtime
+smoke used the real relay/gateway with a disposable trusted TLS listener; this
+does not claim acceptance of a deployed public hostname or Caddy configuration.
 
 Windows-native live verification over a publicly trusted TLS endpoint covered
 valid state delivery, live updates, a real outbound action, automatic recovery

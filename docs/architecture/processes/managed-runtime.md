@@ -29,10 +29,61 @@ client-adapter transport.
 | WebSocket reconnect and HUD state           | `RelayStateSource` / HUD model  | transport-independent freshness presentation                    |
 
 The installed-bundle `imp-direct-wss` command provisions the VPS gateway under
-the same target user's `systemd --user` manager; it does not configure the
-public hostname, DNS, TLS certificate, or reverse proxy. A clean bundle install
-leaves this service disabled; upgrades preserve its existing enablement and
-active state.
+the same target user's `systemd --user` manager; it does not configure DNS or
+the reverse proxy. The installer selects server `ssh`, `direct`, or `none`.
+Fresh interactive installs ask; fresh scripted installs require an explicit
+mode. No-option upgrades and `none` preserve credentials and connection state;
+`none` does not persist a transport transition or disable Direct.
+Explicit SSH may stop/disable the gateway but retains its digest.
+After a durable SSH edge commit, installer cleanup retains the disabled
+gateway/edge state. A failed commit child is reconciled through credential-free
+helper inspection: exact owned files, the original target UID/hostname, no
+pending transaction, and an exact disabled/inactive service with no PID.
+Interruption still exits nonzero; without this proof, connection restoration
+applies. The credential is never changed.
+
+Fresh automatic Direct installation delegates the root-managed public edge to
+`imp_relay.direct_edge` (frozen role `direct-edge`): Debian/Ubuntu system-apt Caddy, direct DNS matching assigned
+global IPs or explicitly authorized `--behind-nat` (one global IPv4 A, no AAAA),
+dedicated exact-owned config/unit/marker, and a pending enabled/active rollback
+record. Operator edges are never adopted. NAT config disables HTTP ACME challenges
+but retains TLS-ALPN-01 through the operator's public TCP 443 forward.
+Trusted HTTPS 404 readiness precedes the installer's direct inherited-terminal
+`imp-direct-wss setup --public-url ...` invocation; NAT adds `--verify-via-loopback`,
+which dials only `127.0.0.1:443` while preserving the public TLS/SNI/Host identity.
+Only that command generates or hands off a token. Schema-3 owned state uses a
+full `{http.request.orig_uri}` CEL allowlist: literal `/state`, `/action`, or
+`/healthz`, optionally followed by literal `?` query, never a normalized `.path`.
+The gateway independently rejects noncanonical targets and queries; no
+authentication bypass was observed. Explicit Direct upgrades may migrate eligible
+legacy policy even when the incoming gateway is disabled and inactive. Existing
+credentials do not implicitly provision, rotate, or enable Direct. No-option
+and `none` only attempt implicit migration when the original gateway was enabled
+or active; `--no-start` uses this incoming snapshot without changing existing
+user-service behavior. With both flags false, formerly Direct, now SSH upgrades
+leave the retained legacy edge unqueried and unchanged, requiring no root/sudo
+for it. Direct-to-`none` is preservation, not a disabling transition, and uses
+the same predicate. The helper still accepts only exact version-1 direct/version-2
+NAT config/unit/marker state, refusing pending transactions, wrong UID, or drift. Migration
+preserves connection/topology/hostname, credentials, certificate data, and
+service state; existing journal snapshots and commit/rollback restore the old
+files/state on handled failure before edge commit, retaining the journal if restoration is incomplete.
+An existing credential is preserved with an explicit not-verified continuation,
+never treated as a newly authenticated handoff. Failed provisioning restores the
+public listener and ordinary runtime/user-service state when no new credential
+remains. If provisioning started and a new credential is present, possible
+handoff conservatively retains the local identity/runtime for recovery while
+restoring/closing the public edge. INT/TERM/HUP enter nonzero installer cleanup;
+errexit and diagnostic-write failures cannot abort independent restoration
+attempts after terminal loss. Restoration remains best-effort if service or
+filesystem operations themselves fail.
+The edge's durable pre-package journal precedes generated-file publication and
+rolls interrupted preparation or failed masking back to absent, retaining
+pre-existing masks; after package work begins protective masks remain.
+Journal staging uses unique same-directory files; handled termination is deferred
+through atomic publication, staging cleanup, and directory sync.
+Package installation itself is not rolled back. This is not generic crash or
+power-loss atomicity.
 
 A pre-existing listener on the desktop node port `8787` is never adopted,
 regardless of whether it looks like an Imp relay. The desktop node supervisor

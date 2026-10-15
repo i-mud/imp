@@ -50,8 +50,12 @@ The numbered walkthrough below describes this remote TinyFugue topology.
 
 On the VPS:
 
-- Linux x86_64;
-- Python 3.12, available as `python3.12`, with `venv` support;
+- Linux x86_64 with glibc 2.36 or newer, the standard /lib64/ld-linux-x86-64.so.2
+  loader, `libz.so.1`, and the system CA store (the bundle contains its own
+  Python runtime, so no host Python is needed; musl is not supported);
+- for the normal automatic installer: Debian 12+ or Ubuntu 24.04+ with
+  `systemd`, `apt`, `iproute2`, and Caddy available from the supported system apt
+  repositories (arbitrary Linux is not an installer-supported target);
 - `systemd --user`;
 - TinyFugue already installed and configured for GMCP; and
 - a TinyFugue build whose GMCP support includes the `GMCP_LOGIN` hook.
@@ -85,6 +89,30 @@ cd imp-server-<version>
 
 ./install.sh
 ```
+
+A fresh interactive install asks whether the desktop will use **SSH**,
+**Direct WSS**, or **Install only / configure later**. For scripted installs,
+choose explicitly:
+
+```bash
+./install.sh --connection ssh
+./install.sh --connection direct --hostname imp.example.com
+./install.sh --connection none
+```
+
+SSH is the shared server configuration for both Managed SSH and External SSH.
+Automatic Direct setup requires a supported Debian/Ubuntu host and no
+operator-owned public edge. Both normal Direct topologies are supported:
+
+- **Directly addressed:** DNS points to a public address assigned to the server.
+- **Behind NAT:** DNS points to the router's public IPv4; forward router TCP 443
+  to the Imp server and add `--behind-nat` to the Direct installation command.
+
+Imp automatically installs and owns a dedicated Caddy edge; operator-managed
+Caddy is refused. It verifies trusted TLS and authenticated WSS before the
+provisioning command displays a token once.
+Never redirect or capture that terminal output. Existing installations with
+no connection option preserve their connection state without prompting.
 
 The installer uses an existing `~/.tfrc` by default and adds the Imp capture
 hook to it.
@@ -221,20 +249,36 @@ ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
 Leave Imp in **External** connection mode. It connects to the forwarded node at
 `127.0.0.1:8789`.
 
-### Direct WSS — advanced
+### Direct WSS
 
-Direct mode does not use SSH. It requires Imp's authenticated gateway behind a
-publicly trusted TLS reverse proxy plus a pairing token.
+Direct mode does not use SSH. On a supported VPS or home Linux server, install
+from an interactive terminal with:
 
-Direct WSS is deliberately not enabled by the normal server installation.
-Provision pairing with the installed bundle's
-[`imp-direct-wss`](deploy/README.md#direct-wss-gateway-advanced) `setup`,
-`rotate`, and `status` commands. The command prints a token only for deliberate
-one-time terminal handoff; never capture or redirect that output.
+```bash
+./install.sh --connection direct --hostname imp.example.com
+```
 
-See [VPS deployment](deploy/README.md#direct-wss-gateway-advanced) for the
-supported service boundary, TLS/proxy operator responsibilities, bounded
-public verification, and separately authorized live acceptance plan.
+For a home/router deployment, point one public A record at the router, remove
+AAAA records, and forward Internet TCP 443 to this server TCP 443:
+
+```bash
+./install.sh --connection direct --hostname imp.example.com --behind-nat
+```
+
+No router automation or NAT hairpin is required. Caddy uses TLS-ALPN-01 for
+public certificates; local readiness retains the public TLS identity while
+dialing the loopback edge. DNS/DDNS and the port forward remain operator-owned.
+
+The installer configures a narrowly owned Caddy edge, then delegates pairing to
+`imp-direct-wss`. Enter the displayed WSS URL and one-time pairing token in
+**Settings -> Connection -> Direct**, save, then restart Imp.
+
+An existing credential is preserved, never implicitly rotated; the installer
+reports that no new authenticated handoff was verified and gives recovery
+instructions. See [connection-oriented server deployment](deploy/README.md#connection-selection)
+for automatic-path restrictions and
+[`imp-direct-wss` recovery/manual deployment](deploy/README.md#direct-wss-gateway-advanced)
+for existing public edges, status, deliberate rotation, and bounded verification.
 
 ## What Imp provides
 
@@ -289,7 +333,7 @@ separate authenticated gateway.
 For more detail:
 
 - [Windows installation](docs/install-windows.md)
-- [VPS deployment and troubleshooting](deploy/README.md)
+- [Server deployment and troubleshooting](deploy/README.md)
 - [TinyFugue integration](integrations/tinyfugue/README.md)
 - [Mudlet integration](integrations/mudlet/README.md)
 
@@ -300,8 +344,8 @@ Imp remains an alpha project.
 Currently supported and verified:
 
 - Windows x64 prebuilt desktop installer;
-- Linux x86_64 prebuilt server bundle;
-- CPython 3.12 server runtime;
+- Linux x86_64 prebuilt server bundle (binary floor and automatic-installer
+  scope are separate; see [VPS deployment](deploy/README.md));
 - `systemd --user` services for the server deployment;
 - TinyFugue and Mudlet MUD-client integrations; and
 - AVATAR GMCP normalization through the shared adapter.
@@ -323,15 +367,17 @@ required for a normal released installation.
 
 Required:
 
-- Node.js >= 24 and npm;
-- [uv](https://docs.astral.sh/uv/); and
-- Python 3.12+.
+- Node.js >= 24 and npm; and
+- [uv](https://docs.astral.sh/uv/), which provides the exact Python
+  interpreter pinned in `services/relay/.python-version`. Relay, build, release,
+  and source workflows use the locked uv-managed environment, not ambient
+  Python.
 
 Clone the repository and install the development dependencies:
 
 ```bash
 npm install
-uv sync --project services/relay
+uv sync --locked --project services/relay --managed-python
 uv sync --project integrations/common
 uv sync --project integrations/mudlet
 uv sync --project integrations/tinyfugue

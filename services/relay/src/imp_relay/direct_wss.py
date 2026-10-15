@@ -10,18 +10,24 @@ import os
 import re
 import secrets
 import shlex
+import signal
+import socket
+import ssl
 import stat
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
+from urllib.parse import SplitResult, urlsplit
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
+from .external_env import external_env
 from .gateway import token_digest, valid_pairing_token
 from .protocol import HelloMessage, decode_server_message
 from .websocket_logging import websocket_logger
@@ -40,6 +46,8 @@ _CONFIG_KEY = "IMP_GATEWAY_TOKEN_SHA256"
 _GATEWAY_HOST = "127.0.0.1"
 _GATEWAY_PORT = 8788
 _RELAY_PORT = 8787
+# Loopback verification dials only this TCP endpoint; URL authority, SNI and Host stay public.
+_LOOPBACK_ENDPOINT = ("127.0.0.1", 443)
 _TIMEOUT = 5
 _MAX_CONFIG_BYTES = 4096
 _DIGEST_LINE = re.compile(r"^IMP_GATEWAY_TOKEN_SHA256[ \t]*=[ \t]*([0-9a-fA-F]{64})$")
@@ -66,7 +74,7 @@ _SHIPPED_UNIT = (
     "[Service]\n"
     "Type=simple\n"
     "EnvironmentFile=%h/.config/imp/gateway.env\n"
-    "ExecStart=%h/.local/share/imp/current/.venv/bin/imp-gateway --host 127.0.0.1 --port 8788 --relay-url ws://127.0.0.1:8787\n"
+    "ExecStart=%h/.local/share/imp/current/bin/imp-server gateway --host 127.0.0.1 --port 8788 --relay-url ws://127.0.0.1:8787\n"
     "Restart=on-failure\n"
     "RestartSec=2\n"
     "NoNewPrivileges=true\n"
@@ -429,6 +437,9 @@ def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
             text=True,
             timeout=_TIMEOUT,
             check=False,
+            env=external_env(),
+            # A terminal-group SIGTERM/SIGHUP must not reach systemctl and interrupt rollback.
+            start_new_session=True,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise DirectWssError("the user systemd manager could not be reached") from None
@@ -481,7 +492,7 @@ def _unit_file(home_fd: int, uid: int, home: str) -> str:
 
 
 def _expected_exec_start(value: str, home: str) -> bool:
-    binary = os.path.join(home, ".local/share/imp/current/.venv/bin/imp-gateway")
+    binary = os.path.join(home, ".local/share/imp/current/bin/imp-server")
     paths = [path.strip() for path in re.findall(r"(?:^|\{ )path=([^;}]*)", value)]
     raw_argv = re.findall(r"argv\[\]=(.*?)(?=\s*;\s*|\s*\})", value)
     if len(raw_argv) != 1:
@@ -492,6 +503,7 @@ def _expected_exec_start(value: str, home: str) -> bool:
         return False
     return paths == [binary] and argv == [
         binary,
+        "gateway",
         "--host",
         _GATEWAY_HOST,
         "--port",
@@ -634,6 +646,127 @@ def _verify_gateway(token: str) -> None:
     raise DirectWssError("gateway did not become healthy and authenticate within the readiness timeout")
 
 
+def _public_url(value: str, loopback: bool = False) -> SplitResult:
+    try:
+        parts = urlsplit(value)
+        valid = (
+            parts.scheme == "wss"
+            and parts.hostname
+            and parts.username is None
+            and parts.password is None
+            and parts.path == "/state"
+            and not any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
+            and not any(char in value for char in "?#\\%")
+            and not parts.netloc.endswith(":")
+            and (parts.port is None or 0 < parts.port <= 65535)
+            and (not loopback or parts.port in (None, 443))
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise DirectWssError(
+            "public URL must be wss://HOST[:PORT]/state without credentials, query or fragment"
+        )
+    return parts
+
+
+def _public_http_get(
+    parts: SplitResult, path: str, context: ssl.SSLContext, loopback: bool = False
+) -> tuple[int, bytes]:
+    assert parts.hostname is not None
+    # Bound the whole response, including drip-fed headers/body, not just each socket read.
+    if any(signal.getitimer(signal.ITIMER_REAL)):
+        raise DirectWssError("public verification requires an unarmed real-time timer")
+
+    def expired(signum: int, frame: object) -> None:
+        raise TimeoutError
+
+    previous_handler = signal.signal(signal.SIGALRM, expired)
+    connection = http.client.HTTPSConnection(
+        parts.hostname, parts.port or 443, timeout=_TIMEOUT, context=context
+    )
+    if loopback:
+        # TCP-only override: TLS server_hostname and the Host header still use the public name.
+        connection._create_connection = lambda address, timeout, source: socket.create_connection(  # type: ignore[attr-defined]
+            _LOOPBACK_ENDPOINT, timeout, source
+        )
+    try:
+        signal.setitimer(signal.ITIMER_REAL, _TIMEOUT)
+        connection.request("GET", path)
+        response = connection.getresponse()
+        body = response.read(1024) if path.endswith("/healthz") and response.status == 200 else b""
+        return response.status, body
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        connection.close()
+
+
+class _NoRedirectConnect(connect):
+    def process_redirect(self, exc: Exception) -> Exception | str:
+        return exc
+
+
+def _public_connect(url: str, context: ssl.SSLContext, loopback: bool = False) -> _NoRedirectConnect:
+    # Refuse redirects/proxies; single-threaded asyncio TLS avoids reproduced sync-client handshake stalls.
+    dial: dict[str, Any] = {"host": _LOOPBACK_ENDPOINT[0], "port": _LOOPBACK_ENDPOINT[1]} if loopback else {}
+    return _NoRedirectConnect(
+        url,
+        ssl=context,
+        proxy=None,
+        open_timeout=_TIMEOUT,
+        close_timeout=2,
+        logger=websocket_logger(),
+        **dial,
+    )
+
+
+async def _public_state_frame(url: str, token: str, context: ssl.SSLContext, loopback: bool) -> object:
+    async with _public_connect(url, context, loopback) as connection:
+        await connection.send(json.dumps({"type": "auth", "token": token}, separators=(",", ":")))
+        return await asyncio.wait_for(connection.recv(), timeout=_TIMEOUT)
+
+
+async def _public_open(url: str, context: ssl.SSLContext, loopback: bool) -> None:
+    async with _public_connect(url, context, loopback):
+        pass
+
+
+def _verify_public(parts: SplitResult, token: str, loopback: bool = False) -> None:
+    try:
+        context = ssl.create_default_context()
+        frame = asyncio.run(_public_state_frame(parts.geturl(), token, context, loopback))
+        decoded = decode_server_message(frame) if isinstance(frame, str) else None
+        if (
+            decoded is None
+            or not decoded.ok
+            or not isinstance(decoded.value, HelloMessage)
+            or decoded.value.protocol != 2
+        ):
+            raise DirectWssError("public state endpoint did not authenticate with a protocol-v2 hello")
+        for path in ("/ingest", "/action-consumer", "/unknown"):
+            status, _ = _public_http_get(parts, path, context, loopback)
+            if status != 404:
+                raise DirectWssError("public forbidden route did not return HTTP 404")
+            try:
+                asyncio.run(_public_open(f"wss://{parts.netloc}{path}", context, loopback))
+            except InvalidStatus as error:
+                if error.response.status_code == 404:
+                    continue
+            raise DirectWssError("public forbidden route did not return WebSocket HTTP 404")
+        status, body = _public_http_get(parts, "/healthz", context, loopback)
+        if status != 404 and (
+            status != 200 or json.loads(body, object_pairs_hook=lambda pairs: pairs) != [("status", "ok")]
+        ):
+            raise DirectWssError("public health endpoint must be absent or return minimal gateway health")
+    except DirectWssError:
+        raise
+    except Exception:
+        raise DirectWssError(
+            "public WSS verification failed (TLS, connection, authentication or route policy)"
+        ) from None
+
+
 def _require_tty() -> None:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise DirectWssError("setup and rotate require interactive stdin and stdout")
@@ -655,7 +788,49 @@ def _write_pairing_token(token: str, stdout: IO[str]) -> None:
         raise
 
 
-def _mutate(command: str, stdout: IO[str]) -> None:
+@contextmanager
+def _interrupt_signals() -> Iterator[Callable[[], None]]:
+    """Defer signals inside exception handlers, then check before token handoff.
+
+    The first signal interrupts ordinary mutation immediately. During rollback an
+    exception is active, so signals cannot interrupt restoration.
+    """
+    interrupted = False
+    closing = False
+
+    def check_interrupted() -> None:
+        if interrupted:
+            raise KeyboardInterrupt
+
+    def interrupt(signum: int, frame: object) -> None:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            if not closing and sys.exception() is None:
+                raise KeyboardInterrupt
+
+    signums = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    previous = {signum: signal.getsignal(signum) for signum in signums}
+    try:
+        for signum in signums:
+            signal.signal(signum, interrupt)
+        try:
+            yield check_interrupted
+        finally:
+            closing = True
+    finally:
+        # Restored original handlers may raise or terminate; block only until all are back in place.
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, signums)
+        try:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
+
+def _mutate(
+    command: str, stdout: IO[str], public_url: SplitResult | None = None, loopback: bool = False
+) -> None:
     _supported_platform()
     with _open_home() as (uid, home, home_fd):
         try:
@@ -670,6 +845,10 @@ def _mutate(command: str, stdout: IO[str]) -> None:
                 existing = _inspect_config(config_fd, uid, require_private=True)
                 if command == "setup" and existing.exists:
                     stdout.write("Direct WSS is already configured; no changes made.\n")
+                    if public_url is not None:
+                        stdout.write(
+                            "Public verification not performed; use rotate to verify with a new token.\n"
+                        )
                     return
                 if command == "rotate" and not existing.exists:
                     raise DirectWssError("rotate requires an existing supported gateway.env")
@@ -683,10 +862,16 @@ def _mutate(command: str, stdout: IO[str]) -> None:
             existing = _inspect_config(config_fd, uid, require_private=True)
             if command == "setup" and existing.exists:
                 stdout.write("Direct WSS is already configured; no changes made.\n")
+                if public_url is not None:
+                    stdout.write(
+                        "Public verification not performed; use rotate to verify with a new token.\n"
+                    )
                 return
             if command == "rotate" and not existing.exists:
                 raise DirectWssError("rotate requires an existing supported gateway.env")
             before = _service_preflight(home_fd, home)
+            if command == "rotate" and public_url is not None and not before.active:
+                raise DirectWssError("rotate with public verification requires an already active gateway")
             if command == "setup" and before.active:
                 raise DirectWssError("setup cannot replace credentials while the gateway is already active")
             if (command == "setup" or before.active) and not asyncio.run(_state_hello(_RELAY_PORT)):
@@ -699,74 +884,87 @@ def _mutate(command: str, stdout: IO[str]) -> None:
             new_data = f"{_CONFIG_KEY}={digest.hex()}\n".encode("ascii")
             config_replaced = False
             service_operation_attempted = False
-            try:
-                _atomic_replace(config_fd, new_data)
-                config_replaced = True
-                if command == "setup":
-                    service_operation_attempted = True
-                    _systemctl_action("enable", "--now", _UNIT)
-                elif before.active:
-                    service_operation_attempted = True
-                    _systemctl_action("restart", _UNIT)
-                if command == "setup" or before.active:
-                    if _systemctl("is-active", "--quiet", _UNIT).returncode != 0:
-                        raise DirectWssError("the gateway service did not become active")
-                    expected_enabled = command == "setup" or before.enabled
-                    if _systemctl("is-enabled", "--quiet", _UNIT).returncode != (
-                        0 if expected_enabled else 1
-                    ):
-                        raise DirectWssError("the gateway enabled state changed unexpectedly")
-                    _verify_gateway(token)
+            with _interrupt_signals() as check_interrupted:
+                try:
+                    _atomic_replace(config_fd, new_data)
+                    config_replaced = True
+                    if command == "setup":
+                        service_operation_attempted = True
+                        _systemctl_action("enable", "--now", _UNIT)
+                    elif before.active:
+                        service_operation_attempted = True
+                        _systemctl_action("restart", _UNIT)
+                    if command == "setup" or before.active:
+                        if _systemctl("is-active", "--quiet", _UNIT).returncode != 0:
+                            raise DirectWssError("the gateway service did not become active")
+                        expected_enabled = command == "setup" or before.enabled
+                        if _systemctl("is-enabled", "--quiet", _UNIT).returncode != (
+                            0 if expected_enabled else 1
+                        ):
+                            raise DirectWssError("the gateway enabled state changed unexpectedly")
+                        _verify_gateway(token)
+                        if public_url is not None:
+                            _verify_public(public_url, token, loopback)
+                            stdout.write("Public WSS endpoint: verified.\n")
+                        stdout.write(
+                            "Gateway: locally verified; enabled for boot.\n"
+                            if expected_enabled
+                            else "Gateway: locally verified; boot enablement remains disabled.\n"
+                        )
+                    else:
+                        stdout.write(
+                            "Credential rotated; gateway remains stopped and enablement is unchanged.\n"
+                        )
                     stdout.write(
-                        "Gateway: locally verified; enabled for boot.\n"
-                        if expected_enabled
-                        else "Gateway: locally verified; boot enablement remains disabled.\n"
+                        "Use the verified public state URL.\n"
+                        if public_url is not None
+                        else "Public state URL: wss://<your-public-host>/state\n"
+                        "Configure your TLS proxy to forward approved routes to 127.0.0.1:8788.\n"
                     )
-                else:
-                    stdout.write("Credential rotated; gateway remains stopped and enablement is unchanged.\n")
-                stdout.write(
-                    "Public state URL: wss://<your-public-host>/state\n"
-                    "Configure your TLS proxy to forward approved routes to 127.0.0.1:8788.\n"
-                    "Paste the URL and token separately into Settings -> Connection -> Direct.\n"
-                    "Save and restart Imp.\n"
-                )
-                _write_pairing_token(token, stdout)
-            except BaseException as error:
-                rollback_failures: list[str] = []
-                config_may_be_replaced = config_replaced or (
-                    isinstance(error, AtomicWriteError) and error.replaced
-                )
-                config_restored = not config_may_be_replaced
-                if config_may_be_replaced:
-                    try:
-                        _restore_config(config_fd, old_data)
-                        config_restored = True
-                    except DirectWssError:
-                        rollback_failures.append("restore the previous gateway.env bytes")
-                rollback_failures.extend(
-                    _restore_service(
-                        before,
-                        operation_attempted=service_operation_attempted,
-                        config_restored=config_restored,
+                    stdout.write(
+                        "Paste the URL and token separately into Settings -> Connection -> Direct.\n"
+                        "Save and restart Imp.\n"
                     )
-                )
-                if rollback_failures:
+                    check_interrupted()
+                    _write_pairing_token(token, stdout)
+                except BaseException as error:
+                    rollback_failures: list[str] = []
+                    # A signal can land after the replace but before config_replaced is set; only a
+                    # clean AtomicWriteError(replaced=False) proves the old bytes are still in place.
+                    config_may_be_replaced = (
+                        config_replaced or not isinstance(error, AtomicWriteError) or error.replaced
+                    )
+                    config_restored = not config_may_be_replaced
+                    if config_may_be_replaced:
+                        try:
+                            _restore_config(config_fd, old_data)
+                            config_restored = True
+                        except DirectWssError:
+                            rollback_failures.append("restore the previous gateway.env bytes")
+                    rollback_failures.extend(
+                        _restore_service(
+                            before,
+                            operation_attempted=service_operation_attempted,
+                            config_restored=config_restored,
+                        )
+                    )
+                    if rollback_failures:
+                        raise DirectWssError(
+                            "operation failed; restoration failed ("
+                            + ", ".join(rollback_failures)
+                            + "); gateway stop was attempted"
+                        ) from None
+                    if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                        raise DirectWssError(
+                            "operation interrupted; previous configuration and service state restored"
+                        ) from None
+                    if isinstance(error, DirectWssError):
+                        raise DirectWssError(
+                            f"{error}; previous configuration and service state restored"
+                        ) from None
                     raise DirectWssError(
-                        "operation failed; restoration failed ("
-                        + ", ".join(rollback_failures)
-                        + "); gateway stop was attempted"
+                        "operation failed; previous configuration and service state restored"
                     ) from None
-                if isinstance(error, (KeyboardInterrupt, SystemExit)):
-                    raise DirectWssError(
-                        "operation interrupted; previous configuration and service state restored"
-                    ) from None
-                if isinstance(error, DirectWssError):
-                    raise DirectWssError(
-                        f"{error}; previous configuration and service state restored"
-                    ) from None
-                raise DirectWssError(
-                    "operation failed; previous configuration and service state restored"
-                ) from None
         finally:
             if lock_fd is not None:
                 os.close(lock_fd)
@@ -854,16 +1052,29 @@ def _status(stdout: IO[str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 1 or args[0] not in {"setup", "rotate", "status"}:
+    if not (
+        len(args) == 1
+        and args[0] in {"setup", "rotate", "status"}
+        or len(args) in (3, 4)
+        and args[0] in {"setup", "rotate"}
+        and args[1] == "--public-url"
+        and (len(args) == 3 or args[3] == "--verify-via-loopback")
+    ):
         with suppress(BaseException):
-            print("usage: imp-direct-wss {setup|rotate|status}", file=sys.stderr)
+            print(
+                "usage: imp-direct-wss {setup|rotate} [--public-url wss://HOST[:PORT]/state"
+                " [--verify-via-loopback]] | status",
+                file=sys.stderr,
+            )
         return 2
     try:
         command = args[0]
+        loopback = len(args) == 4
+        public_url = _public_url(args[2], loopback) if len(args) > 2 else None
         if command == "status":
             _status(sys.stdout)
         else:
-            _mutate(command, sys.stdout)
+            _mutate(command, sys.stdout, public_url, loopback)
         return 0
     except DirectWssError as error:
         message = f"error: {error}"

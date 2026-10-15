@@ -39,8 +39,11 @@ subtle bug is a security bug.
 
 ## Consequences
 
-- The VPS needs Python 3.12+ and one dependency. `uv` manages the environment
-  so the same command works on Linux, macOS and Windows.
+- Source/developer use needs `uv` and the interpreter pinned in
+  `services/relay/.python-version`, plus one dependency. `uv` manages the
+  environment so the same command works on Linux, macOS and Windows. The
+  released Linux server bundle ships its own frozen runtime and needs no host
+  Python.
 - `websockets`' `max_size` gives a byte-level frame cap, complementing the
   character-level cap the decoder applies before `JSON.parse`/`json.loads`.
 - If the relay ever needs to serve many subscribers or richer HTTP, that is a

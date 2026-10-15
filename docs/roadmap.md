@@ -43,6 +43,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`              |
 | Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
 | Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
+| Slice 25 - Connection-oriented server installation    | In progress | No slice completion marker            |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -51,8 +52,9 @@ from Conventional Commits as documented in [`releases.md`](releases.md).
 The Slices 17–23 remediation program is complete; see the separate
 [remediation closure](audits/2026-10-05-remediation-closure.md) for landed
 PR identities, verification, and retained limitations. Slice 24 is complete
-with non-blocking follow-ups; no next slice is selected. Candidate work remains
-provisional.
+with non-blocking follow-ups. Slice 25 is selected: connection-oriented server
+installation with a deliberately narrow automatic Direct WSS edge. Other
+candidate work remains provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -445,8 +447,9 @@ Delivered:
 
 - versioned `imp-server-<version>-linux-x86_64.tar.gz` release bundles;
 - an adjacent archive SHA-256 file plus an internal checksum manifest;
-- wheels for `imp-relay`, `imp-tinyfugue`, and the exact locked CPython 3.12
-  `websockets` dependency;
+- wheels for `imp-relay`, `imp-tinyfugue`, and the locked `websockets`
+  dependency, built with the uv-managed CPython pinned in
+  `services/relay/.python-version`;
 - a per-user installer using
   `~/.local/share/imp/releases/<version>/` and an atomic `current` link;
 - stable relay, feed, gateway, and TinyFugue action-helper paths independent of
@@ -856,20 +859,28 @@ Slice 24 blocker.
 
 #### Direct WSS public-edge automation
 
-Extend the server installer so users can choose a connection path directly,
-for example SSH, Direct WSS, or install-only, with an interactive prompt when
-no mode is supplied.
-
-The SSH path should keep the existing relay/feed setup and leave Managed versus
-External SSH as a desktop choice. The Direct path should guide or automate the
-supported public-edge setup: gateway provisioning, hostname/DNS validation,
-TLS/reverse-proxy configuration, route isolation, and public endpoint
-verification, finishing with the WSS URL and one-time pairing token needed by
-the desktop.
-
-Prefer a deliberately narrow supported deployment path over becoming a general
-DNS or infrastructure manager. Preserve the existing loopback relay,
-gateway-only exposure, credential, upgrade, and fail-closed guarantees.
+Selected as Slice 25. The connection-oriented installer and narrow Debian/Ubuntu
+Caddy path are implemented in the working tree; see
+[deployment connection selection](../deploy/README.md#connection-selection).
+Normal upgrades preserve gateway credentials/state and operator-owned edges;
+exact owned version-1 direct/version-2 NAT state migrates to schema-3 raw-target
+policy without a connection prompt when Direct is selected explicitly or the
+incoming gateway was enabled or active, including with `--no-start`.
+Inactive former-Direct SSH edges stay retained without a root/sudo requirement.
+Pending state, wrong UID, and config/unit drift are refused. The full original-URI CEL allowlist forwards only literal
+`/state`, `/action`, or `/healthz` with optional literal `?` query; the gateway
+still rejects noncanonical targets and queries. No authentication bypass was
+observed. Disposable Caddy 2.6.2 HTTPS/WebSocket-upgrade source-ledger matrices
+passed for both topologies, not public-CA or WSS frame/runtime acceptance.
+The self-contained frozen runtime is implemented. The user-reported NAT VM
+installation succeeded without host Python 3.12, with a publicly trusted
+TLS-ALPN certificate and external authenticated WSS, before acceptance stopped
+at the normalized-edge defect. Remaining live work is review, no-mode owned-edge
+migration and raw-path recheck, desktop GMCP/approved action where safe, and
+restart/upgrade preservation; no reboot without approval. Schedule directly-addressed
+acceptance as practical, but Slice 25 completion requires live acceptance of both
+directly-addressed Direct and real router/NAT TCP 443 deployments, including
+public-CA verification. This is not a release or slice-completion claim.
 
 #### Live connection reconfiguration
 

@@ -6,16 +6,33 @@ die() {
   exit 1
 }
 
-[[ $# -eq 1 ]] || die "usage: $0 ARCHIVE"
+[[ $# -ge 1 && $# -le 2 ]] || die "usage: $0 ARCHIVE [NEXT_ARCHIVE]"
 
 ARCHIVE="$(realpath "$1")"
+NEXT_ARCHIVE=""
+[[ $# -eq 2 ]] && NEXT_ARCHIVE="$(realpath "$2")"
 
 [[ -f "$ARCHIVE" ]] || die "archive not found: $ARCHIVE"
+[[ -z "$NEXT_ARCHIVE" || -f "$NEXT_ARCHIVE" ]] || die "archive not found: $NEXT_ARCHIVE"
 
-for command in python3.12 tar sha256sum readlink stat; do
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(realpath "$0")")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+
+for command in tar sha256sum readlink stat head; do
   command -v "$command" >/dev/null 2>&1 ||
     die "required command not found: $command"
 done
+
+# Developer harness interpreter (absolute, never a target dependency): drives PTYs,
+# fake systemd, and websocket clients. The installed system is exercised with a
+# guard first on PATH that makes python/python3/python3.12/pip/pip3 fail loudly.
+# Deterministic: only the prepared repo relay interpreter, never PATH or an override.
+DEV_PYTHON="$ROOT/services/relay/.venv/bin/python"
+[[ -x "$DEV_PYTHON" ]] ||
+  die "prepared developer Python missing: $DEV_PYTHON (run: uv sync --locked --project services/relay --managed-python)"
+IMP_SRC_PATH="$ROOT/services/relay/src:$ROOT/integrations/common/src:$ROOT/integrations/tinyfugue/src"
+PYTHONPATH="$IMP_SRC_PATH" "$DEV_PYTHON" -c 'import websockets, imp_relay' ||
+  die "developer Python lacks websockets/imp_relay: $DEV_PYTHON"
 
 if [[ -f "$ARCHIVE.sha256" ]]; then
   printf '=== outer checksum ===\n'
@@ -28,10 +45,67 @@ fi
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf -- "$WORK_DIR"' EXIT
 
+# Inside WORK_DIR but never allowlisted (guarded excludes it), so bare python/pip names are kernel-denied.
+GUARD_BIN="$WORK_DIR/guard-bin"
+mkdir -p "$GUARD_BIN"
+for name in python python3 python3.12 pip pip3; do
+  printf '#!/bin/sh\necho "target PATH python must not be used by the installed Imp runtime" >&2\nexit 97\n' \
+    > "$GUARD_BIN/$name"
+  chmod +x "$GUARD_BIN/$name"
+done
+export PATH="$GUARD_BIN:$PATH"
+export IMP_SRC_PATH
+unset PYTHONPATH PYTHONHOME VIRTUAL_ENV
+# Every shipping installed process tree runs developer Python -> Landlock EXECUTE-only guard ->
+# installed command, with no fallback. Only the bundle/fixture work tree may be executed besides
+# non-Python system ELF tools; the host/managed interpreters are denied by the kernel.
+GUARD="$SCRIPT_DIR/exec-guard.py"
+"$DEV_PYTHON" "$GUARD" --abi >/dev/null ||
+  die "Landlock exec guard unavailable (required, no fallback)"
+# Allow every immediate WORK_DIR entry (computed per call, so later homes/clients are covered) except guard-bin.
+guarded() {
+  local -a allow=()
+  local entry
+  for entry in "$WORK_DIR"/* "$WORK_DIR"/.[!.]*; do
+    if [[ -e "$entry" && "$entry" != "$GUARD_BIN" ]]; then allow+=(--allow "$entry"); fi
+  done
+  "$DEV_PYTHON" "$GUARD" "${allow[@]}" -- "$@"
+}
+
+expect_denied() {
+  local rc=0
+  guarded "$@" --version >/dev/null 2>"$WORK_DIR/denied.err" || rc=$?
+  [[ "$rc" -eq 126 ]] && grep -Fq 'Permission denied' "$WORK_DIR/denied.err" ||
+    die "guard did not deny $* (rc=$rc)"
+}
+BASE_PYTHON="$("$DEV_PYTHON" -c 'import sys; print(sys._base_executable)')"
+VENV_BIN="$(dirname "$DEV_PYTHON")"
+for target in "$DEV_PYTHON" "$(realpath "$DEV_PYTHON")" "$BASE_PYTHON" "$(realpath "$BASE_PYTHON")" \
+  "$(dirname "$(realpath "$BASE_PYTHON")")"/{python,python3,python3.12,pip,pip3} \
+  "$VENV_BIN"/{python,python3,python3.12,pip,pip3} \
+  /usr/bin/{python,python3,python3.12,pip,pip3} /usr/local/bin/{python3,pip3}; do
+  if [[ -e "$target" ]]; then expect_denied "$target"; fi
+done
+for name in python python3 python3.12 pip pip3; do
+  expect_denied "$name"
+  expect_denied /usr/bin/env "$name"
+  if [[ -e "$VENV_BIN/$name" ]]; then PATH="$VENV_BIN:/usr/bin:/bin" expect_denied "$name"; fi
+done
+printf 'exec guard: absolute, bare and env-resolved Python/pip denied by the kernel (rc 126)\n'
+
 EXTRACT_DIR="$WORK_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
 
 tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+
+NEXT_BUNDLE=""
+if [[ -n "$NEXT_ARCHIVE" ]]; then
+  mkdir -p "$WORK_DIR/next-extract"
+  tar -xzf "$NEXT_ARCHIVE" -C "$WORK_DIR/next-extract"
+  mapfile -t NEXT_TOP < <(find "$WORK_DIR/next-extract" -mindepth 1 -maxdepth 1 -type d -print)
+  [[ ${#NEXT_TOP[@]} -eq 1 ]] || die "expected exactly one top-level directory in NEXT_ARCHIVE"
+  NEXT_BUNDLE="${NEXT_TOP[0]}"
+fi
 
 mapfile -t TOP_LEVEL < <(
   find "$EXTRACT_DIR" \
@@ -82,12 +156,12 @@ mkdir -p "$HOME_DIR"
 printf '/echo existing TinyFugue startup\n' > "$HOME_DIR/.tfrc"
 
 HOME="$HOME_DIR" \
-  "$BUNDLE_DIR/install.sh" \
-  --no-start
+  guarded "$BUNDLE_DIR/install.sh" \
+  --no-start --connection none
 
 HOME="$HOME_DIR" \
-  "$BUNDLE_DIR/install.sh" \
-  --no-start
+  guarded "$BUNDLE_DIR/install.sh" \
+  --no-start --connection none
 
 EXPECTED_RELEASE="$HOME_DIR/.local/share/imp/releases/$VERSION"
 
@@ -96,84 +170,38 @@ EXPECTED_RELEASE="$HOME_DIR/.local/share/imp/releases/$VERSION"
 
 [[ "$(
   readlink "$HOME_DIR/.local/bin/imp-action-consumer"
-)" == "$HOME_DIR/.local/share/imp/current/.venv/bin/imp-action-consumer" ]] ||
+)" == "$HOME_DIR/.local/share/imp/current/bin/imp-action-consumer" ]] ||
   die "action-consumer symlink is incorrect"
 
 [[ "$(
   readlink "$HOME_DIR/.local/bin/imp-direct-wss"
-)" == "$HOME_DIR/.local/share/imp/current/.venv/bin/imp-direct-wss" ]] ||
+)" == "$HOME_DIR/.local/share/imp/current/bin/imp-direct-wss" ]] ||
   die "direct-wss symlink is incorrect"
 
-mapfile -t WEBSOCKETS_WHEELS < <(
-  find "$BUNDLE_DIR/wheels" \
-    -maxdepth 1 \
-    -type f \
-    -name 'websockets-*.whl' \
-    -print
-)
-
-[[ ${#WEBSOCKETS_WHEELS[@]} -eq 1 ]] ||
-  die "expected exactly one websockets wheel"
-
-WEBSOCKETS_WHEEL="$(basename "${WEBSOCKETS_WHEELS[0]}")"
-EXPECTED_WEBSOCKETS="${WEBSOCKETS_WHEEL#websockets-}"
-EXPECTED_WEBSOCKETS="${EXPECTED_WEBSOCKETS%%-*}"
-
-"$HOME_DIR/.local/share/imp/current/.venv/bin/python" \
-  - "$VERSION" "$EXPECTED_WEBSOCKETS" <<'PY_VERIFY'
-import asyncio
-import json
-import sys
-from importlib.metadata import version
-
-from imp_relay.server import RelayServer
-from websockets.asyncio.client import connect
-
-expected_imp = sys.argv[1]
-expected_websockets = sys.argv[2]
-
-assert version("imp-relay") == expected_imp
-assert version("imp-adapter") == expected_imp
-assert version("imp-tinyfugue") == expected_imp
-assert version("websockets") == expected_websockets
-
-async def verify_hello_version():
-    relay = RelayServer(port=0)
-    await relay.start()
-    try:
-        async with connect(f"ws://127.0.0.1:{relay.port}/state") as subscriber:
-            hello = json.loads(await subscriber.recv())
-            assert hello["relay"]["version"] == version("imp-relay") == expected_imp
-    finally:
-        await relay.close()
-
-asyncio.run(verify_hello_version())
-
-print("package and hello versions: OK")
-PY_VERIFY
-
-for entry in imp-relay imp-gateway imp-feed imp-action-consumer imp-direct-wss; do
-  script="$EXPECTED_RELEASE/.venv/bin/$entry"
-
-  [[ -x "$script" ]] ||
-    die "console script is not executable: $entry"
-
-  IFS= read -r shebang < "$script" ||
-    die "could not read console script: $entry"
-
-  [[ "$shebang" == '#!'* ]] ||
-    die "console script has no shebang: $entry"
-
-  interpreter="${shebang#\#!}"
-
-  [[ "$interpreter" == "$EXPECTED_RELEASE/.venv/bin/"* ]] ||
-    die "console script points outside final release: $entry -> $interpreter"
-
-  [[ -x "$interpreter" ]] ||
-    die "console script interpreter does not exist: $entry -> $interpreter"
+# The release is native: no venv, no wheelhouse, no interpreter on the target PATH.
+for path in .venv wheels; do
+  [[ ! -e "$EXPECTED_RELEASE/$path" ]] || die "release carries $path"
 done
 
-printf 'console script interpreters: OK\n'
+guarded "$EXPECTED_RELEASE/bin/imp-server" runtime-check "$VERSION" ||
+  die "runtime-check rejected the installed release"
+
+SERVER_INODE="$(stat -c '%d:%i' "$EXPECTED_RELEASE/bin/imp-server")"
+for entry in relay gateway feed action-consumer direct-wss direct-edge public-verify; do
+  binary="$EXPECTED_RELEASE/bin/imp-$entry"
+
+  [[ -x "$binary" && ! -L "$binary" ]] ||
+    die "role alias is not an executable regular file: imp-$entry"
+  [[ "$(stat -c '%d:%i' "$binary")" == "$SERVER_INODE" ]] ||
+    die "role alias is not a hardlink of imp-server: imp-$entry"
+  [[ "$(head -c4 "$binary")" == $'\x7f'ELF ]] ||
+    die "role alias is not a native executable: imp-$entry"
+done
+
+printf 'native multicall entrypoints: OK\n'
+
+printf '\n=== frozen relay/feed/gateway/action-consumer flow + native user systemd ===\n'
+"$DEV_PYTHON" "$SCRIPT_DIR/test-frozen-server.py" "$BUNDLE_DIR"
 
 [[ "$(
   grep -Fxc '/load ~/.config/imp/capture.tf' "$HOME_DIR/.tfrc"
@@ -201,16 +229,20 @@ mapfile -t TF_BACKUPS < <(
   die "capture.tf mode is not 600"
 
 grep -Fxq \
-  'ExecStart=%h/.local/share/imp/current/.venv/bin/imp-relay --host 127.0.0.1 --port 8787' \
+  'ExecStart=%h/.local/share/imp/current/bin/imp-server relay --host 127.0.0.1 --port 8787' \
   "$HOME_DIR/.config/systemd/user/imp-relay.service"
 
 grep -Fxq \
-  'ExecStart=%h/.local/share/imp/current/.venv/bin/imp-feed' \
+  'ExecStart=%h/.local/share/imp/current/bin/imp-server feed' \
   "$HOME_DIR/.config/systemd/user/imp-feed.service"
 
 grep -Fxq \
-  'ExecStart=%h/.local/share/imp/current/.venv/bin/imp-gateway --host 127.0.0.1 --port 8788 --relay-url ws://127.0.0.1:8787' \
+  'ExecStart=%h/.local/share/imp/current/bin/imp-server gateway --host 127.0.0.1 --port 8788 --relay-url ws://127.0.0.1:8787' \
   "$HOME_DIR/.config/systemd/user/imp-gateway.service"
+
+if grep -Eq 'python|\.venv|/bin/sh|^Environment=PATH' "$HOME_DIR"/.config/systemd/user/imp-*.service; then
+  die "installed units depend on Python, a venv, a shell, or PATH"
+fi
 
 assert_no_debris "$HOME_DIR"
 [[ ! -e "$HOME_DIR/.config/imp/gateway.env" ]] ||
@@ -222,104 +254,43 @@ printf 'idempotent reinstall: OK\n'
 printf '\n=== credential retention across same-version and distinct-release installs ===\n'
 
 UPGRADE_HOME="$WORK_DIR/upgrade-home"
-SYNTHETIC_BUNDLE="$WORK_DIR/synthetic-release"
 mkdir -p "$UPGRADE_HOME"
 printf '/load ~/.config/imp/capture.tf\n' > "$UPGRADE_HOME/.tfrc"
-HOME="$UPGRADE_HOME" "$BUNDLE_DIR/install.sh" --no-start
+HOME="$UPGRADE_HOME" guarded "$BUNDLE_DIR/install.sh" --no-start --connection none
 
 mkdir -p "$UPGRADE_HOME/.config/imp"
 printf 'IMP_GATEWAY_TOKEN_SHA256=%064d\n' 0 \
   > "$UPGRADE_HOME/.config/imp/gateway.env"
 CONFIG_SHA="$(sha256sum "$UPGRADE_HOME/.config/imp/gateway.env")"
 
-HOME="$UPGRADE_HOME" "$BUNDLE_DIR/install.sh" --no-start
+HOME="$UPGRADE_HOME" guarded "$BUNDLE_DIR/install.sh" --no-start
 [[ "$(sha256sum "$UPGRADE_HOME/.config/imp/gateway.env")" == "$CONFIG_SHA" ]] ||
   die "same-version reinstall changed gateway credentials"
 
-cp -a "$BUNDLE_DIR" "$SYNTHETIC_BUNDLE"
-SYNTHETIC_VERSION="$(
-  python3.12 - "$VERSION" "$SYNTHETIC_BUNDLE" <<'PY_SYNTHETIC_RELEASE'
-import base64
-import csv
-from hashlib import sha256
-from io import StringIO
-from pathlib import Path
-import re
-import sys
-from zipfile import ZIP_DEFLATED, ZipFile
-
-old_version, root_value = sys.argv[1:]
-root = Path(root_value)
-parts = old_version.rsplit(".", 1)
-new_version = f"{parts[0]}.{int(parts[1]) + 1}"
-wheel_dir = root / "wheels"
-
-for wheel in wheel_dir.glob("*.whl"):
-    if wheel.name.startswith("websockets-"):
-        continue
-    rewritten = {}
-    with ZipFile(wheel) as source:
-        for name in source.namelist():
-            renamed = name.replace(f"-{old_version}.dist-info/", f"-{new_version}.dist-info/")
-            data = source.read(name)
-            if name.endswith(".dist-info/METADATA"):
-                data = re.sub(
-                    rb"(?m)^Version: " + re.escape(old_version.encode()) + rb"$",
-                    f"Version: {new_version}".encode(),
-                    data,
-                )
-            rewritten[renamed] = data
-
-    record_path = next(name for name in rewritten if name.endswith(".dist-info/RECORD"))
-    rows = []
-    for name, data in rewritten.items():
-        if name == record_path:
-            rows.append((name, "", ""))
-        else:
-            digest = base64.urlsafe_b64encode(sha256(data).digest()).rstrip(b"=").decode()
-            rows.append((name, f"sha256={digest}", str(len(data))))
-    record = StringIO()
-    csv.writer(record, lineterminator="\n").writerows(rows)
-    rewritten[record_path] = record.getvalue().encode()
-
-    replacement = wheel.with_name(wheel.name.replace(f"-{old_version}-", f"-{new_version}-", 1))
-    with ZipFile(replacement, "w", ZIP_DEFLATED) as target:
-        for name, data in rewritten.items():
-            target.writestr(name, data)
-    wheel.unlink()
-
-(root / "VERSION").write_text(new_version + "\n")
-files = [
-    root / "VERSION",
-    root / "install.sh",
-    root / "capture.tf",
-    *sorted((root / "systemd").glob("*.service")),
-    *sorted(wheel_dir.glob("*.whl")),
-]
-(root / "SHA256SUMS").write_text(
-    "".join(
-        f"{sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root)}\n"
-        for path in files
-    )
-)
-print(new_version)
-PY_SYNTHETIC_RELEASE
-)"
-
-HOME="$UPGRADE_HOME" "$SYNTHETIC_BUNDLE/install.sh" --no-start
-[[ "$(readlink "$UPGRADE_HOME/.local/share/imp/current")" == \
-  "$UPGRADE_HOME/.local/share/imp/releases/$SYNTHETIC_VERSION" ]] ||
-  die "distinct-release install did not select the new runtime"
-[[ "$(readlink "$UPGRADE_HOME/.local/bin/imp-direct-wss")" == \
-  "$UPGRADE_HOME/.local/share/imp/current/.venv/bin/imp-direct-wss" ]] ||
-  die "distinct-release install did not preserve the stable CLI link"
-[[ "$(sha256sum "$UPGRADE_HOME/.config/imp/gateway.env")" == "$CONFIG_SHA" ]] ||
-  die "distinct-release install changed gateway credentials"
-printf 'credential retention and synthetic release selection: OK\n'
+# A distinct release needs a real second artifact: runtime-check validates the
+# embedded package metadata, so a rebranded copy of this bundle is invalid by design.
+UPGRADE_BUNDLE="$BUNDLE_DIR"
+if [[ -n "$NEXT_BUNDLE" ]]; then
+  UPGRADE_BUNDLE="$NEXT_BUNDLE"
+  NEXT_VERSION="$(tr -d '\r\n' < "$NEXT_BUNDLE/VERSION")"
+  [[ "$NEXT_VERSION" != "$VERSION" ]] || die "NEXT_ARCHIVE must be a distinct release"
+  HOME="$UPGRADE_HOME" guarded "$NEXT_BUNDLE/install.sh" --no-start
+  [[ "$(readlink "$UPGRADE_HOME/.local/share/imp/current")" == \
+    "$UPGRADE_HOME/.local/share/imp/releases/$NEXT_VERSION" ]] ||
+    die "distinct-release install did not select the new runtime"
+  [[ "$(readlink "$UPGRADE_HOME/.local/bin/imp-direct-wss")" == \
+    "$UPGRADE_HOME/.local/share/imp/current/bin/imp-direct-wss" ]] ||
+    die "distinct-release install did not preserve the stable CLI link"
+  [[ "$(sha256sum "$UPGRADE_HOME/.config/imp/gateway.env")" == "$CONFIG_SHA" ]] ||
+    die "distinct-release install changed gateway credentials"
+  printf 'credential retention and real distinct-release selection: OK\n'
+else
+  printf 'credential retention (same version): OK; distinct new-layout release not run (no NEXT_ARCHIVE; legacy-to-new upgrade is covered below)\n'
+fi
 
 printf '\n=== installed Direct WSS setup, rotation, and status ===\n'
 
-python3.12 - "$HOME_DIR" "$BUNDLE_DIR" "$SYNTHETIC_BUNDLE" <<'PY_DIRECT_WSS_BUNDLE'
+PYTHONPATH="$IMP_SRC_PATH" "$DEV_PYTHON" - "$HOME_DIR" "$BUNDLE_DIR" "$UPGRADE_BUNDLE" "$WORK_DIR" "$GUARD" <<'PY_DIRECT_WSS_BUNDLE'
 import hashlib
 import json
 import os
@@ -334,8 +305,16 @@ import tempfile
 import threading
 import time
 
-home, bundle, synthetic = map(Path, sys.argv[1:])
-runtime = home / ".local/share/imp/current/.venv/bin"
+home, bundle, upgrade, work, guard = map(Path, sys.argv[1:])
+
+
+def guarded(argv):
+    # Shipping installed processes only: developer Python -> exec-guard -> command.
+    allow = [a for p in sorted(work.iterdir()) if p.name != "guard-bin" for a in ("--allow", str(p))]
+    return [sys.executable, str(guard), *allow, "--", *map(str, argv)]
+
+
+runtime = home / ".local/share/imp/current/bin"
 cli = home / ".local/bin/imp-direct-wss"
 unit_path = home / ".config/systemd/user/imp-gateway.service"
 config_path = home / ".config/imp/gateway.env"
@@ -349,12 +328,12 @@ state = {
     "feed": False,
 }
 state_lock = threading.Lock()
-temporary = tempfile.TemporaryDirectory()
-socket_path = str(Path(temporary.name) / "systemd.sock")
-server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-server.bind(socket_path)
+temporary = tempfile.TemporaryDirectory(dir=work)
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind(("127.0.0.1", 0))
 server.listen()
 server.settimeout(0.2)
+control_port = server.getsockname()[1]
 events = []
 relay = None
 stop_server = threading.Event()
@@ -380,14 +359,14 @@ def start_gateway():
         state["fail_next_gateway_start"] = False
     env = os.environ.copy()
     env["IMP_GATEWAY_TOKEN_SHA256"] = assignment
-    binary = os.path.realpath(runtime / "imp-gateway")
-    state["gateway_release"] = Path(binary).parent.parent.parent.name
+    binary = os.path.realpath(runtime / "imp-server")
+    state["gateway_release"] = Path(binary).parent.parent.name
     process = subprocess.Popen(
-        [
-            binary,
+        guarded([
+            binary, "gateway",
             "--host", "127.0.0.1", "--port", "8788",
             "--relay-url", "ws://127.0.0.1:8787",
-        ],
+        ]),
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -416,8 +395,8 @@ def active(unit):
 def handle(arguments):
     args = arguments[1:] if arguments and arguments[0] == "--user" else arguments
     if len(args) >= 2 and args[0] == "show":
-        binary = str(home / ".local/share/imp/current/.venv/bin/imp-gateway")
-        command = [binary, "--host", "127.0.0.1", "--port", "8788",
+        binary = str(home / ".local/share/imp/current/bin/imp-server")
+        command = [binary, "gateway", "--host", "127.0.0.1", "--port", "8788",
                    "--relay-url", "ws://127.0.0.1:8787"]
         exec_start = f"{{ path={binary} ; argv[]={' '.join(command)} ; ignore_errors=no }}"
         values = {
@@ -492,26 +471,33 @@ def serve():
         except socket.timeout:
             continue
         with connection:
-            request = json.loads(connection.makefile("rb").readline())
+            connection.settimeout(5)
+            line = connection.makefile("rb").readline().rstrip(b"\n")
+            request = line.decode().split("\t") if line else []
             try:
                 with state_lock:
                     code, output = handle(request)
-                response = {"code": code, "output": output}
             except Exception:
-                response = {"code": 1, "output": ""}
-            connection.sendall(json.dumps(response).encode() + b"\n")
+                code, output = 1, ""
+            connection.sendall(f"{code}\n{output}".encode())
 
 
+# Bounded Bash client for the installed shell/CLI: tab-separated argv line out, numeric exit
+# code line then output until EOF back; arguments are fixed systemctl words, never credentials.
 client = Path(temporary.name) / "systemctl"
 client.write_text(
-    "#!/usr/bin/env python3\n"
-    "import json, os, socket, sys\n"
-    "s=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-    "s.connect(os.environ['IMP_TEST_SYSTEMD_SOCKET'])\n"
-    "s.sendall(json.dumps(sys.argv[1:]).encode()+b'\\n')\n"
-    "r=json.loads(s.makefile('rb').readline())\n"
-    "sys.stdout.write(r['output'])\n"
-    "raise SystemExit(r['code'])\n"
+    "#!/bin/bash\n"
+    "IFS=$'\\t'\n"
+    "exec 3<>\"/dev/tcp/127.0.0.1/${IMP_TEST_SYSTEMD_PORT:?}\" || exit 1\n"
+    "printf '%s\\n' \"$*\" >&3\n"
+    "IFS= read -r -t 10 -u 3 code || exit 1\n"
+    "[[ $code =~ ^[0-9]+$ ]] || exit 1\n"
+    "while :; do\n"
+    "  IFS= read -r -t 10 -u 3 line || { rc=$?; break; }\n"
+    "  printf '%s\\n' \"$line\"\n"
+    "done\n"
+    "((rc == 1)) || exit 1\n"
+    "exit \"$code\"\n"
 )
 client.chmod(0o755)
 server_thread = threading.Thread(target=serve, daemon=True)
@@ -520,17 +506,17 @@ environment = os.environ.copy()
 environment.update(
     HOME=str(home),
     PATH=f"{temporary.name}:{os.environ['PATH']}",
-    IMP_TEST_SYSTEMD_SOCKET=socket_path,
+    IMP_TEST_SYSTEMD_PORT=str(control_port),
 )
 environment.pop("PYTHONPATH", None)
 environment.pop("PYTHONHOME", None)
 environment.pop("IMP_GATEWAY_TOKEN_SHA256", None)
 
 
-def run_tty(command, expected=0):
+def run_tty(command, expected=0, confined=True):
     master, slave = pty.openpty()
     process = subprocess.Popen(
-        [str(arg) for arg in command],
+        guarded(command) if confined else [str(arg) for arg in command],
         env=environment,
         stdin=slave,
         stdout=slave,
@@ -595,7 +581,7 @@ try:
             print(f"Direct WSS PTY integration requires free loopback port {port}", file=sys.stderr)
             raise SystemExit(1)
     relay = subprocess.Popen(
-        [str(runtime / "imp-relay"), "--host", "127.0.0.1", "--port", "8787"],
+        guarded([runtime / "imp-relay", "--host", "127.0.0.1", "--port", "8787"]),
         env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -654,7 +640,7 @@ try:
 
     before_reinstall = config_path.read_bytes()
     completed = subprocess.run(
-        [str(bundle / "install.sh"), "--no-start"],
+        guarded([bundle / "install.sh", "--no-start", "--connection", "none"]),
         env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -693,7 +679,7 @@ try:
     import asyncio
     import logging
 
-    sys.path.insert(0, str(runtime.parent / "lib/python3.12/site-packages"))
+    # websockets client for the harness only; the installed runtime is frozen.
     from websockets.asyncio.client import connect
 
     async def verify_restored_credentials():
@@ -711,7 +697,7 @@ try:
 
     before_upgrade = config_path.read_bytes()
     upgraded = subprocess.run(
-        [str(synthetic / "install.sh")],
+        guarded([upgrade / "install.sh"]),
         env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -719,11 +705,11 @@ try:
     )
     assert upgraded.returncode == 0
     assert config_path.read_bytes() == before_upgrade
-    assert state["gateway_release"] == (synthetic / "VERSION").read_text().strip()
+    assert state["gateway_release"] == (upgrade / "VERSION").read_text().strip()
     assert state["starts"] == 6 and active("imp-gateway.service") and state["enabled"]
 
     manager = subprocess.run(
-        [str(client), "--user", "stop", "imp-gateway.service"],
+        guarded([client, "--user", "stop", "imp-gateway.service"]),
         env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -750,7 +736,7 @@ try:
     status_before = config_path.stat()
     lock_before = (config_path.parent / "gateway.env.lock").stat()
     status = subprocess.run(
-        [str(cli), "status"],
+        guarded([cli, "status"]),
         env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -762,9 +748,13 @@ try:
     assert config_path.stat().st_mtime_ns == status_before.st_mtime_ns
     assert (config_path.parent / "gateway.env.lock").stat().st_mtime_ns == lock_before.st_mtime_ns
 
+
     # Ubuntu user-private-group layout: 0775 ancestors under a 0700 ~/.config/imp.
-    # The account database is substituted inside the installed interpreter so the
-    # verdict cannot depend on the runner's real passwd/group contents.
+    # Source system-boundary injection (fixture-only, developer-harness evidence): the account
+    # database is substituted around the developer-interpreter source of imp_relay.direct_wss,
+    # because the frozen binary has no test hooks and the verdict must not depend on the
+    # runner's real passwd/group contents.
+    source_env = {**environment, "PYTHONPATH": os.environ["IMP_SRC_PATH"]}
     ancestors = {path: path.stat().st_mode & 0o7777 for path in (home / ".config", home / ".config/systemd", home / ".config/systemd/user")}
     account_cli = (
         "import grp, os, pwd, sys\n"
@@ -797,8 +787,8 @@ try:
             ),
         ):
             private_status = subprocess.run(
-                [str(runtime / "python"), "-c", account_cli, "status", *members],
-                env=environment,
+                [sys.executable, "-c", account_cli, "status", *members],
+                env=source_env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -811,9 +801,13 @@ try:
             assert inactive_token.decode() not in private_status.stdout + private_status.stderr
         assert config_path.stat().st_mtime_ns == status_before.st_mtime_ns
 
-        # Installed-code rotate under the same layout (gateway enabled + stopped here).
+        # Account-layout boundary injection only; frozen rotation is exercised above.
         before_rotate = config_path.read_bytes()
-        private_token = token_from(run_tty([runtime / "python", "-c", account_cli, "rotate", "imp-user"]))
+        environment["PYTHONPATH"] = source_env["PYTHONPATH"]  # source-boundary run only
+        try:
+            private_token = token_from(run_tty([sys.executable, "-c", account_cli, "rotate", "imp-user"], confined=False))
+        finally:
+            environment.pop("PYTHONPATH")
         assert private_token != inactive_token
         assert config_path.read_bytes() != before_rotate
         assert private_token not in config_path.read_bytes()
@@ -840,6 +834,13 @@ finally:
     temporary.cleanup()
 PY_DIRECT_WSS_BUNDLE
 
+printf '\n=== connection modes, legacy upgrade/rollback, and Direct edge (shipping frozen runtime; edge system boundary injected from source) ===\n'
+
+[[ -x "$BUNDLE_DIR/bin/imp-direct-edge" ]] ||
+  die "bundle is missing bin/imp-direct-edge"
+"$DEV_PYTHON" "$SCRIPT_DIR/test-installer-connections.py" \
+  "$BUNDLE_DIR" ${NEXT_BUNDLE:+"$NEXT_BUNDLE"}
+
 printf '\n=== custom TinyFugue startup override ===\n'
 
 CUSTOM_HOME="$WORK_DIR/custom-home"
@@ -849,8 +850,8 @@ printf '/echo default startup untouched\n' > "$CUSTOM_HOME/.tfrc"
 printf '/echo custom startup\n' > "$CUSTOM_HOME/custom.tf"
 
 HOME="$CUSTOM_HOME" \
-  "$BUNDLE_DIR/install.sh" \
-  --no-start \
+  guarded "$BUNDLE_DIR/install.sh" \
+  --no-start --connection none \
   --tf-startup "$CUSTOM_HOME/custom.tf"
 
 grep -Fxq \
@@ -869,8 +870,8 @@ MISSING_HOME="$WORK_DIR/missing-home"
 mkdir -p "$MISSING_HOME"
 
 if HOME="$MISSING_HOME" \
-   "$BUNDLE_DIR/install.sh" \
-   --no-start \
+   guarded "$BUNDLE_DIR/install.sh" \
+   --no-start --connection none \
    >"$WORK_DIR/missing-startup.out" 2>&1; then
   cat "$WORK_DIR/missing-startup.out" >&2
   die "missing default TinyFugue startup unexpectedly succeeded"
@@ -903,8 +904,8 @@ mkdir -p "$TAMPER_HOME"
 printf '\n; tampered\n' >> "$TAMPER_BUNDLE/capture.tf"
 
 if HOME="$TAMPER_HOME" \
-   "$TAMPER_BUNDLE/install.sh" \
-   --no-start \
+   guarded "$TAMPER_BUNDLE/install.sh" \
+   --no-start --connection none \
    >"$WORK_DIR/tamper.out" 2>&1; then
   cat "$WORK_DIR/tamper.out" >&2
   die "tampered bundle unexpectedly installed"
@@ -929,11 +930,11 @@ EXTRA_HOME="$WORK_DIR/extra-home"
 cp -a "$BUNDLE_DIR" "$EXTRA_BUNDLE"
 mkdir -p "$EXTRA_HOME"
 
-printf 'unlisted\n' > "$EXTRA_BUNDLE/wheels/unlisted.whl"
+printf 'unlisted\n' > "$EXTRA_BUNDLE/bin/unlisted"
 
 if HOME="$EXTRA_HOME" \
-   "$EXTRA_BUNDLE/install.sh" \
-   --no-start \
+   guarded "$EXTRA_BUNDLE/install.sh" \
+   --no-start --connection none \
    >"$WORK_DIR/extra-content.out" 2>&1; then
   cat "$WORK_DIR/extra-content.out" >&2
   die "bundle with unlisted content unexpectedly installed"
@@ -952,6 +953,28 @@ grep -Fq \
 
 printf 'unlisted bundle content rejection: OK\n'
 
+printf '\n=== symlink in bundle rejection ===\n'
+
+LINK_BUNDLE="$WORK_DIR/symlink-content"
+LINK_BUNDLE_HOME="$WORK_DIR/symlink-content-home"
+cp -a "$BUNDLE_DIR" "$LINK_BUNDLE"
+mkdir -p "$LINK_BUNDLE_HOME"
+ln -s /etc/passwd "$LINK_BUNDLE/bin/imp-unsafe-link"
+
+if HOME="$LINK_BUNDLE_HOME" guarded "$LINK_BUNDLE/install.sh" --no-start --connection none \
+  >"$WORK_DIR/symlink-content.out" 2>&1; then
+  die "bundle containing a symlink unexpectedly installed"
+fi
+grep -Fq 'unexpected symlink' "$WORK_DIR/symlink-content.out" ||
+  {
+    cat "$WORK_DIR/symlink-content.out" >&2
+    die "symlinked bundle content produced the wrong failure"
+  }
+[[ ! -e "$LINK_BUNDLE_HOME/.local/share/imp" ]] ||
+  die "symlinked bundle content changed the installation home"
+
+printf 'symlink rejection: OK\n'
+
 printf '\n=== unsafe Direct WSS link rejection ===\n'
 
 LINK_HOME="$WORK_DIR/unsafe-link-home"
@@ -959,7 +982,7 @@ mkdir -p "$LINK_HOME/.local/bin"
 printf '/echo startup\n' > "$LINK_HOME/.tfrc"
 ln -s /tmp/unrelated-command "$LINK_HOME/.local/bin/imp-direct-wss"
 
-if HOME="$LINK_HOME" "$BUNDLE_DIR/install.sh" --no-start \
+if HOME="$LINK_HOME" guarded "$BUNDLE_DIR/install.sh" --no-start --connection none \
   >/dev/null 2>&1; then
   die "installer accepted an unrelated imp-direct-wss symlink"
 fi
@@ -979,8 +1002,8 @@ mkdir -p "$ROLLBACK_HOME" "$FAKE_BIN"
 printf '/load ~/.config/imp/capture.tf\n' > "$ROLLBACK_HOME/.tfrc"
 
 HOME="$ROLLBACK_HOME" \
-  "$BUNDLE_DIR/install.sh" \
-  --no-start
+  guarded "$BUNDLE_DIR/install.sh" \
+  --no-start --connection none
 
 printf 'known-good\n' \
   > "$ROLLBACK_HOME/.local/share/imp/releases/$VERSION/rollback-marker"
@@ -997,9 +1020,9 @@ printf 'old-feed-unit\n' \
 printf 'old-gateway-unit\n' \
   > "$ROLLBACK_HOME/.config/systemd/user/imp-gateway.service"
 
-ln -sfn /tmp/old-action-consumer \
+ROLLBACK_ACTION_TARGET="$ROLLBACK_HOME/.local/share/imp/current/.venv/bin/imp-action-consumer"
+ln -sfn "$ROLLBACK_ACTION_TARGET" \
   "$ROLLBACK_HOME/.local/bin/imp-action-consumer"
-
 
 printf '/echo original startup\n' > "$ROLLBACK_HOME/.tfrc"
 
@@ -1041,7 +1064,10 @@ case "$2" in
     unit="${3:?}"
     if [[ "$unit" == imp-relay.service &&
           ! -e "${IMP_TEST_RELAY_FAIL_MARKER:?}" ]]; then
-      : > "$IMP_TEST_RELAY_FAIL_MARKER"
+      # Injected failure: the unit was active, is now failed/inactive; record outside the fixture HOME.
+      if [[ -e "$state/active-$unit" ]]; then echo active-before > "$IMP_TEST_RELAY_FAIL_MARKER"
+      else echo inactive-before > "$IMP_TEST_RELAY_FAIL_MARKER"; fi
+      rm -f "$state/active-$unit"
       exit 1
     fi
     : > "$state/active-$unit"
@@ -1069,7 +1095,7 @@ HOME="$START_HOME" \
   IMP_TEST_SYSTEMCTL_LOG="$WORK_DIR/start-systemctl.log" \
   IMP_TEST_SYSTEMCTL_STATE="$START_STATE" \
   IMP_TEST_RELAY_FAIL_MARKER="$WORK_DIR/no-relay-failure" \
-  "$BUNDLE_DIR/install.sh" \
+  guarded "$BUNDLE_DIR/install.sh" --connection none \
   >"$WORK_DIR/start.out" 2>&1
 
 [[ -e "$START_STATE/active-imp-relay.service" &&
@@ -1100,7 +1126,7 @@ HOME="$INACTIVE_DISABLED_HOME" \
   IMP_TEST_SYSTEMCTL_LOG="$WORK_DIR/inactive-disabled.log" \
   IMP_TEST_SYSTEMCTL_STATE="$INACTIVE_DISABLED_STATE" \
   IMP_TEST_RELAY_FAIL_MARKER="$WORK_DIR/no-relay-failure" \
-  "$BUNDLE_DIR/install.sh" \
+  guarded "$BUNDLE_DIR/install.sh" --connection none \
   >"$WORK_DIR/inactive-disabled.out" 2>&1
 [[ ! -e "$INACTIVE_DISABLED_STATE/active-imp-gateway.service" &&
    ! -e "$INACTIVE_DISABLED_STATE/enabled-imp-gateway.service" ]] ||
@@ -1116,7 +1142,7 @@ HOME="$ACTIVE_DISABLED_HOME" \
   IMP_TEST_SYSTEMCTL_LOG="$WORK_DIR/active-disabled.log" \
   IMP_TEST_SYSTEMCTL_STATE="$ACTIVE_DISABLED_STATE" \
   IMP_TEST_RELAY_FAIL_MARKER="$WORK_DIR/no-relay-failure" \
-  "$BUNDLE_DIR/install.sh" \
+  guarded "$BUNDLE_DIR/install.sh" --connection none \
   >"$WORK_DIR/active-disabled.out" 2>&1
 [[ -e "$ACTIVE_DISABLED_STATE/active-imp-gateway.service" &&
    ! -e "$ACTIVE_DISABLED_STATE/enabled-imp-gateway.service" ]] ||
@@ -1135,7 +1161,7 @@ if HOME="$ROLLBACK_HOME" \
    IMP_TEST_SYSTEMCTL_LOG="$ROLLBACK_SYSTEMCTL_LOG" \
    IMP_TEST_SYSTEMCTL_STATE="$ROLLBACK_SYSTEMCTL_STATE" \
    IMP_TEST_RELAY_FAIL_MARKER="$ROLLBACK_RELAY_FAIL_MARKER" \
-   "$BUNDLE_DIR/install.sh" \
+   guarded "$BUNDLE_DIR/install.sh" --connection none \
    >"$WORK_DIR/rollback.out" 2>&1; then
   cat "$WORK_DIR/rollback.out" >&2
   die "failed-activation test unexpectedly succeeded"
@@ -1169,6 +1195,11 @@ for unexpected_call in \
   fi
 done
 
+[[ "$(<"$ROLLBACK_RELAY_FAIL_MARKER")" == active-before ]] ||
+  die "injected relay restart failure did not start from an active relay"
+[[ "$(grep -Fxc -- '--user restart imp-relay.service' "$ROLLBACK_SYSTEMCTL_LOG")" -eq 2 ]] ||
+  die "rollback did not restart the relay that the injected failure left inactive"
+
 printf 'service-state rollback: OK\n'
 
 grep -Fxq \
@@ -1194,7 +1225,7 @@ grep -Fxq old-gateway-unit \
 
 [[ "$(
   readlink "$ROLLBACK_HOME/.local/bin/imp-action-consumer"
-)" == "/tmp/old-action-consumer" ]] ||
+)" == "$ROLLBACK_ACTION_TARGET" ]] ||
   die "action-consumer link rollback failed"
 
 grep -Fxq \
@@ -1230,12 +1261,12 @@ assert_no_debris "$ROLLBACK_HOME"
 
 [[ "$(
   readlink "$ROLLBACK_HOME/.local/bin/imp-direct-wss"
-)" == "$ROLLBACK_HOME/.local/share/imp/current/.venv/bin/imp-direct-wss" ]] ||
+)" == "$ROLLBACK_HOME/.local/share/imp/current/bin/imp-direct-wss" ]] ||
   die "direct-wss link rollback failed"
 
 printf 'runtime rollback: OK\n'
 printf 'integration-file rollback: OK\n'
 printf 'TinyFugue startup rollback: OK\n'
 
-printf 'Fake systemd models state and launches real CLI-fixture gateway/relay processes; it does not validate real user-systemd behavior.\n'
+printf 'Fake systemd models state for installer rollback and launches real frozen gateway/relay processes; real user-systemd evidence is the isolated native phase of test-frozen-server.py. Source-boundary injection (edge root boundary, account database) is developer-harness-only.\n'
 printf '\nserver bundle acceptance: PASS\n'

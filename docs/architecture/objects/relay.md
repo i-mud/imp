@@ -35,8 +35,8 @@ there is no second listener and no HTTP framework.
 
 `hello.relay.version` comes from the running `imp-relay` distribution's Python
 package metadata. Release automation updates `services/relay/pyproject.toml`;
-uv source-tree execution installs that metadata, server wheels carry it, and
-the frozen desktop sidecar explicitly includes it. Missing metadata fails
+uv source-tree execution installs that metadata, the frozen server runtime and
+the frozen desktop sidecar explicitly include it. Missing metadata fails
 startup rather than advertising a fallback. This implementation identity is
 separate from wire compatibility (`protocol: 2`).
 

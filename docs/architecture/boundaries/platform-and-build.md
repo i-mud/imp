@@ -21,9 +21,16 @@ This boundary records durable requirements rather than a live workstation
 inventory:
 
 - the root package requires Node.js 24 or newer;
-- all Python projects require Python 3.12 or newer and use `uv`;
-- Linux CI runs `npm run check` with Node 24, Python 3.12, and the repository's
-  pinned `uv` setup;
+- all Python projects require Python 3.12 or newer and use `uv` for source
+  development and builds; the relay/build/release environment is the locked
+  `uv sync --locked --project services/relay --managed-python` environment on
+  the exact interpreter in `services/relay/.python-version`;
+- the released Linux server bundle is self-contained and needs no host Python;
+  its binary floor (x86_64, glibc 2.36+, standard loader, `libz.so.1`, system
+  CA store) is enforced by a release ABI gate and is distinct from the
+  automatic installer's Debian 12+/Ubuntu 24.04+ support scope;
+- Linux CI runs `npm run check` with Node 24, that pinned Python, and the
+  repository's pinned `uv` setup;
 - Windows CI runs the native Rust tests and builds the x64 NSIS installer with
   Node 24 and stable Rust; and
 - native Windows development requires the MSVC Rust host, Microsoft C++ build

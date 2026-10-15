@@ -13,6 +13,10 @@ Usage: ./install.sh [options]
 Install the Imp server runtime for the current user.
 
 Options:
+  --connection MODE  Choose ssh, direct, or none. Existing installs preserve
+                     connection state when this option is omitted.
+  --hostname HOST    Public DNS hostname for Direct WSS.
+  --behind-nat       Direct behind a router forwarding TCP 443 to this host.
   --tf-startup FILE  Add the Imp capture hook to FILE instead of the
                      default ~/.tfrc.
   --no-start         Install files and systemd units without starting or
@@ -24,9 +28,35 @@ USAGE
 TF_STARTUP="$HOME/.tfrc"
 TF_STARTUP_EXPLICIT=0
 START_SERVICES=1
+CONNECTION=""
+PUBLIC_HOSTNAME=""
+BEHIND_NAT=0
+DIRECT_EDGE_OPTIONS=()
+PUBLIC_VERIFY_OPTIONS=()
 
 while (($#)); do
   case "$1" in
+    --connection)
+      (($# >= 2)) || die "--connection requires ssh, direct, or none"
+      [[ -z "$CONNECTION" ]] || die "--connection may be supplied only once"
+      case "$2" in
+        ssh|direct|none) CONNECTION="$2" ;;
+        *) die "--connection requires ssh|direct|none" ;;
+      esac
+      shift 2
+      ;;
+    --hostname)
+      (($# >= 2)) || die "--hostname requires a public DNS hostname"
+      [[ -z "$PUBLIC_HOSTNAME" ]] || die "--hostname may be supplied only once"
+      PUBLIC_HOSTNAME="$2"
+      [[ -n "$PUBLIC_HOSTNAME" ]] || die "--hostname requires a public DNS hostname"
+      shift 2
+      ;;
+    --behind-nat)
+      (( ! BEHIND_NAT )) || die "--behind-nat may be supplied only once"
+      BEHIND_NAT=1
+      shift
+      ;;
     --tf-startup)
       (($# >= 2)) || die "--tf-startup requires a path"
       TF_STARTUP="$2"
@@ -51,8 +81,6 @@ done
 [[ "$(uname -s)" == "Linux" ]] || die "this Imp server bundle supports Linux only"
 [[ "$(uname -m)" == "x86_64" ]] || die "this Imp server bundle supports x86_64 only"
 
-command -v python3.12 >/dev/null 2>&1 ||
-  die "Python 3.12 is required"
 command -v sha256sum >/dev/null 2>&1 ||
   die "sha256sum is required"
 
@@ -67,6 +95,7 @@ VERSION_FILE="$BUNDLE_DIR/VERSION"
 [[ -f "$VERSION_FILE" ]] || die "bundle is missing VERSION"
 [[ -f "$BUNDLE_DIR/SHA256SUMS" ]] || die "bundle is missing SHA256SUMS"
 [[ -f "$BUNDLE_DIR/capture.tf" ]] || die "bundle is missing capture.tf"
+[[ -f "$BUNDLE_DIR/bin/imp-server" ]] || die "bundle is missing bin/imp-server"
 
 VERSION="$(tr -d '\r\n' < "$VERSION_FILE")"
 
@@ -79,79 +108,13 @@ printf 'Verifying Imp server bundle...\n'
   sha256sum -c SHA256SUMS
 )
 
-python3.12 - "$BUNDLE_DIR" <<'PY_BUNDLE_INVENTORY'
-from pathlib import Path
-import string
-import sys
-
-root = Path(sys.argv[1])
-manifest = root / "SHA256SUMS"
-
-expected: list[str] = []
-
-for raw in manifest.read_text(encoding="utf-8").splitlines():
-    parts = raw.split(maxsplit=1)
-    if len(parts) != 2:
-        raise SystemExit("invalid SHA256SUMS entry")
-
-    digest, name = parts
-    name = name.removeprefix("*")
-    relative = Path(name)
-
-    if (
-        len(digest) != 64
-        or any(char not in string.hexdigits for char in digest)
-        or not name
-        or relative.is_absolute()
-        or ".." in relative.parts
-        or name == "SHA256SUMS"
-    ):
-        raise SystemExit(f"invalid SHA256SUMS entry: {raw!r}")
-
-    expected.append(relative.as_posix())
-
-if len(expected) != len(set(expected)):
-    raise SystemExit("SHA256SUMS contains duplicate paths")
-
-actual: list[str] = []
-
-for path in root.rglob("*"):
-    relative = path.relative_to(root).as_posix()
-
-    if path.is_symlink():
-        raise SystemExit(f"bundle contains an unexpected symlink: {relative}")
-
-    if path.is_file():
-        if relative != "SHA256SUMS":
-            actual.append(relative)
-    elif not path.is_dir():
-        raise SystemExit(f"bundle contains an unsupported path type: {relative}")
-
-expected_set = set(expected)
-actual_set = set(actual)
-
-if actual_set != expected_set:
-    missing = sorted(expected_set - actual_set)
-    extra = sorted(actual_set - expected_set)
-    raise SystemExit(
-        "bundle contents do not match SHA256SUMS: "
-        f"missing={missing!r} extra={extra!r}"
-    )
-PY_BUNDLE_INVENTORY
+"$BUNDLE_DIR/bin/imp-server" bundle-check "$BUNDLE_DIR"
 
 BUNDLE_ID=""
 read -r BUNDLE_ID _ < <(sha256sum "$BUNDLE_DIR/SHA256SUMS")
 
 [[ "$BUNDLE_ID" =~ ^[0-9a-f]{64}$ ]] ||
   die "could not identify verified server bundle"
-
-if [[ ! -f "$TF_STARTUP" ]]; then
-  if ((TF_STARTUP_EXPLICIT)); then
-    die "TinyFugue startup file does not exist: $TF_STARTUP"
-  fi
-
-  die "default TinyFugue startup file does not exist: $TF_STARTUP; use --tf-startup FILE for a different startup file"
-fi
 
 DATA_DIR="$HOME/.local/share/imp"
 RELEASES_DIR="$DATA_DIR/releases"
@@ -166,22 +129,112 @@ SYSTEMD_DIR="$HOME/.config/systemd/user"
 ACTION_LINK="$BIN_DIR/imp-action-consumer"
 DIRECT_WSS_LINK="$BIN_DIR/imp-direct-wss"
 
+# Missing one expected file is not evidence of a fresh installation.
+EXISTING_INSTALL=0
+SERVICE_STATE_UNKNOWN=0
+for path in "$DATA_DIR" "$CONFIG_DIR" "$STATE_DIR" "$ACTION_LINK" "$DIRECT_WSS_LINK" \
+  "$SYSTEMD_DIR/imp-relay.service" "$SYSTEMD_DIR/imp-feed.service" \
+  "$SYSTEMD_DIR/imp-gateway.service" /etc/imp/direct-edge.json; do
+  if [[ -e "$path" || -L "$path" ]]; then
+    EXISTING_INSTALL=1
+  fi
+done
+if ((!EXISTING_INSTALL)) && command -v systemctl >/dev/null 2>&1; then
+  for unit in imp-relay.service imp-feed.service imp-gateway.service; do
+    if systemctl --user is-active --quiet "$unit" 2>/dev/null ||
+       systemctl --user is-enabled --quiet "$unit" 2>/dev/null; then
+      EXISTING_INSTALL=1
+    elif loaded="$(systemctl --user show "$unit" --property=LoadState --value 2>/dev/null)"; then
+      if [[ -n "$loaded" && "$loaded" != "not-found" ]]; then
+        EXISTING_INSTALL=1
+      fi
+    else
+      SERVICE_STATE_UNKNOWN=1
+    fi
+  done
+fi
+
+if [[ -z "$CONNECTION" ]] && ((!EXISTING_INSTALL)); then
+  if ((SERVICE_STATE_UNKNOWN)) || [[ ! -t 0 || ! -t 1 ]]; then
+    die "specify --connection ssh|direct|none; a fresh connection mode cannot be chosen non-interactively or with unknown user-service state"
+  fi
+  printf '\nHow will the Imp desktop connect?\n\n1. SSH\n2. Direct WSS\n3. Install only / configure later\n'
+  read -r -p 'Choice [1-3]: ' choice || die "connection selection interrupted"
+  case "$choice" in
+    1) CONNECTION=ssh ;;
+    2) CONNECTION=direct ;;
+    3) CONNECTION=none ;;
+    *) die "choose 1, 2, or 3, or rerun with --connection ssh|direct|none" ;;
+  esac
+fi
+if [[ "$CONNECTION" == direct ]]; then
+  ((START_SERVICES)) || die "--connection direct cannot be combined with --no-start"
+  if [[ -z "$PUBLIC_HOSTNAME" && -t 0 && -t 1 ]]; then
+    read -r -p 'Public hostname: ' PUBLIC_HOSTNAME || die "hostname selection interrupted"
+  fi
+  [[ -n "$PUBLIC_HOSTNAME" ]] || die "--connection direct requires --hostname HOST"
+  PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME,,}"
+  "$BUNDLE_DIR/bin/imp-server" direct-edge hostname "$PUBLIC_HOSTNAME"
+elif [[ -n "$PUBLIC_HOSTNAME" ]]; then
+  die "--hostname is supported only with --connection direct"
+fi
+if ((BEHIND_NAT)) && [[ "$CONNECTION" != direct ]]; then
+  die "--behind-nat is supported only with --connection direct"
+fi
+
+if [[ ! -f "$TF_STARTUP" ]]; then
+  if ((TF_STARTUP_EXPLICIT)); then
+    die "TinyFugue startup file does not exist: $TF_STARTUP"
+  fi
+
+  die "default TinyFugue startup file does not exist: $TF_STARTUP; use --tf-startup FILE for a different startup file"
+fi
+
+DIRECT_HAS_CREDENTIAL=0
+if [[ -e "$CONFIG_DIR/gateway.env" || -L "$CONFIG_DIR/gateway.env" ]]; then
+  DIRECT_HAS_CREDENTIAL=1
+fi
+if [[ "$CONNECTION" == direct ]] && ((!DIRECT_HAS_CREDENTIAL)); then
+  if ((BEHIND_NAT)); then
+    DIRECT_EDGE_OPTIONS=(--behind-nat)
+    "$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" "${DIRECT_EDGE_OPTIONS[@]}"
+  elif dns_error="$("$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" 2>&1)"; then
+    printf '%s\n' "$dns_error"
+  elif [[ -t 0 && -t 1 ]] &&
+       nat_address="$("$BUNDLE_DIR/bin/imp-server" direct-edge nat-candidate "$PUBLIC_HOSTNAME" 2>/dev/null)"; then
+    printf '\n%s resolves to %s, but that address is not assigned\ndirectly to this machine.\n\n' "$PUBLIC_HOSTNAME" "$nat_address"
+    printf 'Is this machine behind a router/NAT with TCP port 443 forwarded here?\n\n1. Yes, use NAT / port-forwarded Direct\n2. No, stop and fix DNS\n'
+    read -r -p 'Choice [2]: ' nat_choice || die "NAT selection interrupted"
+    [[ "$nat_choice" == 1 ]] || die "Direct stopped; fix DNS or forward TCP 443 and rerun with --behind-nat"
+    BEHIND_NAT=1
+    DIRECT_EDGE_OPTIONS=(--behind-nat)
+    "$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" "${DIRECT_EDGE_OPTIONS[@]}"
+  else
+    printf '%s\n' "$dns_error" >&2
+    die "Direct DNS preflight failed; NAT requires explicit --behind-nat and one global A record with no AAAA"
+  fi
+  [[ -t 0 && -t 1 ]] || die "new Direct provisioning requires interactive stdin and stdout; rerun from a terminal"
+  if ((BEHIND_NAT)); then
+    PUBLIC_VERIFY_OPTIONS=(--verify-via-loopback)
+  fi
+fi
+
 if [[ -e "$CURRENT_LINK" && ! -L "$CURRENT_LINK" ]]; then
   die "$CURRENT_LINK exists but is not a symlink"
 fi
 
-if [[ -e "$ACTION_LINK" && ! -L "$ACTION_LINK" ]]; then
-  die "$ACTION_LINK exists but is not a symlink"
-fi
-
-if [[ -e "$DIRECT_WSS_LINK" && ! -L "$DIRECT_WSS_LINK" ]]; then
-  die "$DIRECT_WSS_LINK exists but is not a symlink"
-fi
-
-if [[ -L "$DIRECT_WSS_LINK" &&
-      "$(readlink "$DIRECT_WSS_LINK")" != "$CURRENT_LINK/.venv/bin/imp-direct-wss" ]]; then
-  die "$DIRECT_WSS_LINK points somewhere other than this install's runtime"
-fi
+# Only this install's runtime, or its previous .venv layout, may be migrated.
+for link in "$ACTION_LINK" "$DIRECT_WSS_LINK"; do
+  name="${link##*/}"
+  if [[ -e "$link" && ! -L "$link" ]]; then
+    die "$link exists but is not a symlink"
+  fi
+  if [[ -L "$link" ]]; then
+    target="$(readlink "$link")"
+    [[ "$target" == "$CURRENT_LINK/bin/$name" || "$target" == "$CURRENT_LINK/.venv/bin/$name" ]] ||
+      die "$link points somewhere other than this install's runtime"
+  fi
+done
 
 mkdir -p \
   "$RELEASES_DIR" \
@@ -205,6 +258,13 @@ FEED_WAS_ACTIVE=0
 GATEWAY_WAS_ACTIVE=0
 RELAY_WAS_ENABLED=0
 FEED_WAS_ENABLED=0
+GATEWAY_WAS_ENABLED=0
+GATEWAY_CONNECTION_CHANGED=0
+SSH_CONNECTION_COMMITTED=0
+commit_status=0
+EDGE_PENDING=0
+DIRECT_PROVISIONING_STARTED=0
+TARGET_UID="$(id -u)"
 
 backup_path() {
   local source="$1"
@@ -219,7 +279,7 @@ restore_path() {
   local target="$1"
   local key="$2"
 
-  rm -f -- "$target"
+  rm -f -- "$target" || return
 
   if [[ -e "$FILES_BACKUP_DIR/$key" ||
         -L "$FILES_BACKUP_DIR/$key" ]]; then
@@ -231,10 +291,6 @@ verify_release_runtime() {
   local release="$1"
   local expected_bundle_id="$2"
   local actual_bundle_id=""
-  local entry=""
-  local script=""
-  local shebang=""
-  local interpreter=""
 
   [[ -f "$release/BUNDLE_SHA256" ]] ||
     die "existing Imp release is missing its bundle identity: $release"
@@ -244,50 +300,18 @@ verify_release_runtime() {
   [[ "$actual_bundle_id" == "$expected_bundle_id" ]] ||
     die "Imp release $VERSION already exists from a different bundle"
 
-  [[ -x "$release/.venv/bin/python" ]] ||
-    die "Imp release is missing its Python runtime: $release"
+  [[ -x "$release/bin/imp-server" ]] ||
+    die "Imp release is missing its runtime: $release"
 
-  "$release/.venv/bin/python" - "$VERSION" <<'PY_VERIFY_RUNTIME'
-from importlib.metadata import version
-import sys
-
-expected = sys.argv[1]
-
-for package in ("imp-relay", "imp-adapter", "imp-tinyfugue"):
-    actual = version(package)
-    if actual != expected:
-        raise SystemExit(
-            f"{package}: expected version {expected}, installed {actual}"
-        )
-PY_VERIFY_RUNTIME
-
-  for entry in imp-relay imp-gateway imp-feed imp-action-consumer imp-direct-wss; do
-    script="$release/.venv/bin/$entry"
-
-    [[ -x "$script" ]] ||
-      die "Imp release is missing console script: $script"
-
-    IFS= read -r shebang < "$script" ||
-      die "could not read console script: $script"
-
-    [[ "$shebang" == '#!'* ]] ||
-      die "Imp console script has no interpreter: $script"
-
-    interpreter="${shebang#\#!}"
-
-    [[ "$interpreter" == "$release/.venv/bin/"* ]] ||
-      die "Imp console script points outside its release: $entry -> $interpreter"
-
-    [[ -x "$interpreter" ]] ||
-      die "Imp console script has missing interpreter: $entry -> $interpreter"
-  done
+  "$release/bin/imp-server" runtime-check "$VERSION"
 }
 
 if [[ -L "$CURRENT_LINK" ]]; then
   OLD_CURRENT="$(readlink "$CURRENT_LINK")"
 fi
 
-if ((START_SERVICES)); then
+# --no-start still needs the incoming gateway state to select retained Direct migration.
+if command -v systemctl >/dev/null 2>&1; then
   if systemctl --user is-active --quiet imp-relay.service; then
     RELAY_WAS_ACTIVE=1
   fi
@@ -307,46 +331,68 @@ if ((START_SERVICES)); then
   if systemctl --user is-enabled --quiet imp-feed.service; then
     FEED_WAS_ENABLED=1
   fi
+
+  if systemctl --user is-enabled --quiet imp-gateway.service; then
+    GATEWAY_WAS_ENABLED=1
+  fi
 fi
 
 cleanup() {
   status=$?
+  set +e
+  # A recorded SSH commit interruption remains authoritative through trap restoration.
+  if ((commit_status != 0)); then status=$commit_status; fi
   trap - EXIT
+  trap '' INT TERM HUP PIPE
+  restoration_failed=0
 
   if ((status != 0)); then
+    if ((EDGE_PENDING)); then
+      "$BUNDLE_DIR/bin/imp-server" direct-edge rollback "$TARGET_UID" ||
+        printf 'error: public-edge restoration failed; inspect imp-caddy.service before retrying\n' >&2 || true
+    fi
+    # The child may have handed off its token before a pending parent signal runs.
+    # Presence also retains malformed/incomplete state for recovery; never inspect its contents here.
+    if ((DIRECT_PROVISIONING_STARTED)) &&
+       [[ -e "$CONFIG_DIR/gateway.env" || -L "$CONFIG_DIR/gateway.env" ]]; then
+      printf 'error: Direct provisioning may have handed off a credential; local installation retained, public-edge recovery required\n' >&2 || true
+      printf 'Inspect imp-direct-wss status and the public edge before retrying; do not rotate implicitly.\n' >&2 || true
+      rm -rf -- "$FILES_BACKUP_DIR"
+      exit "$status"
+    fi
     if ((CURRENT_SWITCHED)); then
       if [[ -n "$OLD_CURRENT" ]]; then
         rollback_link="$DATA_DIR/.current.rollback.$$"
-        rm -f -- "$rollback_link"
-        ln -s "$OLD_CURRENT" "$rollback_link"
-        mv -Tf -- "$rollback_link" "$CURRENT_LINK"
+        rm -f -- "$rollback_link" &&
+          ln -s "$OLD_CURRENT" "$rollback_link" &&
+          mv -Tf -- "$rollback_link" "$CURRENT_LINK" || restoration_failed=1
       else
-        rm -f -- "$CURRENT_LINK"
+        rm -f -- "$CURRENT_LINK" || restoration_failed=1
       fi
     fi
 
-    if ((RELEASE_PLACED)); then
-      rm -rf -- "$RELEASE_DIR"
+    if ((RELEASE_PLACED && !restoration_failed)); then
+      rm -rf -- "$RELEASE_DIR" || restoration_failed=1
     fi
 
     if ((FILES_BACKUP_READY)); then
-      restore_path "$ACTION_LINK" action-consumer
-      restore_path "$CONFIG_DIR/capture.tf" capture.tf
-      restore_path "$SYSTEMD_DIR/imp-relay.service" imp-relay.service
-      restore_path "$SYSTEMD_DIR/imp-feed.service" imp-feed.service
-      restore_path "$SYSTEMD_DIR/imp-gateway.service" imp-gateway.service
-      restore_path "$DIRECT_WSS_LINK" direct-wss
+      restore_path "$ACTION_LINK" action-consumer || restoration_failed=1
+      restore_path "$CONFIG_DIR/capture.tf" capture.tf || restoration_failed=1
+      restore_path "$SYSTEMD_DIR/imp-relay.service" imp-relay.service || restoration_failed=1
+      restore_path "$SYSTEMD_DIR/imp-feed.service" imp-feed.service || restoration_failed=1
+      restore_path "$SYSTEMD_DIR/imp-gateway.service" imp-gateway.service || restoration_failed=1
+      restore_path "$DIRECT_WSS_LINK" direct-wss || restoration_failed=1
     fi
 
     if ((TF_STARTUP_CHANGED)) &&
        [[ -n "$TF_STARTUP_BACKUP" &&
           -f "$TF_STARTUP_BACKUP" ]]; then
-      cp -p -- "$TF_STARTUP_BACKUP" "$TF_STARTUP"
-      rm -f -- "$TF_STARTUP_BACKUP"
+      cp -p -- "$TF_STARTUP_BACKUP" "$TF_STARTUP" &&
+        rm -f -- "$TF_STARTUP_BACKUP" || restoration_failed=1
     fi
 
     if ((CURRENT_SWITCHED && START_SERVICES)); then
-      printf 'Restoring previous Imp installation after failed activation...\n' >&2
+      printf 'Restoring previous Imp installation after failed activation...\n' >&2 || true
 
       systemctl --user daemon-reload || true
       systemctl --user reset-failed \
@@ -378,19 +424,35 @@ cleanup() {
         systemctl --user stop imp-feed.service || true
       fi
 
-      if ((GATEWAY_WAS_ACTIVE)); then
+      if ((GATEWAY_CONNECTION_CHANGED && !SSH_CONNECTION_COMMITTED)); then
+        if ((GATEWAY_WAS_ENABLED)); then
+          systemctl --user enable imp-gateway.service || true
+        else
+          systemctl --user disable imp-gateway.service || true
+        fi
+        if ((GATEWAY_WAS_ACTIVE)); then
+          systemctl --user restart imp-gateway.service || true
+        else
+          systemctl --user stop imp-gateway.service || true
+        fi
+      elif ((GATEWAY_WAS_ACTIVE && !SSH_CONNECTION_COMMITTED)); then
         systemctl --user restart imp-gateway.service || true
       fi
     fi
   fi
 
-  if [[ -d "$FILES_BACKUP_DIR" ]]; then
+  if ((restoration_failed)); then
+    printf 'error: filesystem restoration incomplete; rollback backups retained at %s\n' "$FILES_BACKUP_DIR" >&2 || true
+  elif [[ -d "$FILES_BACKUP_DIR" ]]; then
     rm -rf -- "$FILES_BACKUP_DIR"
   fi
 
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 if [[ -e "$RELEASE_DIR" ]]; then
   [[ -d "$RELEASE_DIR" ]] ||
@@ -399,30 +461,18 @@ if [[ -e "$RELEASE_DIR" ]]; then
   printf 'Reusing existing Imp server runtime at %s...\n' "$RELEASE_DIR"
   verify_release_runtime "$RELEASE_DIR" "$BUNDLE_ID"
 else
-  printf 'Creating Python 3.12 runtime at %s...\n' "$RELEASE_DIR"
+  printf 'Installing Imp server runtime at %s...\n' "$RELEASE_DIR"
 
   mkdir -p "$RELEASE_DIR"
   RELEASE_PLACED=1
 
-  if ! python3.12 -m venv "$RELEASE_DIR/.venv"; then
-    die "could not create a Python 3.12 venv; install the Python 3.12 venv support package"
-  fi
-
-  "$RELEASE_DIR/.venv/bin/python" -m pip install \
-    --no-index \
-    --no-cache-dir \
-    --find-links "$BUNDLE_DIR/wheels" \
-    "imp-relay==$VERSION" \
-    "imp-adapter==$VERSION" \
-    "imp-tinyfugue==$VERSION"
-
-  "$RELEASE_DIR/.venv/bin/python" -m pip check
-
+  # cp -a preserves the hardlinked role aliases; validation runs on the installed copy.
+  cp -a -- "$BUNDLE_DIR/bin" "$RELEASE_DIR/bin"
   cp "$VERSION_FILE" "$RELEASE_DIR/VERSION"
   printf '%s\n' "$BUNDLE_ID" > "$RELEASE_DIR/BUNDLE_SHA256"
 
   verify_release_runtime "$RELEASE_DIR" "$BUNDLE_ID"
-  printf 'Imp Python packages and console scripts verified at %s\n' "$VERSION"
+  printf 'Imp runtime verified at %s\n' "$VERSION"
 fi
 
 NEXT_LINK="$DATA_DIR/.current.$$"
@@ -445,10 +495,10 @@ backup_path "$SYSTEMD_DIR/imp-gateway.service" imp-gateway.service
 FILES_BACKUP_READY=1
 
 ln -sfn \
-  "$CURRENT_LINK/.venv/bin/imp-action-consumer" \
+  "$CURRENT_LINK/bin/imp-action-consumer" \
   "$ACTION_LINK"
 ln -sfn \
-  "$CURRENT_LINK/.venv/bin/imp-direct-wss" \
+  "$CURRENT_LINK/bin/imp-direct-wss" \
   "$DIRECT_WSS_LINK"
 
 install -m 600 \
@@ -496,7 +546,7 @@ if ((START_SERVICES)); then
   systemctl --user restart imp-relay.service
   systemctl --user restart imp-feed.service
 
-  if ((GATEWAY_WAS_ACTIVE)); then
+  if ((GATEWAY_WAS_ACTIVE)) && [[ "$CONNECTION" != ssh ]]; then
     systemctl --user restart imp-gateway.service
   fi
 
@@ -506,10 +556,66 @@ if ((START_SERVICES)); then
   systemctl --user is-active --quiet imp-feed.service ||
     die "imp-feed.service did not become active"
 
-  if ((GATEWAY_WAS_ACTIVE)); then
+  if ((GATEWAY_WAS_ACTIVE)) && [[ "$CONNECTION" != ssh ]]; then
     systemctl --user is-active --quiet imp-gateway.service ||
       die "imp-gateway.service did not become active"
   fi
+fi
+
+if [[ "$CONNECTION" == ssh ]] && ((START_SERVICES)); then
+  GATEWAY_CONNECTION_CHANGED=1
+  systemctl --user stop imp-gateway.service
+  systemctl --user disable imp-gateway.service
+  edge_hostname="$("$BUNDLE_DIR/bin/imp-server" direct-edge owned-hostname "$TARGET_UID")"
+  EDGE_PENDING=1
+  "$BUNDLE_DIR/bin/imp-server" direct-edge disable "$TARGET_UID"
+  # Defer interruptions through child-result reconciliation against durable owned state.
+  commit_signal=0
+  trap '((commit_signal != 0)) || commit_signal=$((commit_status != 0 ? commit_status : 130))' INT
+  trap '((commit_signal != 0)) || commit_signal=$((commit_status != 0 ? commit_status : 143))' TERM
+  trap '((commit_signal != 0)) || commit_signal=$((commit_status != 0 ? commit_status : 129))' HUP
+  "$BUNDLE_DIR/bin/imp-server" direct-edge commit "$TARGET_UID" || commit_status=$?
+  if ((commit_status != 0)); then
+    # Establish inherited protection before creating any reconciliation process.
+    trap '' INT TERM HUP
+    ((commit_signal != 0)) || commit_signal=$commit_status
+  fi
+  if ((commit_status == 0)) ||
+     { [[ -n "$edge_hostname" ]] &&
+       "$BUNDLE_DIR/bin/imp-server" direct-edge ssh-committed "$edge_hostname" "$TARGET_UID"; }; then
+    SSH_CONNECTION_COMMITTED=1
+    EDGE_PENDING=0
+  fi
+  ((commit_signal == 0)) || commit_status=$commit_signal
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  ((commit_status == 0)) || exit "$commit_status"
+elif [[ "$CONNECTION" == direct ]] && ((!DIRECT_HAS_CREDENTIAL)); then
+  EDGE_PENDING=1
+  "$BUNDLE_DIR/bin/imp-server" direct-edge enable "$PUBLIC_HOSTNAME" "$TARGET_UID" "${DIRECT_EDGE_OPTIONS[@]}"
+  if [[ -e "$CONFIG_DIR/gateway.env" || -L "$CONFIG_DIR/gateway.env" ]]; then
+    die "a Direct credential appeared during edge preparation; preserved without a verified token handoff"
+  fi
+  # Credentials and their one-time terminal output belong exclusively to this command.
+  DIRECT_PROVISIONING_STARTED=1
+  "$DIRECT_WSS_LINK" setup --public-url "wss://$PUBLIC_HOSTNAME/state" "${PUBLIC_VERIFY_OPTIONS[@]}"
+  "$BUNDLE_DIR/bin/imp-server" direct-edge commit "$TARGET_UID"
+  EDGE_PENDING=0
+elif [[ "$CONNECTION" != ssh ]] && ((EXISTING_INSTALL)) &&
+     { [[ "$CONNECTION" == direct ]] || ((GATEWAY_WAS_ENABLED || GATEWAY_WAS_ACTIVE)); }; then
+  # Keep assignment outside a condition so ownership/query failures abort the install.
+  edge_migration="$("$BUNDLE_DIR/bin/imp-server" direct-edge migration-needed "$TARGET_UID")"
+  case "$edge_migration" in
+    yes)
+      EDGE_PENDING=1
+      "$BUNDLE_DIR/bin/imp-server" direct-edge migrate "$TARGET_UID"
+      "$BUNDLE_DIR/bin/imp-server" direct-edge commit "$TARGET_UID"
+      EDGE_PENDING=0
+      ;;
+    no) ;;
+    *) die "unexpected public-edge migration status" ;;
+  esac
 fi
 
 printf '\nImp server %s installed.\n' "$VERSION"
@@ -540,5 +646,30 @@ if command -v loginctl >/dev/null 2>&1; then
   fi
 fi
 
-printf '\nDirect WSS setup is off on a clean install; existing gateway enablement is unchanged.\n'
-printf 'To configure it interactively, run: %s setup\n' "$DIRECT_WSS_LINK"
+case "$CONNECTION" in
+  ssh)
+    if ((!START_SERVICES)); then
+      printf '\nServices were not started; existing gateway and public-edge state is preserved.\n'
+    fi
+    printf '\nImp is ready for SSH connections.\n\nIn Settings -> Connection choose:\n'
+    printf '  Managed SSH  - Imp manages the SSH tunnel\n  External SSH - you manage the SSH tunnel\n'
+    ;;
+  direct)
+    if ((DIRECT_HAS_CREDENTIAL)); then
+      printf '\nExisting Direct credential and public edge preserved; public authentication was not verified.\n'
+      printf 'No token was generated or rotated. Keep using the existing URL/token.\n'
+      printf 'For a deliberate new handoff, first configure/verify the public edge and ensure the gateway is active, then run:\n'
+      printf '  %q rotate --public-url %q\n' "$DIRECT_WSS_LINK" "wss://$PUBLIC_HOSTNAME/state"
+      printf 'For a router/NAT edge, add --verify-via-loopback to that command; leave the retained edge topology unchanged.\n'
+    else
+      printf '\nImp Direct WSS is ready.\n\nWSS URL:\n  wss://%s/state\n\n' "$PUBLIC_HOSTNAME"
+      printf "The pairing token was displayed above by Imp's provisioning step.\n\n"
+      printf 'Desktop:\n  Settings -> Connection -> Direct\n\n'
+      printf 'Enter the WSS URL and pairing token, save, then restart Imp.\n'
+    fi
+    ;;
+  *)
+    printf '\nConnection configuration preserved; Direct remains unconfigured on a fresh install.\n'
+    printf 'To configure later, rerun with --connection ssh or --connection direct --hostname HOST.\n'
+    ;;
+esac

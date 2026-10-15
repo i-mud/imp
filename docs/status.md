@@ -66,7 +66,8 @@ the desktop-owned node while the same HUD consumes a different remote node.
 
 `.github/workflows/ci.yml` runs on pull requests targeting `main`, pushes to
 `main`, and manual dispatch. It installs the committed npm and uv dependency
-state with Node 24 and Python 3.12, then runs the canonical project gate once:
+state with Node 24 and the uv-managed Python pinned in
+`services/relay/.python-version`, then runs the canonical project gate once:
 `npm run check`.
 
 That gate covers:
@@ -82,6 +83,12 @@ That gate covers:
 
 CI requires no Imp secrets or external infrastructure. It does not compile
 the Rust crate and does not prove native or live runtime behavior.
+
+The Linux server bundle has a separate release gate (ABI check, frozen A/B
+install/upgrade/rollback acceptance with legacy-layout coverage, and a
+Landlock guard denying host Python/pip to real installed flows) described in
+[`releases.md`](releases.md). Fake source-boundary controls are outside that
+kernel guard. Results are recorded per release run, not asserted here.
 
 ### Manual, native, and live evidence
 
@@ -1173,5 +1180,186 @@ active credential remained unchanged.
   failure or a Slice 24 blocker.
   [Public verifier failure diagnostics](roadmap.md#public-verifier-failure-diagnostics)
   remains a low-priority open follow-up, without token or secret logging.
+
+## In-progress implementation
+
+### Slice 25 - Connection-oriented server installation
+
+The working-tree installer supports `--connection ssh|direct|none`, conservative
+fresh-install prompting, preservation on ordinary upgrades, and a narrow
+Debian/Ubuntu Caddy path for Direct WSS. The dedicated edge has root-owned
+configuration, exact-byte ownership checks, and a pending state-restoration
+record. DNS and trusted HTTPS route rejection precede the terminal-only
+`imp-direct-wss setup --public-url` handoff. Existing credentials are preserved
+without claiming a new authenticated public verification.
+
+Direct also supports explicit home/router NAT with `--behind-nat`: exactly one
+global IPv4 A, no AAAA, and an operator-configured TCP 443 forward. Caddy disables
+HTTP-01 but retains TLS-ALPN-01. Readiness, provisioning, and the async manual
+verifier dial only `127.0.0.1:443` while retaining public TLS/SNI/Host identity;
+hairpin is unnecessary. Schema 3 now records the raw-target policy for both
+topologies. The full `{http.request.orig_uri}` CEL allowlist forwards only
+literal `/state`, `/action`, or `/healthz`, optionally followed by literal `?`
+query, not normalized `.path`. The unchanged gateway independently rejects
+noncanonical targets and queries; no authentication bypass was observed.
+Installer migration selection is narrowed: explicit Direct may migrate eligible
+legacy state even when the incoming gateway is disabled and inactive; no-option
+and `none` only attempt implicit migration if the original gateway was enabled
+or active. `--no-start` uses that incoming snapshot without changing existing
+user-service behavior. With both flags false, formerly Direct, now SSH upgrades
+leave the retained legacy edge unqueried and unchanged, with no root/sudo required
+for it. `none` preserves selection rather than persisting a transport transition
+or disabling Direct, so Direct-to-`none` uses the same predicate. Existing
+credentials never implicitly provision, rotate, or enable Direct. Exact ownership
+checks still limit migration to version-1 direct/version-2 NAT state, refusing
+pending transactions, wrong UID, or config/unit drift. Connection, hostname, NAT, credentials,
+certificate data, and service state are preserved. Existing commit/rollback
+snapshots restore old files/state on handled failure and retain the journal
+when restoration is incomplete.
+
+Former-Direct selection acceptance passed for v1 direct and v2 NAT: explicit SSH
+disabled the gateway and retained edge, then no-option, `none`, and `--no-start`
+upgrades succeeded with sudo unavailable and no edge-helper invocation.
+Enabled/active, enabled/inactive, and disabled/active incoming gateways still
+selected implicit migration; explicit Direct selected inactive legacy state
+without credential or enablement changes. `--no-start` preserved the incoming
+user-service state while migrating eligible owned policy.
+
+Local validation passed:
+
+- Focused Direct edge, provisioning, gateway, and manual-verifier tests: 313 passed.
+- `npm run check`: 64 protocol, 152 desktop, 505 relay, 31 shared-adapter,
+  32 Mudlet, and 101 TinyFugue tests; lint, strict typing, documentation/version
+  checks, cross-component roundtrip, and production frontend build passed.
+- Installed-bundle acceptance against a disposable development-labelled
+  `0.3.2+slice25.round2` bundle passed, including the connection-mode
+  matrix, interactive prompts, upgrade preservation, owned/operator edge
+  boundaries, negative-route readiness, failure rollback, and the existing
+  real relay/gateway provisioning fixtures.
+- Pre-live blocker regressions send actual INT/TERM/HUP to installer subprocesses
+  after runtime/TinyFugue and connection mutations, and after child token handoff
+  before parent success bookkeeping. The latter retains credential/runtime while
+  closing/restoring the public edge. Real provisioner signals after digest
+  replacement restore setup/rotation config and gateway state without token
+  output; handler restoration and deferred signals inside verification exceptions
+  are also covered.
+- Failed first/second stock masks return to an absent, directly retryable baseline,
+  preserving pre-existing masks. The preparation journal supports rollback before
+  package work, including retry after systemd cache-reload failure; package failures
+  retain protective masks. FIFO inspection rejects the non-regular file without
+  blocking.
+- Round 2 closes the controlling PTY after an owned SSH transition: HUP exits
+  129 and filesystem, TinyFugue, gateway, relay/feed, and edge restoration
+  completes despite dead-terminal diagnostic writes. An injected restore-copy
+  failure preserves its backup while independent restoration continues.
+- Native TERM immediately after preparation-journal, Caddyfile, and unit-file
+  publication leaves no foreign orphan and permits normal retry. The journal
+  is written and directory-synced before generated files are published.
+- Real process-group TERM followed by TERM/HUP during a real rollback subprocess
+  preserves the prior credential and active/enabled state; user-systemd children
+  run in separate sessions. Guard-entry interruption and native interruption
+  during original-handler restoration restore all handlers and the signal mask.
+- The public-verification failure was reproduced as intermittent synchronous
+  TLS/WebSocket opening stalls, also outside the provisioner. Public provisioning
+  verification now uses the existing asyncio client with the same security
+  floor, TLS validation, proxy refusal, redirect refusal, and timeouts. The exact
+  previously failing setup case passed 30 independent runs; a representative
+  neighboring-test order passed five runs of 46 cases, without failure.
+- Final pre-live fixes port the documented manual verifier to the same asyncio
+  public connection policy. Local trusted-TLS tests cover valid protocol-v2
+  state, wrong/missing/optional previous credentials on state and action,
+  forbidden HTTP/WebSocket routes, both health policies, untrusted/mismatched
+  certificates, redirects, proxy bypass, and bounded hello failure. Five
+  independent repeat runs completed 80 full verifier flows without failure.
+- SSH commit-return INT/TERM/HUP regressions preserve disabled/inactive gateway
+  and edge state with unchanged credentials; pre-commit restoration is unchanged.
+  Native TERM immediately after journal or Caddyfile staging creation cleans
+  unique staging files, leaves the listener off, and permits ordinary retry
+  without touching unrelated temporary files.
+- Pre-NAT final-pass focused provisioning/edge/gateway/manual-verifier tests:
+  348 passed. Current-source development bundle `0.3.2+slice25.final` build,
+  installer connection acceptance, and installed-bundle acceptance passed.
+- The final-pass `npm run check` passed: protocol 64, desktop 152, relay 540,
+  shared adapter 31, Mudlet 32, and TinyFugue 101 tests; lint, format, typing,
+  docs/version checks, cross-component end-to-end, and production frontend build
+  passed. Svelte reported zero errors and warnings.
+- NAT focused provisioning/edge/gateway/config/manual-verifier suite: 504 passed
+  before one added endpoint assertion;
+  Direct-edge suite: 145 passed. Three independent positive-matrix runs completed
+  96 full async verifier flows across direct and loopback modes without failure.
+- Current-source `0.3.2+slice25.nat` build, installer connection acceptance, and
+  installed-bundle acceptance passed. NAT variants cover publication/retry,
+  pre/post-commit signals, protected reconciliation startup/query, closed PTY,
+  possible handoff retention, and no-option/none credential/edge preservation.
+- NAT `npm run check` passed: protocol 64, desktop 152, relay 671, shared adapter
+  31, Mudlet 32, and TinyFugue 101; lint, format, typing, docs/version, end-to-end,
+  and production frontend build passed, with zero Svelte errors/warnings.
+- Disposable official Caddy 2.6.2 HTTPS and WebSocket-upgrade route matrices
+  passed for both generated topology templates in
+  `services/relay/tests/test_caddy_routes.py`. A recording-upstream request
+  ledger and unique response marker distinguish Caddy `404` from upstream
+  `404`; status alone is not route-source proof. Literal routes and intentional
+  query variants reach upstream, while normalized/encoded alternatives do not.
+  This fixture uses local test certificates: it proves neither public-CA
+  issuance nor authenticated WSS frame/runtime behavior.
+- Raw-policy/migration focused tests: 397 passed, including the actual-Caddy
+  route-source matrix. The current-source development bundle
+  `0.3.2+dev.rawedge.20261010` passed the ABI gate and mandatory distinct frozen
+  A/B release acceptance, including legacy migration, failed activation rollback,
+  Direct/NAT orchestration, and existing signal/ownership/reconciliation checks.
+  Installed process trees denied 32 host Python/pip targets under Landlock.
+  The container's unavailable user manager was explicitly skipped; a separate
+  WSL2 isolated native user-systemd run passed with the final artifact.
+- Raw-policy `npm run check` passed: protocol 64, desktop 152, relay 967,
+  shared adapter 31, Mudlet 32, TinyFugue 101; lint/format/types, docs/version,
+  end-to-end and production frontend build passed, with zero Svelte errors/warnings.
+- Former-Direct focused edge/provisioning/gateway/verifier suites: 736 passed,
+  including the actual Caddy 2.6.2 matrix. Development artifact
+  `0.3.2+dev.formerdirect.20261010` passed the ABI gate, full installer connection
+  acceptance, standalone installed-bundle acceptance, and mandatory distinct
+  frozen A/B release acceptance with legacy migration and activation rollback.
+  Installed flows denied host Python/pip under Landlock; a separate isolated
+  native user-systemd frozen-runtime smoke passed on WSL2. `npm run check` passed:
+  protocol 64, desktop 152, relay 967, shared adapter 31, Mudlet 32, TinyFugue 101,
+  plus lint/format/types, docs/version, E2E, and the production frontend build.
+
+These interruption checks cover the named local subprocess/PTY boundaries with
+fake service state, not generic crash/power-loss atomicity. Filesystem and
+system-service restoration remain best-effort when those operations fail.
+
+The automatic-edge installer acceptance uses deterministic DNS, privilege, apt,
+TLS, and system-service boundaries. It proves orchestration, not real package
+maintainer scripts, ACME issuance, or root Caddy service behavior. The separate
+actual-Caddy fixture above proves raw-target routing only. Local trusted TLS,
+including a cached certificate, is not a fresh external port-forward reachability
+check. No desktop Connection UI was changed.
+
+Packaging cutover (working tree): the server bundle now contains one
+PyInstaller onedir runtime, `<bundle>/bin/imp-server` with
+`<bundle>/bin/imp-server-runtime/`, selected through multicall roles and
+hardlinked role aliases. The target server needs no Python installation to
+install, run, or recover; the source developer toolchain still requires
+Python 3.12 and `uv`. TinyFugue
+remains operator-installed. The manual public verifier now lives in the
+package as `imp_relay.public_verifier` (`imp-server public-verify`) with its
+security semantics unchanged, and the edge helper as `imp_relay.direct_edge`.
+Legacy venv releases are left in place and restored on rollback. Installed-bundle
+acceptance passed with `python`, `python3`, and `python3.12` rejected on the
+target PATH, including legacy-layout upgrade and failed-upgrade restoration.
+Local WSL2 native user-systemd acceptance also passed under isolated unit names
+and ports: frozen relay/feed/gateway processes delivered state and the frozen
+action consumer received a trusted action. This isolated run is not live Caddy,
+sudo, or router/public-CA evidence.
+
+The user-reported live NAT VM succeeded with the self-contained installation
+and no host Python 3.12, Caddy 2.6.2 TLS-ALPN issuance of a publicly trusted
+certificate, and external authenticated WSS. The subsequent exact-owned
+schema-3 NAT policy migration, raw-route checks, authentication checks, and
+desktop live state/action acceptance passed. Live feed/relay restart acceptance
+then failed to recover the still-running TinyFugue selection; a TF relogin
+workaround restored the live feed. Live restart acceptance of this tree is not
+claimed: recovery of a still-running TinyFugue selection after a feed restart
+remains unresolved here. Directly-addressed acceptance remains to be exercised
+as practical. Do not reboot without operator approval. Slice 25 is not complete.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).

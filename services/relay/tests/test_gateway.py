@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
@@ -701,6 +702,9 @@ def test_direct_wss_rotation_replaces_gateway_auth_session_and_preserves_relay_s
     monkeypatch.setattr(direct_wss, "_user_home", lambda: (os.geteuid(), str(home)))
     monkeypatch.setattr(direct_wss, "_GATEWAY_PORT", gateway_port)
     monkeypatch.setattr(direct_wss, "_RELAY_PORT", relay_port)
+    # Rotation runs in a worker so this test's event loop can serve real sockets.
+    # Native CLI signals are exercised separately in test_direct_wss subprocesses.
+    monkeypatch.setattr(direct_wss, "_interrupt_signals", lambda: nullcontext(lambda: None))
     monkeypatch.setattr(
         direct_wss,
         "_service_preflight",

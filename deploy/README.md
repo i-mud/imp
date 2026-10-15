@@ -1,10 +1,10 @@
-# VPS deployment
+# Server deployment
 
 Installs Imp's relay and TinyFugue live feed as `systemd --user`
-services so the pipeline survives a VPS reboot and an administrator's SSH
-session ending without root-owned Imp services. The authenticated Direct WSS
-gateway is included in the server bundle but remains disabled unless the
-operator deliberately configures Direct mode.
+services on a VPS or home Linux host so the pipeline survives a reboot and an
+administrator's SSH session ending without root-owned Imp services. Connection selection chooses
+SSH, automatic Direct WSS, or install-only; the authenticated gateway remains
+disabled on a fresh installation unless Direct is deliberately selected.
 
 The relay, feed-facing endpoints, and gateway all remain loopback-only. SSH
 forwards the **entire relay TCP port** to the workstation; it does not filter
@@ -12,28 +12,43 @@ relay routes or add application authentication. Direct WSS instead uses a
 separate TLS reverse proxy in front of the authenticated gateway; the reverse
 proxy never forwards the relay itself.
 
-Everything below runs **on the VPS** unless labelled otherwise.
+Everything below runs **on the Imp server** unless labelled otherwise.
 
 Loopback prevents remote network access but is not same-user isolation. Any
 local OS user or process in the VPS network namespace can reach the relay, and
 Imp provides no per-user endpoint authentication. Deploy only on a
-single-user VPS or where every host-local user/process is mutually trusted;
+single-user server or where every host-local user/process is mutually trusted;
 untrusted multi-user hosts are unsupported.
 
 ## Install from a release bundle
 
 The normal server installation does **not** require an Imp source checkout,
-Node.js, npm, Rust, or `uv` on the VPS.
+Node.js, npm, Rust, `uv`, or any host Python on the VPS.
 
-The published Linux server bundle supports:
+Binary compatibility and installer support are separate policies.
 
-- Linux x86_64;
-- CPython 3.12;
-- `systemd --user`;
-- the TinyFugue client adapter.
+The frozen server binary requires:
 
-Python 3.12 must include `venv` support. TinyFugue itself remains
-operator-owned and must already be installed with the GMCP capabilities
+- Linux x86_64 (little-endian ELF64) with glibc 2.36 or newer, the standard
+  /lib64/ld-linux-x86-64.so.2 loader, `libz.so.1`, and the system CA store;
+  musl and other loaders are unsupported. The release build enforces this with
+  an ABI gate over every bundled ELF (loader, needed libraries, and required
+  glibc/libstdc++/CXXABI/GCC symbol versions);
+- the self-contained runtime inside the bundle (the current packaged release
+  and installer need no host Python installation to install, run, or recover).
+  A retained pre-frozen virtual-environment release kept as a rollback target
+  may still need its original interpreter/runtime to execute that old release
+  until migration succeeds and no legacy rollback is needed. The bundle neither
+  installs nor manages that interpreter; migration of a real historical host
+  remains live acceptance evidence.
+
+The normal automatic installer is supported on Debian 12+ or Ubuntu 24.04+ with
+`systemd --user`, `apt`, `iproute2`, and Caddy for the Direct edge. It is not
+supported on arbitrary Linux distributions. The installer adds no OS version
+check; this is a support statement, not a runtime gate.
+
+TinyFugue is a separate operator prerequisite: Imp ships only the client
+adapter. TinyFugue must already be installed with the GMCP capabilities
 described below.
 
 Download both server assets from the matching Imp GitHub release:
@@ -63,6 +78,24 @@ run:
 ./install.sh
 ```
 
+On a genuinely fresh interactive installation this asks:
+
+```text
+How will the Imp desktop connect?
+
+1. SSH
+2. Direct WSS
+3. Install only / configure later
+```
+
+Direct selection also asks for a public hostname if one was not supplied.
+An explicit `--connection` skips the choice prompt. Fresh non-interactive
+installs must specify `--connection ssh|direct|none`; the installer never
+guesses. A reinstall/upgrade without this option never prompts and preserves
+the existing connection state. Existing Imp runtime/configuration paths,
+credentials, helper links, and user-service state all count as prior
+installation evidence; one missing file does not make an install fresh.
+
 The installer uses the existing `~/.tfrc` by default. Imp backs it up before
 adding:
 
@@ -87,23 +120,32 @@ This also covers custom layouts and TinyFugue launches that use `-f FILE`.
 The installer:
 
 - verifies the bundle's internal checksums;
-- creates a private Python 3.12 virtual environment entirely from the bundled
-  wheelhouse, without resolving packages from the network;
+- installs the self-contained PyInstaller runtime `<bundle>/bin/imp-server`
+  (with its `<bundle>/bin/imp-server-runtime/` directory and hardlinked role
+  aliases such as `<bundle>/bin/imp-relay`) with no Python virtual environment, wheel installation, or
+  network package resolution;
 - installs releases under
   `~/.local/share/imp/releases/<version>/`;
-- creates each Python environment directly at its final release path so Python
-  console scripts never depend on a temporary installation directory;
 - treats an installed version as immutable: reinstalling the exact same bundle
   reuses it, while a different bundle claiming the same version is rejected;
 - atomically selects the installed runtime through
   `~/.local/share/imp/current`;
-- installs the fixed `~/.local/bin/imp-action-consumer` helper link;
+- installs the fixed `~/.local/bin/imp-action-consumer` and
+  `~/.local/bin/imp-direct-wss` links to `current/bin/<name>`, migrating
+  legitimate legacy helper links;
 - installs `~/.config/imp/capture.tf`;
 - installs the relay, feed, and optional gateway user units;
-- enables and starts only `imp-relay.service` and `imp-feed.service`;
+- enables and starts `imp-relay.service` and `imp-feed.service`;
 - preserves and rolls back the previous installation if activation fails; and
-- does not change Direct WSS gateway enablement and restarts it only when it was
-  already active.
+- preserves existing gateway credentials and enabled/active state on ordinary
+  reinstall/upgrade, restarting an already-active gateway on the selected runtime.
+  Explicit connection changes follow the rules below.
+
+Units run `%h/.local/share/imp/current/bin/imp-server ROLE ...` directly (no
+shell or `PATH`). Upgrading from a legacy virtual-environment release leaves
+that old release directory in place; a failed activation restores the prior
+units, links, and `current` selection, so rollback returns to the old release
+with its historical runtime prerequisites.
 
 If TinyFugue is already connected when the installer restarts `imp-feed`, the
 feed deliberately starts without retaining the previous selected-action
@@ -114,6 +156,242 @@ context is established. A reconnect may also be necessary for MUDs that send
 complete character identity only during login.
 
 Configuration and state directories are kept private to the user.
+
+### Connection selection
+
+```bash
+./install.sh --connection ssh
+./install.sh --connection direct --hostname imp.example.com
+./install.sh --connection direct --hostname imp.example.com --behind-nat
+./install.sh --connection none
+```
+
+- **ssh** installs the loopback relay/feed configuration shared by desktop
+  **Managed SSH** and **External SSH**. It creates no public edge. When services
+  are being started, explicit SSH stops/disables the gateway but retains
+  `gateway.env`; it disables only an unchanged Imp-owned Caddy listener.
+  Operator-owned web configuration is never disabled or modified.
+- **direct** requires live services, a public DNS hostname, and interactive
+  stdin/stdout for a new one-time token handoff. `--hostname` and `--behind-nat`
+  are valid only with Direct; `--connection direct --no-start` is rejected.
+- **none** installs normal components without configuring fresh Direct access.
+  On an existing installation it preserves credentials, gateway state, and
+  public-edge identity; it does not mean delete or disable Direct.
+- **no option on an existing install** preserves connection state and
+  operator-owned public edges. No implicit credential rotation occurs.
+  Explicit Direct upgrades may migrate exact owned legacy edge policy even when
+  inactive; no-option and `none` only attempt migration if the incoming gateway
+  was enabled or active. `--no-start` uses that original snapshot while preserving
+  existing connection services rather than applying an SSH transition.
+
+Managed/External SSH and Direct/Local remain desktop choices, not four server
+installation modes.
+
+### Automatic Direct public edge
+
+The automatic path is intentionally limited to Debian/Ubuntu with systemd,
+the system apt repositories providing a Caddy package,
+and `ip`/`ss` from iproute2. It does not add DNS-provider integrations, package
+repositories, or a second TLS implementation. Other environments and existing
+operator public edges require [manual provisioning](#direct-wss-gateway-advanced).
+
+Supply an ASCII DNS domain name, not an IP address, URL, port, wildcard, or path;
+hostname case is normalized. DNS preflight occurs before runtime mutation or
+credential generation. Two normal Direct deployment shapes are supported:
+
+| Topology                 | DNS and reachability                                                                                                | Installer option |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| VPS / directly addressed | Every A/AAAA answer is global and assigned directly to this server. A subset of its public addresses is sufficient. | No topology flag |
+| Home / NAT               | Exactly one global IPv4 A points to the router; router TCP 443 forwards to this server TCP 443. No AAAA records.    | `--behind-nat`   |
+
+The default directly-addressed policy is unchanged. A fresh interactive Direct
+install whose single public A is not local offers NAT confirmation; **stop/no is
+the default**. It asks nothing extra when directly-addressed DNS passes.
+Non-interactive mismatches require explicit `--behind-nat`; NAT is never inferred.
+NAT rejects multiple A answers and any AAAA, including a locally valid IPv6
+address: remove AAAA or use the directly-addressed path. Private, CGNAT,
+documentation, reserved, multicast, and other non-global addresses are rejected.
+DNS must point directly to the router, not a CDN/reverse proxy.
+
+Configure the router's TCP 443 forward yourself before installation. Imp does
+not manage routers, UPnP/NAT-PMP, firewalls, or DNS providers. CGNAT without an
+inbound public port forward is unsupported. A dynamic public IPv4 is supported
+when DNS is current; manage DDNS externally. NAT hairpin/loopback, inbound TCP 80,
+and UDP 443 forwarding are not required for NAT Direct.
+
+Before any public mutation, the helper refuses existing Caddy/nginx/Apache
+configuration and any unowned TCP 80/443 or UDP 443 listener. It does not adopt
+an existing Caddy installation. For a new edge, it masks stock Caddy listeners
+before apt installation so package startup cannot publish the default site.
+The package may remain installed and masked after a failed setup or later SSH
+transition; only the dedicated Imp listener is enabled.
+
+Interactive public changes deliberately invoke `sudo`. Non-interactive changes
+use non-prompting privilege and fail when it is unavailable. No credentials
+enter the public-edge helper. Under `sudo` the bundled edge executes as the
+authorized host administrator; this is not a limited-sudoers security boundary
+and Imp makes no such claim.
+
+Ownership consists of root-owned, non-symlink, exact generated files:
+
+```text
+/etc/imp/Caddyfile
+/etc/imp/direct-edge.json
+/etc/systemd/system/imp-caddy.service
+```
+
+The marker records the target user, hostname, topology, and a pending transaction's
+previous enabled/active state. Schema 3 records the current raw-target policy for
+both topologies. Only exact version-1 directly-addressed or version-2 NAT state
+is eligible for migration; those legacy templates remain for ownership and recovery.
+Exact config/unit bytes, safe ownership/modes, and loaded-unit checks distinguish
+generated state from operator edits. Pending transactions, wrong UID, config/unit
+drift, and hostname/topology changes are refused rather than adopted.
+Caddy's unused admin listener is disabled.
+
+The Caddyfile's CEL allowlist examines the full original request target,
+`{http.request.orig_uri}`, not `.path` or a normalized path matcher. Only literal
+`/state`, `/action`, and `/healthz`, optionally followed by a literal `?` and any
+query (including empty), reach `127.0.0.1:8788`; everything else returns Caddy
+`404`. The gateway independently rejects noncanonical targets and queries under
+its existing policy. The observed normalized-edge defect did not bypass authentication.
+The relay's `8787` port is never proxied. Caddy owns normal publicly trusted
+certificate acquisition and renewal. Directly-addressed deployments retain normal
+Caddy ACME behavior; permit inbound TCP 80/443 and account for host/provider firewalls yourself.
+NAT config uses this supported Caddy ACME issuer policy:
+
+```text
+tls {
+    issuer acme {
+        disable_http_challenge
+    }
+}
+```
+
+Only HTTP-01 is disabled; TLS-ALPN-01 remains enabled, with no DNS challenge or
+provider credentials. Successful public-CA issuance through TLS-ALPN-01 is
+external evidence that public TCP 443 reaches this Caddy instance. Keep that
+port forward available for renewal. This syntax is supported by Caddy 2.6.2
+and later; see [Caddy TLS issuer configuration](https://caddyserver.com/docs/caddyfile/directives/tls)
+and [TLS-ALPN reachability requirements](https://caddyserver.com/docs/automatic-https#tls-alpn-challenge).
+
+After activation, trusted HTTPS GETs to `/unknown`, `/ingest`, and
+`/action-consumer` must each return `404`. NAT readiness dials `127.0.0.1:443`
+while keeping the public hostname for TLS SNI, certificate hostname validation,
+and HTTP Host; the locally presented certificate must validate against normal
+public trust. It does not require the server to reach its own router public IP.
+Directly-addressed verification continues dialing normal public DNS.
+Certificate errors, redirects, proxy errors, and other HTTP statuses are not
+success; environment proxies are ignored and readiness is bounded.
+Only then does the installer invoke `~/.local/bin/imp-direct-wss setup
+--public-url wss://HOST/state` directly with inherited terminal stdin/stdout;
+NAT adds `--verify-via-loopback`. It never pipes, captures, parses, or persists
+the provisioning output. The provisioning command owns token generation,
+digest persistence, local/public authenticated verification, rollback, and
+one-time token display.
+
+Failure does not print Direct-ready instructions. The helper restores the
+previous owned listener state, leaving a newly created listener stopped and
+disabled; package installation is not transactionally undone. Existing runtime,
+TinyFugue, and user-service rollback remains in place before credential creation.
+Once Direct provisioning starts, a newly present `gateway.env` is conservatively
+treated as a possible token handoff even if a parent signal arrives before the
+child's success is recorded. The local runtime/credential is retained for
+recovery, while the public edge is restored/disabled and no Direct success is
+claimed. Real INT/TERM/HUP regressions cover the tested mutation phases. A
+closed-controlling-PTY regression covers an SSH transition with dead terminal
+output: cleanup disables shell errexit, treats diagnostics as best-effort, and
+continues independent restoration attempts while preserving HUP exit status.
+Independent service restoration continues even if a filesystem copy fails; its
+rollback backup is retained rather than deleted. Restoration is still best-effort
+if filesystem or system-service operations fail. SIGKILL, power loss, and
+root/operator edits can require manual recovery.
+
+An explicit SSH transition commits the gateway shutdown with the durable edge
+commit. If the commit child fails, credential-free helper inspection must prove
+the same target UID/hostname, exact owned configuration/unit, no pending journal,
+and disabled/inactive dedicated service with no running PID. This proof retains
+the completed SSH connection state even if the child was interrupted after
+publication; the installer still exits failure. Without proof, ordinary
+connection restoration applies. Ordinary runtime rollback remains in place.
+After an ambiguous SSH commit failure, the installer parent temporarily ignores
+terminal INT/TERM/HUP while performing the bounded, read-only durable proof.
+Ignored dispositions are inherited from process creation by the reconciliation
+helper and its service-query child, including the fork/startup window.
+The original recorded signal/failure remains the eventual exit reason; normal
+parent traps are restored after recording the proof result. The query retains
+its 120-second subprocess timeout. Genuine proof or timeout failure still fails
+closed; it is not an assumed commit. These guarantees do not cover arbitrary
+crashes or power loss.
+
+Provisioner rollback's user-systemd subprocesses run in separate sessions.
+Real process-group TERM followed by another TERM and HUP during a blocked
+rollback subprocess restores the previous credential and active/enabled state
+in the regression harness. Signal-guard entry and teardown restoration are
+also tested. These checks do not establish recovery from SIGKILL, power loss,
+or unavailable systemd/filesystem operations.
+
+Before any generated edge file is published, the installer helper durably writes
+the pending preparation journal identifying stock masks absent at entry.
+TERM immediately after the journal, Caddyfile, or unit-file publication is covered
+by cleanup/retry regressions. Failed/partial masking removes only the attempted
+masks and Imp-generated files, returning to an absent, directly retryable baseline.
+Pre-existing null-device masks remain untouched. Once package work may have
+begun, protective masks and the disabled owned edge remain available for retry;
+package installation is not transactionally reversed.
+
+### Existing Direct credentials and recovery
+
+If `gateway.env` already exists, explicit Direct installation preserves it and
+the public-edge identity while migrating eligible owned legacy policy, does not
+call no-op setup as verification, and prints no Direct-ready or new-token claim.
+Keep using the existing URL/token. For a new
+verified handoff, deliberately configure/enable the public edge, inspect
+`imp-direct-wss status`, ensure the gateway is active, then use
+`imp-direct-wss rotate --public-url wss://HOST/state` interactively.
+On a NAT host add `--verify-via-loopback` to that deliberate rotation command.
+Explicit Direct upgrades migrate eligible exact owned version-1 direct/version-2
+NAT policy to schema 3 even when the incoming gateway is disabled and inactive.
+No-option upgrades and `none` preserve connection selection and only attempt
+implicit migration when the original gateway was enabled or active, including
+under `--no-start`. With both flags false, a formerly Direct, now SSH installation
+does not query or change the retained legacy edge and needs no root/sudo for it.
+`none` does not persist a transport transition or disable Direct: Direct-to-`none`
+is preservation, with the same enabled-or-active predicate, not a disabling transition.
+Existing credentials do not implicitly provision, rotate, or enable Direct.
+Hostname, NAT choice, UID, gateway credentials, certificate data, unit, stock
+masks, and enabled/active state are preserved; operator edges are untouched.
+Migration uses the existing pending journal and commit/rollback transaction:
+snapshots restore the exact old Caddyfile and marker plus prior service state on
+handled failure before edge commit. An incomplete restoration retains the journal for retry.
+This does not renew public reachability evidence or request a new token, and
+does not promise arbitrary crash/power-loss atomicity.
+
+For an unchanged Imp-owned edge disabled by an SSH transition, an operator can
+reactivate `imp-caddy.service` with `sudo systemctl enable --now imp-caddy.service`.
+Enable and start the existing gateway with `systemctl --user enable --now imp-gateway.service`
+before deliberate rotation. For operator-owned public edges, use that edge's
+own lifecycle. Do not assume the hostname requested during an existing-credential
+install was publicly authenticated.
+
+The root-owned marker retains pending state if edge restoration is incomplete.
+Manual recovery commands must run from the **extracted bundle directory**.
+After inspecting the unchanged owned files and service, obtain sudo credentials
+first; the helper's privileged rollback/commit uses non-interactive `sudo -n`:
+
+```bash
+sudo -v
+./bin/imp-server direct-edge rollback "$(id -u)"
+```
+
+Rollback resolves failed preparation, retries prior listener-state restoration,
+or restores a pending migration's old configuration/marker snapshots without
+credential access. Use `./bin/imp-server direct-edge commit "$(id -u)"`
+only to deliberately accept a completed, verified pending change; unfinished
+pre-package preparation cannot be committed. If operator edits revoked
+ownership, resolve that configuration manually; the installer does not overwrite
+it to force recovery. Normal non-interactive installer paths never prompt for
+sudo credentials.
 
 ### User lingering
 
@@ -146,6 +424,10 @@ The installer reports a warning when lingering is not enabled; it does not
 silently perform privileged system configuration.
 
 ## Direct WSS gateway (advanced)
+
+These lower-level commands support recovery, deliberate rotation, existing
+deployments, and operator-owned/manual TLS edges. For normal supported installs,
+use [connection selection](#connection-selection) instead.
 
 Direct WSS uses one 256-bit pairing token. The gateway stores only its
 SHA-256 digest. The plaintext token is shown once by the bundle's provisioning
@@ -198,6 +480,51 @@ authenticated `/state` protocol-v2 hello are verified. If it was inactive, it
 remains inactive (and retains its previous enabled/disabled state); no
 network preflight or activation occurs.
 
+To require public-edge verification **before** the one-time token handoff:
+
+```bash
+~/.local/bin/imp-direct-wss setup --public-url wss://imp.example.com/state
+~/.local/bin/imp-direct-wss rotate --public-url wss://imp.example.com/state
+```
+
+For an explicitly authorized NAT/port-forwarded deployment without hairpin,
+append `--verify-via-loopback` after the `--public-url URL` argument. The public
+URL must use the default secure port (no explicit port) or explicit `443`.
+Loopback verification dials only `127.0.0.1:443` and retains the public URL's
+hostname for TLS and Host. It accepts no arbitrary verification destination and
+never bypasses certificate verification. External diagnostics should omit this
+flag.
+
+`--public-url URL` follows `setup` or `rotate`; `status` takes no options.
+Without loopback verification, other valid public ports remain supported.
+The URL must use `wss`, contain a hostname, and use exactly `/state` (no prefix,
+trailing slash, userinfo, query, or fragment).
+Invalid URL diagnostics never echo the supplied value.
+
+Configure DNS and the TLS edge before invoking this option. After the usual
+relay, local gateway, and service-state checks, provisioning authenticates the
+public `/state` with the newly generated in-memory token and requires a decoded
+protocol-v2 hello. It requires both HTTPS GET and WebSocket handshake HTTP
+`404` responses for `/ingest`, `/action-consumer`, and `/unknown`. Public
+`/healthz` must return either `404` or `200` with exactly `{"status":"ok"}`.
+Normal trust-store TLS validation is mandatory; redirects are refused and
+environment proxies are ignored. HTTP probes use a five-second elapsed deadline
+for headers/body as well as socket timeouts, with the same Unix/main-thread,
+unarmed `ITIMER_REAL` constraint as the standalone verifier below.
+No action is sent and no general endpoint scan is performed.
+
+Every requested check must pass before the token is printed. Failure uses the
+same configuration/service rollback as local readiness failure, with generic
+credential-safe network diagnostics. The token is never passed to a subprocess,
+exported, persisted, or embedded in a URL or proxy configuration.
+
+Already-configured `setup --public-url ...` is still a non-destructive no-op:
+it reports that public verification was **not performed**, without requesting
+the existing plaintext token. Use deliberate rotation to verify with a new
+token. `rotate --public-url ...` requires an already-active gateway and refuses
+before credential generation/replacement when it is stopped; plain `rotate`
+continues to support stopped gateways without starting them.
+
 Handled failures attempt to restore the previous configuration bytes and
 enabled/active service state. Rollback is best effort: if recovery is incomplete,
 the command reports recovery-required and attempts to stop the gateway, rather
@@ -220,7 +547,7 @@ directory modes, gateway unit policy, systemd enabled/active state, and minimal
 health without disclosing credential material. An unsafe path names the
 offending directory and reason. The fixed paths are `~/.config/imp/gateway.env`,
 `~/.config/systemd/user/imp-gateway.service`, and
-`~/.local/share/imp/current/.venv/bin/imp-gateway`. The config's only accepted
+`~/.local/share/imp/current/bin/imp-server` (invoked as `gateway`). The config's only accepted
 content is exactly one `IMP_GATEWAY_TOKEN_SHA256=<64 hex characters>`
 assignment, with full-line comments and surrounding whitespace allowed; NUL
 bytes are rejected anywhere, including comments. It is not a general environment
@@ -244,10 +571,10 @@ configurations, it is not proof that no other principal shares the group. If any
 other account can write such an ancestor through directory-service membership
 or another mechanism, remove group write from that ancestor.
 
-The normal release installer does not create pairing credentials or enable
-`imp-gateway.service`. Upgrade preserves the gateway's existing enablement and
-restarts it only if it was already active; see the installer behavior above.
-Provision the gateway separately and deliberately with `setup`.
+Explicit fresh Direct installation delegates pairing to this command after
+preparing the supported public edge. Ordinary upgrades preserve the digest and
+gateway state; explicit Direct with an existing credential reports preservation,
+not successful authenticated public verification.
 
 The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
 `ws://127.0.0.1:8787`. Never proxy port 8787 or the relay's `/ingest` or
@@ -255,16 +582,23 @@ The gateway listens only on `127.0.0.1:8788` and connects only to the relay at
 
 ### Public TLS/WSS edge for Direct mode
 
-The operator owns the public hostname, DNS, publicly trusted TLS certificate
-acquisition/renewal, and reverse-proxy lifecycle. Imp's Python gateway does
-not terminate TLS. The reverse proxy must forward only `/state`, `/action`,
-and optionally `/healthz` to `127.0.0.1:8788`; reject every other path.
+For manual public edges, the operator owns hostname, DNS, publicly trusted TLS
+certificate acquisition/renewal, and reverse-proxy lifecycle. Imp's Python
+gateway does not terminate TLS. The reverse proxy must forward only literal
+`/state`, `/action`, and optionally `/healthz`, with an optional literal `?`
+query suffix, to `127.0.0.1:8788`; reject every other original request target.
+The gateway still rejects queries and noncanonical targets independently.
 
-A minimal Caddy route shape is:
+A minimal route shape supported by Caddy 2.6.2 uses the full original URI
+(not `.path` or a normalizing path matcher):
 
 ```text
 https://imp.example {
-    @gateway path /state /action /healthz
+    @gateway expression `
+        {http.request.orig_uri} == "/state" || {http.request.orig_uri}.startsWith("/state?") ||
+        {http.request.orig_uri} == "/action" || {http.request.orig_uri}.startsWith("/action?") ||
+        {http.request.orig_uri} == "/healthz" || {http.request.orig_uri}.startsWith("/healthz?")
+    `
 
     handle @gateway {
         reverse_proxy 127.0.0.1:8788
@@ -287,199 +621,55 @@ acceptance.
 
 ### Bounded public verification
 
-Run this from a machine with network reachability to the public hostname, using
-the installed bundle's CPython 3.12 environment (which includes the Imp relay
-package and `websockets`), or another environment that already has both
-dependencies on its import path. It probes authenticated state, auth
-rejection, and HTTP plus WebSocket 404s for privileged/unknown routes without
-an `Origin` header, and optionally minimal health. It sends no action frame.
-The token is read from /dev/tty using `getpass`, never argv or environment.
-Both secret prompts fail closed if terminal echo control is unavailable, before
-reading fallback input or starting network activity. Errors are intentionally
-generic so exception text cannot expose credentials or response payloads.
-
-Save the snippet as a local script (not in a repository or shared location),
-then run it interactively with the approved WSS state endpoint as its sole
-argument. It rejects credentials, query/fragment, non-WSS URLs, and endpoints
-not ending in `/state`; derives sibling routes while retaining any path prefix.
-The optional previous-token prompt proves revocation after rotation; its value
-is read only from /dev/tty and never appears in output. TLS verification stays
-enabled, redirects are refused, and no insecure TLS options are used. Each HTTP
-probe has a five-second monotonic elapsed deadline covering headers and body,
-in addition to the socket timeout. It uses `SIGALRM` to interrupt even a
-drip-fed response, so it requires Unix, the main thread, and an unarmed
-`ITIMER_REAL`; it refuses to probe if a real-time timer is already armed.
-
-For example, after saving the snippet as `public_wss_check.py`:
+Run this from a machine with network reachability to the public hostname. On
+the Imp server, or any machine with an extracted/installed server bundle, the
+frozen runtime needs no host Python installation. It probes authenticated
+state, auth rejection, and HTTP plus WebSocket 404s for privileged/unknown
+routes without an `Origin` header, and optionally minimal health. It sends no
+action frame. The token is read from /dev/tty using `getpass`, never argv or
+environment. Both secret prompts fail closed if terminal echo control is
+unavailable, before reading fallback input or starting network activity. Errors
+are intentionally generic so exception text cannot expose credentials or
+response payloads.
 
 ```bash
-~/.local/share/imp/current/.venv/bin/python public_wss_check.py 'wss://imp.example/state'
+~/.local/share/imp/current/bin/imp-server public-verify 'wss://imp.example/state'
+~/.local/share/imp/current/bin/imp-server public-verify 'wss://imp.example/state' --verify-via-loopback
 ```
 
-```python
-import base64
-import getpass
-import json
-import secrets
-import signal
-import sys
-import time
-import warnings
-from urllib.parse import urlsplit, urlunsplit
-from urllib.error import HTTPError
-from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
+From an extracted bundle that is not installed, use
+`./bin/imp-server public-verify ...`. The `<bundle>/bin/imp-public-verify` alias
+dispatches to the same role. Source checkouts run the same module,
+`imp_relay.public_verifier`, with the developer toolchain (Python 3.12 and
+`uv`), for example `uv run --project services/relay python -m
+imp_relay.public_verifier URL`.
 
-from imp_relay.websocket_logging import websocket_logger
-from websockets.exceptions import ConnectionClosed, InvalidStatus
-from websockets.sync.client import connect
+The first argument is the approved WSS state endpoint (optionally followed by
+`--verify-via-loopback`). It rejects credentials, query/fragment, non-WSS URLs,
+and endpoints not ending in `/state`; derives sibling routes while retaining
+any path prefix. The optional previous-token prompt proves revocation after
+rotation; its value is read only from /dev/tty and never appears in output. TLS
+verification stays enabled, redirects are refused, proxies are bypassed, and no
+insecure TLS options are used; WebSocket and HTTPS probes use the same shared
+public connection policy as `imp-direct-wss --public-url`
+(`imp_relay.direct_wss`). WebSocket probes run with `asyncio.run`, bounded by
+their open, receive and close timeouts. Each HTTPS probe has a five-second
+monotonic elapsed deadline covering headers and body, in addition to the socket
+timeout. It uses `SIGALRM` to interrupt even a drip-fed response, so it
+requires Unix, the main thread, and an unarmed `ITIMER_REAL`; it refuses to
+probe if a real-time timer is already armed.
 
-logger = websocket_logger()
-HTTP_DEADLINE = 5
+For a NAT host that cannot reach its own public address, append
+`--verify-via-loopback` after the URL. Every probe then dials only
+`127.0.0.1:443` locally; the public URL's authority (so TLS server name and
+certificate validation) and `Host` header are unchanged, and the URL must use
+the default port. This proves local edge TLS/routing only, not external
+reachability or router port forwarding. It is not available for arbitrary
+targets.
 
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, new_url):
-        return None
-
-
-def http_get(url):
-    def expired(signum, frame):
-        raise TimeoutError
-
-    if any(signal.getitimer(signal.ITIMER_REAL)):
-        fail()
-    deadline = time.monotonic() + HTTP_DEADLINE
-    previous_handler = signal.signal(signal.SIGALRM, expired)
-    try:
-        signal.setitimer(signal.ITIMER_REAL, max(deadline - time.monotonic(), 0.000001))
-        with opener.open(Request(url, method="GET"), timeout=5) as response:
-            return response.status, response.read(128)
-    except HTTPError as exc:
-        exc.close()
-        return exc.code, b""
-    except Exception:
-        fail()
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-
-
-def fail():
-    print("Verification failed.")
-    raise SystemExit(1)
-
-
-def endpoint(path):
-    return urlunsplit(("wss", parts.netloc, path, "", ""))
-
-
-def canonical_token(value):
-    try:
-        raw = base64.urlsafe_b64decode(value + "=")
-        return (len(value) == 43 and len(raw) == 32
-                and base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii") == value)
-    except Exception:
-        return False
-
-
-def rejection(path, token):
-    try:
-        with connect(endpoint(path), proxy=None, open_timeout=5, logger=logger) as ws:
-            if token is not None:
-                ws.send('{"type":"auth","token":"' + token + '"}')
-            ws.recv(timeout=10)
-    except ConnectionClosed as exc:
-        if exc.code == 1008:
-            return
-    except Exception:
-        pass
-    fail()
-
-
-def hidden(path):
-    try:
-        with connect(endpoint(path), proxy=None, open_timeout=5, logger=logger):
-            pass
-    except InvalidStatus as exc:
-        if exc.response.status_code == 404:
-            return
-    except Exception:
-        pass
-    fail()
-
-
-if len(sys.argv) != 2:
-    fail()
-try:
-    parts = urlsplit(sys.argv[1])
-    valid_url = (parts.scheme == "wss" and parts.hostname
-                 and parts.username is None and parts.password is None
-                 and not parts.query and not parts.fragment
-                 and parts.path.endswith("/state"))
-    parts.port
-except ValueError:
-    fail()
-if (not valid_url or "?" in sys.argv[1] or "#" in sys.argv[1]):
-    fail()
-prefix = parts.path[:-len("/state")]
-state_path = prefix + "/state"
-action_path = prefix + "/action"
-health_path = prefix + "/healthz"
-try:
-    with open("/dev/tty", "w") as tty, warnings.catch_warnings():
-        warnings.simplefilter("error", getpass.GetPassWarning)
-        token = getpass.getpass("Pairing token: ", stream=tty)
-        previous_token = getpass.getpass(
-            "Previous token to verify revocation (optional): ", stream=tty)
-    if not canonical_token(token) or (previous_token and not canonical_token(previous_token)):
-        fail()
-except Exception:
-    fail()
-
-try:
-    with connect(endpoint(state_path), proxy=None, open_timeout=5, logger=logger) as ws:
-        ws.send('{"type":"auth","token":"' + token + '"}')
-        hello = json.loads(ws.recv(timeout=5))
-        if hello.get("type") != "hello" or hello.get("protocol") != 2:
-            fail()
-except SystemExit:
-    raise
-except Exception:
-    fail()
-
-wrong_token = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
-while wrong_token in (token, previous_token):
-    wrong_token = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
-for route in (state_path, action_path):
-    rejection(route, wrong_token)
-    rejection(route, None)
-    if previous_token:
-        rejection(route, previous_token)
-
-opener = build_opener(ProxyHandler({}), HTTPSHandler(), NoRedirect())
-for route in ("/ingest", "/action-consumer", "/unknown"):
-    status, _ = http_get(f"https://{parts.netloc}{prefix}{route}")
-    if status != 404:
-        fail()
-    hidden(prefix + route)
-
-status, body = http_get(f"https://{parts.netloc}{health_path}")
-if status not in (200, 404):
-    fail()
-if status == 200:
-    try:
-        if json.loads(body) != {"status": "ok"}:
-            fail()
-    except Exception:
-        fail()
-
-print("Public gateway verification passed.")
-```
-
-Use only a disposable local copy of the script and remove it after use. Do not
-enable websocket protocol/frame logging. The configured Imp `websockets`
-logger's INFO security floor is part of the credential confidentiality
-boundary.
+Do not enable websocket protocol/frame logging. The Imp `websockets` logger's
+INFO security floor, applied by the shared public connection policy, is part of
+the credential confidentiality boundary.
 
 ### Separate live acceptance authorization
 
@@ -697,7 +887,7 @@ Add an override:
 ```ini
 [Service]
 ExecStart=
-ExecStart=%h/.local/share/imp/current/.venv/bin/imp-feed --diagnostic-capture
+ExecStart=%h/.local/share/imp/current/bin/imp-server feed --diagnostic-capture
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user restart
@@ -723,4 +913,5 @@ iteration and testing.
 
 Released installations should use the versioned server archive and
 `install.sh` instead. Normal Imp users do not need a VPS Git checkout, Node.js,
-npm, Rust, or `uv`.
+npm, Rust, `uv`, or Python. Source and build workflows need `uv` with the exact
+interpreter pinned in `services/relay/.python-version`.

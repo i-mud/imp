@@ -244,6 +244,30 @@ cleanup, relaunch, and an independently persistent external master/forward.
 Its observer retains pidfds only for its own descendant tree, including
 adopted daemonized fixtures, and cleans/waits them before propagating failure.
 
+## Server bundle checks
+
+Server build, release, and source workflows require `uv` and the locked
+managed environment; they never use ambient Python:
+
+```bash
+uv sync --locked --project services/relay --managed-python
+./scripts/build-server-bundle.sh
+services/relay/.venv/bin/python scripts/test-server-release.py <archive>
+```
+
+The interpreter version comes only from `services/relay/.python-version`.
+The gate builds a throwaway development-labelled artifact A, then runs
+`scripts/test-server-bundle.sh` over A and the supplied artifact B. Real
+installed operations (DirectWSS, safe edge commands, legacy/frozen upgrade,
+failed-upgrade recovery) are launched under a Landlock EXECUTE denial of host
+Python/pip with shell infrastructure children, so a Linux x86_64 kernel with
+Landlock is required and there is no fallback. Developer Python control and
+source fixtures, and fake source-boundary controls, stay outside the guard;
+it is not a general sandbox. The build also enforces the frozen runtime's
+glibc/libstdc++ ABI floor over
+every bundled ELF. Run these on a clean source tree: the gate builds a
+development-labelled A and must not be used to publish uncommitted code.
+
 ## Before pushing
 
 ```bash
