@@ -10,6 +10,16 @@ public release versions.
 
 No changes yet.
 
+## [0.4.0] - 2026-10-15
+
+### Bug Fixes
+
+- restore TinyFugue feed context after restart ([5c1742b](https://github.com/i-mud/imp/commit/5c1742b6efff03bfe4c07e8c17a502de21417d09))
+
+### Features
+
+- ship self-contained Linux server runtime with literal Direct edge routing ([5687cba](https://github.com/i-mud/imp/commit/5687cba5cb70405cf781a02b84797433927c62cb))
+
 ## [0.3.2] - 2026-10-06
 
 ### Bug Fixes
