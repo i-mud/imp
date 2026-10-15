@@ -6,7 +6,7 @@ Wants=imp-relay.service
 [Service]
 Type=simple
 ExecStart=%h/.local/share/imp/current/bin/imp-server feed
-ExecStopPost=/usr/bin/rm -f %h/.local/state/imp/spool
+ExecStopPost=/usr/bin/rm -f %h/.local/state/imp/spool %h/.local/state/imp/feed-ready
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

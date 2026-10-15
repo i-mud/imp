@@ -1357,9 +1357,43 @@ certificate, and external authenticated WSS. The subsequent exact-owned
 schema-3 NAT policy migration, raw-route checks, authentication checks, and
 desktop live state/action acceptance passed. Live feed/relay restart acceptance
 then failed to recover the still-running TinyFugue selection; a TF relogin
-workaround restored the live feed. Live restart acceptance of this tree is not
-claimed: recovery of a still-running TinyFugue selection after a feed restart
-remains unresolved here. Directly-addressed acceptance remains to be exercised
-as practical. Do not reboot without operator approval. Slice 25 is not complete.
+workaround restored the old live feed, not acceptance of the correction.
+
+The working-tree correction adds one TF-owned, reload-safe `imp-feed-watch`
+quote job and a private per-incarnation readiness marker. The feed clears old
+raw spools under lock but preserves normalized checkpoint values. Readiness
+does not restore authority: live TF reasserts its actual foreground or null
+selection, and matching cached state returns stale until fresh GMCP. The
+checkpoint remains ephemeral; reboot-time identity bootstrap is unchanged.
+
+Actual offline TinyFugue against a fake MUD passed:
+
+- feed and relay restart with the same TF PID and MUD socket, stable identity
+  and vitals restored stale, then live after fresh GMCP;
+- foreground switching during feed downtime selected the current world rather
+  than the old one, and null/disconnect during downtime recovered null;
+- two hook reloads left one actual watcher and did not launch extra action
+  helpers; session and connection counters survived;
+- no action or transient-text replay, and rejection of an old-context action.
+
+The development bundle `0.3.2+dev.tfrecovery.20261015083058.1d2957` passed its
+ABI gate, standalone installed-bundle acceptance, and mandatory distinct frozen
+A/B release acceptance. These exercised real isolated user-systemd flows without
+skips and denied host Python/pip execution under Landlock. Its native watcher
+also emitted readiness and exited on pipe loss with `XDG_RUNTIME_DIR` unset.
+`npm run check` passed: protocol 64, desktop 152, relay 786 passed/184 skipped,
+shared adapter 31, Mudlet 32, TinyFugue 112, plus lint/types, docs/version, E2E,
+and production frontend build. The retained native TF restart regression passed.
+
+Live NAT acceptance on a disposable host passed for this tree: migration,
+route isolation, authenticated WSS, TinyFugue GMCP, desktop Direct, a real
+service restart that recovered the still-connected TinyFugue selection without a
+reconnect, and an idempotent second install with credentials, ownership,
+certificate and ACME storage unchanged. The connection generation was not
+captured immediately before the final restart, so "no reconnect" rests on the
+operator's report; session and generation matched. Old-hook TinyFugue sessions
+need one `/load ~/.config/imp/capture.tf` after installation. A host reboot
+still discards the ephemeral checkpoint and needs a fresh identity-bearing
+login. Do not reboot without operator approval.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).

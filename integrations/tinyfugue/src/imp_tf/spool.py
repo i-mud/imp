@@ -56,6 +56,7 @@ class RuntimeLayout:
     diagnostics: Path
     checkpoint: Path
     context: Path
+    ready: Path
 
     @classmethod
     def resolve(cls, runtime_dir: Path | None = None, state_dir: Path | None = None) -> RuntimeLayout:
@@ -76,6 +77,7 @@ class RuntimeLayout:
             # without turning it into durable session history.
             checkpoint=runtime / "state.json",
             context=state / "context",
+            ready=state / "feed-ready",
         )
 
     @property

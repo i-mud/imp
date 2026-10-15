@@ -178,6 +178,13 @@ EXPECTED_RELEASE="$HOME_DIR/.local/share/imp/releases/$VERSION"
 )" == "$HOME_DIR/.local/share/imp/current/bin/imp-direct-wss" ]] ||
   die "direct-wss symlink is incorrect"
 
+[[ "$(
+  readlink "$HOME_DIR/.local/bin/imp-feed-watch"
+)" == "$HOME_DIR/.local/share/imp/current/bin/imp-feed-watch" ]] ||
+  die "feed-watch symlink is incorrect"
+guarded "$HOME_DIR/.local/bin/imp-feed-watch" --help ||
+  die "feed-watch stable link does not run"
+
 # The release is native: no venv, no wheelhouse, no interpreter on the target PATH.
 for path in .venv wheels; do
   [[ ! -e "$EXPECTED_RELEASE/$path" ]] || die "release carries $path"
@@ -187,7 +194,7 @@ guarded "$EXPECTED_RELEASE/bin/imp-server" runtime-check "$VERSION" ||
   die "runtime-check rejected the installed release"
 
 SERVER_INODE="$(stat -c '%d:%i' "$EXPECTED_RELEASE/bin/imp-server")"
-for entry in relay gateway feed action-consumer direct-wss direct-edge public-verify; do
+for entry in relay gateway feed feed-watch action-consumer direct-wss direct-edge public-verify; do
   binary="$EXPECTED_RELEASE/bin/imp-$entry"
 
   [[ -x "$binary" && ! -L "$binary" ]] ||
@@ -1023,6 +1030,8 @@ printf 'old-gateway-unit\n' \
 ROLLBACK_ACTION_TARGET="$ROLLBACK_HOME/.local/share/imp/current/.venv/bin/imp-action-consumer"
 ln -sfn "$ROLLBACK_ACTION_TARGET" \
   "$ROLLBACK_HOME/.local/bin/imp-action-consumer"
+ROLLBACK_WATCH_TARGET="$(readlink "$ROLLBACK_HOME/.local/bin/imp-feed-watch")"
+
 
 printf '/echo original startup\n' > "$ROLLBACK_HOME/.tfrc"
 
@@ -1227,6 +1236,9 @@ grep -Fxq old-gateway-unit \
   readlink "$ROLLBACK_HOME/.local/bin/imp-action-consumer"
 )" == "$ROLLBACK_ACTION_TARGET" ]] ||
   die "action-consumer link rollback failed"
+
+[[ "$(readlink "$ROLLBACK_HOME/.local/bin/imp-feed-watch")" == "$ROLLBACK_WATCH_TARGET" ]] ||
+  die "pre-existing feed-watch link rollback failed"
 
 grep -Fxq \
   '/echo original startup' \

@@ -18,6 +18,7 @@ dependencies = [
 imp-bridge = "imp_tf.bridge:main"
 imp-capture = "imp_tf.capture:main"
 imp-feed = "imp_tf.feed:main"
+imp-feed-watch = "imp_tf.feed_watch:main"
 imp-action-consumer = "imp_tf.action_consumer:main"
 
 [tool.hatch.build.targets.wheel]

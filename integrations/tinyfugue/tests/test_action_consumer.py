@@ -26,7 +26,7 @@ from imp_relay.protocol import (
     encode_select,
 )
 from imp_relay.server import RelayServer
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
@@ -62,7 +62,7 @@ class _TrackedPipeWriter:
 
 @contextmanager
 def _stalled_consumer_peer(
-    *, acknowledge_registration: bool
+    *, acknowledge_registration: bool, dispatch: bool = False
 ) -> Iterator[tuple[str, threading.Event, list[dict[str, object]]]]:
     started = threading.Event()
     stalled = threading.Event()
@@ -77,6 +77,9 @@ def _stalled_consumer_peer(
             frames.append(cast(dict[str, object], json.loads(cast(str, await connection.recv()))))
             if acknowledge_registration:
                 await connection.send(encode_consumer_ready(CONTEXT))
+            if dispatch:
+                await connection.send(encode_dispatch("dispatch1", CONTEXT, "north"))
+                frames.append(cast(dict[str, object], json.loads(cast(str, await connection.recv()))))
             stalled.set()
             release.wait()
 
@@ -182,6 +185,55 @@ def test_pipe_reader_loss_aborts_stalled_pending_registration(tmp_path: Path) ->
                 assert len(frames) == 1
                 assert frames[0]["type"] == "consumer"
                 assert output.writes == []
+        finally:
+            if read_fd >= 0:
+                os.close(read_fd)
+            output.close()
+
+    asyncio.run(scenario())
+
+
+def test_pipe_reader_loss_interrupts_graceful_close_after_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        marker = tmp_path / "context"
+        write_context_marker(marker, CONTEXT)
+        read_fd, write_fd = os.pipe()
+        output = _TrackedPipeWriter(write_fd)
+        closing = asyncio.Event()
+        original_close = ClientConnection.close
+
+        async def observe_close(connection: ClientConnection, code: int = 1000, reason: str = "") -> None:
+            assert await asyncio.to_thread(stalled.wait, 1)
+            closing.set()
+            await original_close(connection, code, reason)
+
+        monkeypatch.setattr(ClientConnection, "close", observe_close)
+        try:
+            with _stalled_consumer_peer(acknowledge_registration=True, dispatch=True) as (
+                url,
+                stalled,
+                frames,
+            ):
+                helper = asyncio.create_task(
+                    run_action_consumer(url, CONTEXT, "Alpha", marker, cast(TextIO, output))
+                )
+                try:
+                    assert await asyncio.to_thread(stalled.wait, 1)
+                    await asyncio.wait_for(closing.wait(), timeout=1)
+                    assert not helper.done()
+                    assert os.read(read_fd, 4096) == b"/imp_send session1 2 3 Alpha north\n"
+                    os.close(read_fd)
+                    read_fd = -1
+                    await asyncio.wait_for(helper, timeout=0.75)
+                    assert [frame["type"] for frame in frames] == ["consumer", "consumer-result"]
+                    assert frames[1]["status"] == "forwarded"
+                    assert len(output.writes) == 1
+                finally:
+                    if not helper.done():
+                        helper.cancel()
+                        await asyncio.gather(helper, return_exceptions=True)
         finally:
             if read_fd >= 0:
                 os.close(read_fd)
@@ -496,41 +548,6 @@ def test_tf_eval_locals_never_escape_single_command_eval() -> None:
     assert "/eval /set imp_connection_%{_world}=%{imp_connection_serial}%;" in source
     assert "/set _connection" not in source
     assert source.count("imp_connection_serial :=") == 1
-
-
-def test_select_world_deselects_until_known_generation_is_connected() -> None:
-    source = (Path(__file__).parents[1] / "imp.tf").read_text(encoding="utf-8")
-    macro = source.split("/def -i imp_select_world = \\\n", 1)[1].split("\n\n/def", 1)[0]
-    lookup = "/let _connection=%%{imp_connection_%{_world}}%%;"
-
-    changed = macro.index("/if (_world !~ imp_selected_world)")
-    increment = macro.index("imp_foreground := imp_foreground + 1", changed)
-    selected = macro.index("/set imp_selected_world=%{_world}", increment)
-    changed_end = macro.index("/endif%;", selected)
-
-    scope = macro.index("/eval \\", changed_end)
-    first_lookup = macro.index(lookup, scope)
-    unavailable = macro.index(
-        "/if (!strlen(_connection) | !is_connected(textdecode(_world)))",
-        first_lookup,
-    )
-    deselect = macro.index(
-        'strcat("IMP2 S ", imp_session, " ", imp_foreground, " 0 - ", time()))%%;',
-        unavailable,
-    )
-    alternative = macro.index("/else", deselect)
-    event = macro.index('strcat("IMP2 S "', alternative)
-    consumer = macro.index("/imp_start_consumer %%{_connection} %{_world}%%;", event)
-    missing_end = macro.index("/endif", consumer)
-
-    assert changed < increment < selected < changed_end < scope
-    assert scope < first_lookup < unavailable < deselect < alternative
-    assert alternative < event < consumer < missing_end
-    assert macro.count(lookup) == 1
-    assert "/imp_reset_world" not in macro
-    assert macro.count("/imp_start_consumer") == 1
-    assert "/let _world=$[textencode({1})]" in macro
-    assert '_connection, " ", _world' in macro[event:consumer]
 
 
 def test_connect_owns_connection_generation_not_gmcp_login() -> None:
@@ -906,3 +923,18 @@ def test_real_pipe_consumer_recovers_after_relay_restart_then_stops_on_reader_lo
                     await asyncio.gather(helper, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_native_tf_owns_consumer_across_same_context_readiness() -> None:
+    binary = os.environ.get("IMP_TF_BINARY")
+    if binary is None:
+        pytest.skip("set IMP_TF_BINARY to a GMCP-capable TinyFugue binary")
+    if sys.platform != "linux":
+        pytest.skip("native TF ownership regression requires Linux /proc")
+    root = Path(__file__).resolve().parents[3]
+    subprocess.run(
+        [sys.executable, str(root / "scripts/test-tf-restart.py"), binary],
+        cwd=root,
+        check=True,
+        timeout=120,
+    )

@@ -67,6 +67,15 @@ durable session history. The exact active context is also written atomically as
 `IMPCTX 2 <session> <foreground> <connection>` to the private `0600`
 `~/.local/state/imp/context` marker.
 
+On feed restart, the checkpoint restores cached values, not selection authority.
+The feed clears old raw spool generations under its producer lock and atomically
+publishes a private `~/.local/state/imp/feed-ready` marker with a new 32-hex
+incarnation. The TF-owned `imp-feed-watch` helper checks that bounded readiness
+record once per second and asks the live hook to reassert its actual foreground
+selection (including no selection). Readiness itself grants no authority. Only
+that live selection can restore the matching cached state through `select`,
+which remains `stale` until fresh authoritative GMCP is published.
+
 ## Running (normal production path)
 
 Copy the unchanged hook to `~/.config/imp/capture.tf`, then add this line
@@ -85,6 +94,11 @@ sends no GMCP of its own. Installation must not create or overwrite an
 operator startup file. See [`../../deploy/README.md`](../../deploy/README.md)
 for the VPS systemd setup.
 
+After installing the updated hook into an already-running TinyFugue that still
+has the old hook loaded, run `/load ~/.config/imp/capture.tf` once before testing
+restart recovery. Installing the file does not reload that process. No MUD
+reconnect is needed when the normalized checkpoint still contains identity.
+
 The hook writes to the fixed path `~/.local/state/imp/spool`.
 `imp-feed` creates that path as a symlink into its private runtime
 directory and owns everything downstream:
@@ -102,6 +116,12 @@ spool, parses versioned events, keeps normalization isolated per world, and
 publishes only the selected exact context. A newer delivery cancels an older
 pending publish so reconnect backoff cannot replay stale foreground state. On a
 publisher reconnect it sends `select` again before any `publish`.
+
+The hook owns one asynchronous `/quote` readiness watcher, launched through the
+stable `~/.local/bin/imp-feed-watch` CLI (packaged role `imp-server feed-watch`).
+Repeated hook loads preserve session/connection counters and replace definitions
+without multiplying the watcher job. The helper exits when TF closes its stdout
+pipe; it is not a systemd service or an independent session owner.
 
 The TF hook starts an asynchronous `imp-action-consumer` for the selected
 connection. It registers only while the feed's private context marker matches
@@ -125,8 +145,8 @@ retries the dispatch.
 
 To stop the feed without closing TinyFugue, stop `imp-feed` (or
 `systemctl --user stop imp-feed.service`). The hook keeps trying the fixed
-spool path and loses updates rather than blocking. Reloading or exiting
-TinyFugue removes its session-local hook state.
+spool path and loses updates rather than blocking. Reloading the hook preserves
+the live session identity and counters; exiting TinyFugue closes its helper pipes.
 
 ## Identity bootstrap prerequisite
 
@@ -259,6 +279,43 @@ Stop if any tuple regresses, if a background world appears in the HUD, or if
 TinyFugue pauses. Do not open `/action` during this checklist. A real outbound
 command is a separate, explicit operator acceptance check because even a
 read-only-looking MUD command is an external effect.
+
+### Native restart regression
+
+With the repository's prepared Python environment and a GMCP-capable TinyFugue
+binary, run from the repository root:
+
+```sh
+integrations/tinyfugue/.venv/bin/python scripts/test-tf-restart.py /path/to/tf
+```
+
+This uses isolated HOME/runtime directories, loopback fake MUDs, and an ephemeral
+node port. It exercises real TF hook execution, feed/node restart without a MUD
+reconnect, same-context selection during a feed outage followed by readiness
+reselection, changed and null foreground recovery, and watcher reload ownership.
+It checks that only one action consumer remains alive, registrations stop churning,
+unrelated quotes survive replacement, and actions/text are not replayed. A later
+foreground change must still replace the consumer and deliver only to that world.
+It never loads the operator's startup or contacts a real MUD, and does not replace
+live NAT/desktop acceptance.
+
+The normal pytest suite runs the same behavioral regression when `IMP_TF_BINARY`
+explicitly names a GMCP-capable native Linux TF binary; otherwise that test is
+skipped:
+
+```sh
+IMP_TF_BINARY=/path/to/tf integrations/tinyfugue/.venv/bin/python -m pytest \
+  integrations/tinyfugue/tests/test_action_consumer.py
+```
+
+`imp_start_consumer` owns its `/quote` process ID just as the readiness watcher
+does: it kills only its previous live quote before starting a replacement; an
+already completed quote needs no stop. Selection
+and readiness can both start a consumer for the same context, so waiting for the
+context marker to change is insufficient to retire the previous helper. The
+session/foreground/connection/world fences and action validation remain unchanged.
+Reader-loss monitoring remains active during the WebSocket close handshake, so
+retiring a quote cannot make TF wait for an unresponsive relay to finish closing.
 
 ### Transient received-text acceptance
 

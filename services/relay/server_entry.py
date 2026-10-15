@@ -6,6 +6,7 @@ here, not in the relay package, which must not depend on the adapter packages.
 
 from imp_tf.action_consumer import main as action_consumer
 from imp_tf.feed import main as feed
+from imp_tf.feed_watch import main as feed_watch
 
 from imp_relay.__main__ import main as relay
 from imp_relay.direct_edge import main as direct_edge
@@ -18,6 +19,7 @@ ROLES = {
     "relay": relay,
     "gateway": gateway,
     "feed": feed,
+    "feed-watch": feed_watch,
     "action-consumer": action_consumer,
     "direct-wss": direct_wss,
     "direct-edge": direct_edge,

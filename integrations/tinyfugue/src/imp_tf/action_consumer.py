@@ -58,13 +58,23 @@ def _validate_url(url: str) -> None:
         raise ValueError("consumer URL must be a loopback ws:// URL with the /action-consumer path")
 
 
-async def _close_connection(connection: ClientConnection, *, abort: bool) -> None:
-    if abort:
+async def _close_connection(connection: ClientConnection, *, output_lost: asyncio.Event) -> None:
+    if output_lost.is_set():
         # TinyFugue owns the pipe; its shutdown cannot wait for relay cooperation.
         connection.transport.abort()
         await connection.wait_closed()
-    else:
-        await connection.close()
+        return
+    closing = asyncio.create_task(connection.close())
+    reader_lost = asyncio.create_task(output_lost.wait())
+    try:
+        done, _ = await asyncio.wait((closing, reader_lost), return_when=asyncio.FIRST_COMPLETED)
+        if reader_lost in done:
+            connection.transport.abort()
+        await closing
+    finally:
+        closing.cancel()
+        reader_lost.cancel()
+        await asyncio.gather(closing, reader_lost, return_exceptions=True)
 
 
 async def _register(
@@ -90,7 +100,7 @@ async def _register(
             pass
         finally:
             if connection is not None:
-                await _close_connection(connection, abort=output_lost.is_set())
+                await _close_connection(connection, output_lost=output_lost)
         await asyncio.sleep(_MARKER_POLL_SECONDS)
     return None
 
@@ -204,17 +214,22 @@ async def run_action_consumer(
                     receive.cancel()
                     await asyncio.gather(receive, return_exceptions=True)
                     receive = None
-                await _close_connection(connection, abort=output_lost.is_set())
+                await _close_connection(connection, output_lost=output_lost)
                 connection = None
     finally:
-        tasks = tuple(
-            task for task in (registration, receive, marker_changed, pipe_reader_lost) if task is not None
-        )
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        if connection is not None:
-            await _close_connection(connection, abort=output_lost.is_set())
+        try:
+            if connection is not None:
+                await _close_connection(connection, output_lost=output_lost)
+        finally:
+            tasks = tuple(task for task in (registration, receive, marker_changed) if task is not None)
+            for task in tasks:
+                task.cancel()
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                if pipe_reader_lost is not None:
+                    pipe_reader_lost.cancel()
+                    await asyncio.gather(pipe_reader_lost, return_exceptions=True)
 
 
 def _arguments() -> argparse.ArgumentParser:

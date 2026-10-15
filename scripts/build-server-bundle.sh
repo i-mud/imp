@@ -185,7 +185,7 @@ PY_REGULARIZE
 
 cp -a "$PYI_DIR/dist/imp-server/." "$BUNDLE_DIR/bin/"
 
-for role in relay gateway feed action-consumer direct-wss direct-edge public-verify; do
+for role in relay gateway feed feed-watch action-consumer direct-wss direct-edge public-verify; do
   ln "$BUNDLE_DIR/bin/imp-server" "$BUNDLE_DIR/bin/imp-$role"
 done
 

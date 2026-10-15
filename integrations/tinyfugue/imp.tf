@@ -15,6 +15,7 @@
 /if (!isvar("imp_connection_serial")) /set imp_connection_serial=0%; /endif
 /if (!isvar("imp_foreground")) /set imp_foreground=0%; /endif
 /if (!isvar("imp_selected_world")) /set imp_selected_world=%; /endif
+/if (!isvar("imp_ready_token")) /set imp_ready_token=%; /endif
 
 ; /eval creates a nested local scope. Any /let inside /eval and every dependent
 ; command must remain in that same expansion.
@@ -35,8 +36,13 @@
         /endif
 
 /def -i imp_start_consumer = \
+    /if (isvar("imp_consumer_pid") & imp_consumer_pid > 0) \
+        /let _consumer=$(/ps -sq %{imp_consumer_pid})%; \
+        /if (strlen(_consumer)) /kill %{imp_consumer_pid}%; /endif%; \
+    /endif%; \
     /quote -0 -dexec -w !~/.local/bin/imp-action-consumer --session %{imp_session} \
-        --foreground %{imp_foreground} --connection %{1} --world %{2} 2>/dev/null
+        --foreground %{imp_foreground} --connection %{1} --world %{2} 2>/dev/null%; \
+    /set imp_consumer_pid=%?
 
 /def -i imp_reset_world = \
     /let _world=$[textencode({1})]%; \
@@ -53,7 +59,7 @@
 
 /def -i imp_select_world = \
     /let _world=$[textencode({1})]%; \
-    /if (_world !~ imp_selected_world) \
+    /if (_world !~ imp_selected_world | imp_foreground <= 0) \
         /test imp_foreground := imp_foreground + 1%; \
         /set imp_selected_world=%{_world}%; \
     /endif%; \
@@ -101,3 +107,19 @@
         /endif%%; \
         /test fwrite("~/.local/state/imp/spool", \
             strcat("IMP2 G ", imp_session, " ", _connection, " ", _world, " ", time(), " ", {*}))
+
+; The watcher only signals readiness; selection must come from TF's foreground.
+/def -i imp_feed_ready = \
+    /if (regmatch("^[0-9a-f]{32}$$", {*}) & {*} !~ imp_ready_token) \
+        /set imp_ready_token=%{*}%; \
+        /imp_select_world $[fg_world()]%; \
+    /endif
+
+/def -i imp_start_feed_watch = \
+    /if (isvar("imp_feed_watch_pid") & imp_feed_watch_pid > 0) \
+        /kill %{imp_feed_watch_pid}%; \
+    /endif%; \
+    /quote -0 -dexec !~/.local/bin/imp-feed-watch 2>/dev/null%; \
+    /set imp_feed_watch_pid=%?
+
+/imp_start_feed_watch

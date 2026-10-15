@@ -127,12 +127,13 @@ BIN_DIR="$HOME/.local/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 
 ACTION_LINK="$BIN_DIR/imp-action-consumer"
+FEED_WATCH_LINK="$BIN_DIR/imp-feed-watch"
 DIRECT_WSS_LINK="$BIN_DIR/imp-direct-wss"
 
 # Missing one expected file is not evidence of a fresh installation.
 EXISTING_INSTALL=0
 SERVICE_STATE_UNKNOWN=0
-for path in "$DATA_DIR" "$CONFIG_DIR" "$STATE_DIR" "$ACTION_LINK" "$DIRECT_WSS_LINK" \
+for path in "$DATA_DIR" "$CONFIG_DIR" "$STATE_DIR" "$ACTION_LINK" "$FEED_WATCH_LINK" "$DIRECT_WSS_LINK" \
   "$SYSTEMD_DIR/imp-relay.service" "$SYSTEMD_DIR/imp-feed.service" \
   "$SYSTEMD_DIR/imp-gateway.service" /etc/imp/direct-edge.json; do
   if [[ -e "$path" || -L "$path" ]]; then
@@ -224,7 +225,7 @@ if [[ -e "$CURRENT_LINK" && ! -L "$CURRENT_LINK" ]]; then
 fi
 
 # Only this install's runtime, or its previous .venv layout, may be migrated.
-for link in "$ACTION_LINK" "$DIRECT_WSS_LINK"; do
+for link in "$ACTION_LINK" "$FEED_WATCH_LINK" "$DIRECT_WSS_LINK"; do
   name="${link##*/}"
   if [[ -e "$link" && ! -L "$link" ]]; then
     die "$link exists but is not a symlink"
@@ -377,6 +378,7 @@ cleanup() {
 
     if ((FILES_BACKUP_READY)); then
       restore_path "$ACTION_LINK" action-consumer || restoration_failed=1
+      restore_path "$FEED_WATCH_LINK" feed-watch || restoration_failed=1
       restore_path "$CONFIG_DIR/capture.tf" capture.tf || restoration_failed=1
       restore_path "$SYSTEMD_DIR/imp-relay.service" imp-relay.service || restoration_failed=1
       restore_path "$SYSTEMD_DIR/imp-feed.service" imp-feed.service || restoration_failed=1
@@ -485,6 +487,7 @@ rm -rf -- "$FILES_BACKUP_DIR"
 mkdir -p "$FILES_BACKUP_DIR"
 
 backup_path "$ACTION_LINK" action-consumer
+backup_path "$FEED_WATCH_LINK" feed-watch
 backup_path "$DIRECT_WSS_LINK" direct-wss
 
 backup_path "$CONFIG_DIR/capture.tf" capture.tf
@@ -497,6 +500,9 @@ FILES_BACKUP_READY=1
 ln -sfn \
   "$CURRENT_LINK/bin/imp-action-consumer" \
   "$ACTION_LINK"
+ln -sfn \
+  "$CURRENT_LINK/bin/imp-feed-watch" \
+  "$FEED_WATCH_LINK"
 ln -sfn \
   "$CURRENT_LINK/bin/imp-direct-wss" \
   "$DIRECT_WSS_LINK"

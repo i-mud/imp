@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from imp_adapter.normalize import Normalizer
 from imp_adapter.publisher import DEFAULT_RELAY_URL, RelayPublisher, state_to_wire
@@ -143,6 +144,19 @@ def store_checkpoint(path: Path, checkpoint: FeedCheckpoint) -> None:
     finally:
         os.close(fd)
     os.replace(staged, path)
+
+
+def _write_ready(path: Path) -> None:
+    staged = path.with_name(f".{path.name}.{os.getpid()}")
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _CHECKPOINT_MODE)
+    try:
+        os.fchmod(fd, _CHECKPOINT_MODE)
+        os.write(fd, f"{uuid4().hex}\n".encode("ascii"))
+        os.fsync(fd)
+        os.replace(staged, path)
+    finally:
+        os.close(fd)
+        staged.unlink(missing_ok=True)
 
 
 def _checkpoint(session: str, worlds: dict[str, _WorldRuntime]) -> FeedCheckpoint:
@@ -403,15 +417,20 @@ def main() -> None:
     diagnostics = DiagnosticCapture(layout.diagnostics) if args.diagnostic_capture else None
     publisher = RelayPublisher(url=args.relay_url)
     try:
+        layout.ready.unlink(missing_ok=True)
         write_context_marker(layout.context, None)
+        # Old raw events cannot authorize this incarnation; TF must select again.
+        reader.close()
         reader.open()
         initial_checkpoint = load_checkpoint(layout.checkpoint)
         if diagnostics is not None:
             diagnostics.open()
             LOGGER.info("diagnostic raw capture enabled at %s", layout.diagnostics)
+        _write_ready(layout.ready)
         LOGGER.info("feed started: spool=%s lock=%s", layout.spool, layout.lock)
         asyncio.run(_serve(reader, publisher, args.poll_interval, diagnostics, initial_checkpoint, layout))
     finally:
+        layout.ready.unlink(missing_ok=True)
         write_context_marker(layout.context, None)
         reader.close()
         if diagnostics is not None:

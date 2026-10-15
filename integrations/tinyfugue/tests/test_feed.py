@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -16,9 +17,10 @@ from imp_relay.state import Snapshot
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
 
+import imp_tf.feed as feed_module
 from imp_tf.diagnostics import DiagnosticCapture
 from imp_tf.feed import FeedCheckpoint, WorldCheckpoint, load_checkpoint, run_feed, store_checkpoint
-from imp_tf.spool import RuntimeLayout, SpoolReader
+from imp_tf.spool import RuntimeLayout, SpoolReader, acquire_producer_lock
 
 EMPTY = GameState(character=None, target=None)
 
@@ -667,6 +669,169 @@ def test_matching_checkpoint_seeds_world_but_different_session_discards_it() -> 
         fresh = _CollectingPublisher()
         await _run(_FakeSource([["IMP2 S new 1 1 Alpha 1"]]), fresh, initial_checkpoint=checkpoint)
         assert _character_name(fresh.operations[0][2]) is None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", [None, "open", "checkpoint", "serve"])
+def test_feed_readiness_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(sys, "argv", ["imp-feed"])
+    layout = RuntimeLayout.resolve()
+    layout.ready.parent.mkdir(parents=True)
+    layout.ready.write_text("obsolete\n", encoding="ascii")
+    tokens: list[str] = []
+    cached = FeedCheckpoint(
+        "same", {"Alpha": WorldCheckpoint(1, GameState(Character("Seed", None, None, None), None))}
+    )
+    store_checkpoint(layout.checkpoint, cached)
+    original_open = SpoolReader.open
+    original_load = load_checkpoint
+
+    def open_reader(reader: SpoolReader) -> None:
+        assert not layout.ready.exists()
+        assert not layout.spool.exists()
+        assert not layout.retired_spool.exists()
+        if failure == "open":
+            raise RuntimeError("open failed")
+        original_open(reader)
+
+    def load(path: Path) -> FeedCheckpoint | None:
+        assert not layout.ready.exists()
+        assert layout.hook_spool.is_file()
+        if failure == "checkpoint":
+            raise RuntimeError("checkpoint failed")
+        return original_load(path)
+
+    async def serve(
+        reader: SpoolReader,
+        publisher: RelayPublisher,
+        poll_interval: float,
+        diagnostics: DiagnosticCapture | None,
+        initial_checkpoint: FeedCheckpoint | None,
+        actual_layout: RuntimeLayout,
+    ) -> None:
+        assert actual_layout == layout
+        token = layout.ready.read_text(encoding="ascii")
+        assert len(token) == 33 and token[-1] == "\n"
+        assert all(char in "0123456789abcdef" for char in token[:-1])
+        assert stat.S_IMODE(layout.ready.stat().st_mode) == 0o600
+        tokens.append(token)
+        collector = _CollectingPublisher()
+        stop = asyncio.Event()
+        stop.set()
+        assert reader.read_lines() == []
+        assert initial_checkpoint == cached
+        await run_feed(reader, collector, stop=stop, initial_checkpoint=initial_checkpoint)
+        assert collector.operations == []
+        await publisher.close()
+        if failure == "serve":
+            raise RuntimeError("serve failed")
+
+    monkeypatch.setattr(SpoolReader, "open", open_reader)
+    monkeypatch.setattr(feed_module, "load_checkpoint", load)
+    monkeypatch.setattr(feed_module, "_serve", serve)
+    for _ in range(2):
+        _append_spool(
+            layout.spool,
+            "IMP2 S same 1 1 Alpha 1",
+            'IMP2 G same 1 Alpha 2 Char.Status {"character_name":"Old"}',
+            "IMP2 T same 1 Alpha 3 old%20text",
+        )
+        _append_spool(layout.retired_spool, "IMP2 S same 1 1 Alpha 1")
+        if failure is None:
+            feed_module.main()
+        else:
+            with pytest.raises(RuntimeError, match=f"{failure} failed"):
+                feed_module.main()
+        assert not layout.ready.exists()
+        assert not layout.hook_spool.exists()
+        lock_fd = acquire_producer_lock(layout.lock)
+        os.close(lock_fd)
+    if failure in (None, "serve"):
+        assert len(set(tokens)) == 2
+
+
+def test_feed_lock_refusal_preserves_running_feed_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(sys, "argv", ["imp-feed"])
+    layout = RuntimeLayout.resolve()
+    reader = SpoolReader(layout)
+    lock_fd = acquire_producer_lock(layout.lock)
+    reader.open()
+    token = "a" * 32 + "\n"
+    layout.ready.write_text(token, encoding="ascii")
+    try:
+        with pytest.raises(SystemExit, match="another Imp feed"):
+            feed_module.main()
+        assert layout.ready.read_text(encoding="ascii") == token
+        assert layout.hook_spool.is_file()
+    finally:
+        reader.close()
+        os.close(lock_fd)
+
+
+@pytest.mark.parametrize("connection", [1, 2], ids=["same-connection", "new-connection"])
+def test_checkpoint_requires_current_selection_before_stale_identity_then_fresh_gmcp(
+    tmp_path: Path, connection: int
+) -> None:
+    async def scenario() -> None:
+        seeded = GameState(Character("Seed", None, None, None), None)
+        checkpoint = FeedCheckpoint("same", {"Alpha": WorldCheckpoint(1, seeded)})
+        layout = RuntimeLayout.resolve(runtime_dir=tmp_path / "run", state_dir=tmp_path / "state")
+        reader = _RecordingSpoolReader(layout)
+        reader.open()
+        relay = RelayServer(port=0)
+        await relay.start()
+        publisher = RelayPublisher(f"ws://127.0.0.1:{relay.port}/ingest")
+        stop = _StepStop()
+        task = asyncio.create_task(
+            run_feed(reader, publisher, stop=stop, poll_interval=3600, initial_checkpoint=checkpoint)
+        )
+        context = StateContext("same", 2, connection)
+        try:
+            assert await asyncio.wait_for(reader.batches.get(), timeout=1) == []
+            assert relay.state.snapshot() is None
+            _append_spool(layout.spool, f"IMP2 S same 2 {connection} Alpha 1")
+            stop.advance()
+            await asyncio.wait_for(reader.batches.get(), timeout=1)
+            snapshot = await _wait_for_snapshot(relay, context, "Seed" if connection == 1 else None)
+            assert relay.state.health()["feed"] == "stale"
+            payload = (
+                '{"health":"9","health_max":"10"}'
+                if connection == 1
+                else '{"character_name":"New","health":"9","health_max":"10"}'
+            )
+            _append_spool(
+                layout.spool,
+                f"IMP2 G same {connection} Alpha 2 Char.Status {payload}",
+            )
+            stop.advance()
+            await asyncio.wait_for(reader.batches.get(), timeout=1)
+
+            async def wait_live() -> None:
+                while relay.state.health()["feed"] != "live":
+                    await asyncio.sleep(0.001)
+
+            await asyncio.wait_for(wait_live(), timeout=2)
+            fresh = relay.state.snapshot()
+            assert fresh is not None
+            assert _character_name(fresh.state) == ("Seed" if connection == 1 else "New")
+            assert fresh.state.character is not None
+            assert fresh.state.character.hp == Vital(9, 10)
+            assert snapshot.context == fresh.context
+        finally:
+            stop.stop()
+            await asyncio.wait_for(task, timeout=1)
+            await publisher.close()
+            await relay.close()
+            reader.close()
 
     asyncio.run(scenario())
 

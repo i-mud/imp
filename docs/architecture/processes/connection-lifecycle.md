@@ -107,6 +107,23 @@ revision, so it cannot disable transient text on an already selected transport
 while its send is pending. Text still drops while disconnected or selection is
 not ready; it never waits, retries, or replays.
 
+TinyFugue feed-process recovery has an additional authority boundary. The feed
+preserves its ephemeral normalized checkpoint but clears old raw spools under
+its lock before atomically announcing a new private `feed-ready` incarnation.
+One TF-owned, reload-safe `imp-feed-watch` quote job checks readiness once per
+second with bounded reads and exits when its stdout reader closes. The marker
+does not authorize a checkpoint context: the running TF hook reasserts its
+actual foreground selection, including null after a switch/disconnect during
+the outage. Matching cached state returns through `select` as `stale`; only
+fresh authoritative GMCP makes it live. No action or transient text is replayed.
+This does not change the existing policy allowing an otherwise valid selected
+context's action while feed state is stale.
+
+For an already-running TF using the old hook, install the new bundle and run
+`/load ~/.config/imp/capture.tf` once before testing recovery; reconnecting the
+MUD is unnecessary if checkpoint identity survives. Reboot still discards that
+ephemeral identity and requires the documented login-time GMCP bootstrap.
+
 ## HUD presentation states
 
 `freshnessOf()` in `apps/desktop/src/lib/hud/model.ts` classifies the pipeline;
@@ -194,3 +211,8 @@ ignored/rejected traffic, stale restoration, silence, and retained sequence/stat
 Slice 19 additionally verified non-reading subscriber retirement under real
 loopback TCP backpressure without delaying healthy-peer snapshots, watchdog
 status, or text, and shutdown with no subscriber tasks remaining.
+Actual offline TinyFugue against a fake MUD additionally passed feed/relay
+restart with the same TF process and MUD socket, stale cached-state recovery
+then fresh-GMCP liveness, foreground/null changes during feed downtime,
+reload deduplication, and no action/text replay. Live deployment acceptance of
+this feed-recovery correction remains pending; see `docs/status.md`.

@@ -197,7 +197,7 @@ def entrypoints(bundle, version):
     bin_dir = bundle / "bin"
     server = bin_dir / "imp-server"
     for name in (
-        "relay", "gateway", "feed", "action-consumer", "direct-wss", "direct-edge", "public-verify",
+        "relay", "gateway", "feed", "feed-watch", "action-consumer", "direct-wss", "direct-edge", "public-verify",
     ):
         alias = bin_dir / f"imp-{name}"
         check(

@@ -32,6 +32,7 @@ def test_resolve_uses_xdg_runtime_but_keeps_the_hook_at_its_fixed_tf_path(
     assert layout.spool == layout.runtime_dir / "spool"
     assert layout.hook_spool == tmp_path / "home" / ".local" / "state" / "imp" / "spool"
     assert layout.checkpoint == layout.runtime_dir / "state.json"
+    assert layout.ready == tmp_path / "home" / ".local" / "state" / "imp" / "feed-ready"
 
 
 def test_resolve_requires_xdg_runtime_dir(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,6 +53,32 @@ def test_open_creates_private_runtime_dir_and_links_the_fixed_hook_path(tmp_path
     assert layout.hook_spool.is_symlink()
     assert Path(os.readlink(layout.hook_spool)) == layout.spool
     reader.close()
+
+
+def test_startup_close_discards_old_inodes_without_truncating_an_open_tf_writer(
+    tmp_path: Path,
+) -> None:
+    layout = _layout(tmp_path)
+    previous = SpoolReader(layout)
+    previous.open()
+    _append(layout.hook_spool, "old selection\n")
+    _append(layout.retired_spool, "old retired event\n")
+    writer_fd = os.open(layout.hook_spool, os.O_WRONLY | os.O_APPEND)
+    reader = SpoolReader(layout)
+    try:
+        reader.close()
+        assert not layout.hook_spool.exists()
+        assert not layout.retired_spool.exists()
+        reader.open()
+        assert os.fstat(writer_fd).st_ino != layout.spool.stat().st_ino
+        assert os.fstat(writer_fd).st_size == len("old selection\n")
+        os.write(writer_fd, b"late old write\n")
+        _append(layout.hook_spool, "current selection\n")
+        assert reader.read_lines() == ["current selection"]
+    finally:
+        os.close(writer_fd)
+        reader.close()
+        previous.close()
 
 
 def test_reader_drains_lines_written_through_the_fixed_hook_path(tmp_path: Path) -> None:

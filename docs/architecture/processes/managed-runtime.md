@@ -12,21 +12,22 @@ client-adapter transport.
 
 ## Ownership
 
-| Resource                                    | Owner                           | Lifecycle                                                       |
-| ------------------------------------------- | ------------------------------- | --------------------------------------------------------------- |
-| TinyFugue session                           | operator                        | started and stopped interactively                               |
-| TinyFugue capture/select/action definitions | TinyFugue startup config        | fixed named `/def`; repeated loads replace                      |
-| TinyFugue per-dispatch action helper        | TinyFugue `/quote`              | reader loss or one line ends it; guarded macro replaces it      |
-| TinyFugue spool/feed                        | `imp-feed.service`              | one locked process, `Restart=on-failure`                        |
-| Mudlet profile/session                      | operator / Mudlet               | normal Mudlet profile lifecycle                                 |
-| Mudlet Lua adapter + helper                 | Mudlet profile / spawned helper | package loads per profile; helper follows package lifecycle     |
-| VPS Imp node                                | `imp-relay.service`             | `systemd --user`, `Restart=on-failure`                          |
-| desktop same-host Imp node                  | desktop `NodeSupervisor`        | supervised in every desktop connection mode                     |
-| VPS authenticated gateway                   | `imp-gateway.service`           | loopback user service; state/action only                        |
-| desktop authenticated gateway               | desktop `GatewaySupervisor`     | active only when producer-side WSS is enabled                   |
-| Managed SSH consumer forward on `8789`      | desktop `TunnelSupervisor`      | at most one owned child per Imp process                         |
-| healthy pre-existing relay on `8789`        | whoever started it              | Managed mode may adopt and monitor it; never owns or signals it |
-| WebSocket reconnect and HUD state           | `RelayStateSource` / HUD model  | transport-independent freshness presentation                    |
+| Resource                                    | Owner                           | Lifecycle                                                          |
+| ------------------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
+| TinyFugue session                           | operator                        | started and stopped interactively                                  |
+| TinyFugue capture/select/action definitions | TinyFugue startup config        | fixed named `/def`; repeated loads replace                         |
+| TinyFugue per-dispatch action helper        | TinyFugue `/quote`              | reader loss or one line ends it; guarded macro replaces it         |
+| TinyFugue feed-readiness watcher            | TinyFugue `/quote`              | one reload-safe job; bounded 1s reads; exits on stdout reader loss |
+| TinyFugue spool/feed                        | `imp-feed.service`              | one locked process, `Restart=on-failure`                           |
+| Mudlet profile/session                      | operator / Mudlet               | normal Mudlet profile lifecycle                                    |
+| Mudlet Lua adapter + helper                 | Mudlet profile / spawned helper | package loads per profile; helper follows package lifecycle        |
+| VPS Imp node                                | `imp-relay.service`             | `systemd --user`, `Restart=on-failure`                             |
+| desktop same-host Imp node                  | desktop `NodeSupervisor`        | supervised in every desktop connection mode                        |
+| VPS authenticated gateway                   | `imp-gateway.service`           | loopback user service; state/action only                           |
+| desktop authenticated gateway               | desktop `GatewaySupervisor`     | active only when producer-side WSS is enabled                      |
+| Managed SSH consumer forward on `8789`      | desktop `TunnelSupervisor`      | at most one owned child per Imp process                            |
+| healthy pre-existing relay on `8789`        | whoever started it              | Managed mode may adopt and monitor it; never owns or signals it    |
+| WebSocket reconnect and HUD state           | `RelayStateSource` / HUD model  | transport-independent freshness presentation                       |
 
 The installed-bundle `imp-direct-wss` command provisions the VPS gateway under
 the same target user's `systemd --user` manager; it does not configure DNS or
@@ -94,6 +95,20 @@ the VPS user units available without a root-owned service or administrative SSH
 session: `imp-feed` and `imp-relay` returned before interactive login.
 TinyFugue intentionally did not auto-start. The feed `Wants=` the relay but
 does not `Require=` it: its publisher reconnect loop owns a relay outage.
+
+Feed restart discards old raw spools under the producer lock, preserves the
+normalized checkpoint, and atomically publishes a private `feed-ready` marker
+with a new 32-hex incarnation. One TF-owned `imp-feed-watch` quote job observes
+it once per second; reloads preserve live counters and do not add watchers.
+Closing the quote pipe ends the helper. The packaged `feed-watch` role is
+exposed through the stable `~/.local/bin/imp-feed-watch` CLI.
+
+Readiness is not selection authority: the live TF hook reasserts the actual
+foreground context or null selection. Only that selection can restore matching
+checkpoint values via `select`; they remain stale until fresh authoritative
+GMCP. An already-running TF with the old hook needs a one-time
+`/load ~/.config/imp/capture.tf` after installation, before restart acceptance;
+the new hook does not require a MUD reconnect to recover cached identity.
 
 ## TinyFugue identity bootstrap
 

@@ -15,6 +15,7 @@ ROLES = (
     "relay",
     "gateway",
     "feed",
+    "feed-watch",
     "action-consumer",
     "direct-wss",
     "direct-edge",

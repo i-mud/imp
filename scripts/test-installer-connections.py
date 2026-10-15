@@ -920,6 +920,19 @@ def legacy_upgrade(work, bundle, next_bundle, edge_bundle, uid):
     check(states(site) == before and site.snapshot() == snap, "failed upgrade changed env/connection/service state", result)
     run_legacy(site, result)
     check(not (site.home / f".local/share/imp/releases/{new_version}").exists(), "failed release left behind", result)
+    check(
+        not (site.home / ".local/bin/imp-feed-watch").is_symlink(),
+        "failed legacy upgrade retained the new watcher link",
+        result,
+    )
+
+    print("--- foreign watcher helper is rejected without mutation")
+    site = legacy_site("legacy-foreign-watcher")
+    (site.home / ".local/bin/imp-feed-watch").symlink_to("/unrelated/feed-watch")
+    tree, before = home_tree(site.home), states(site)
+    result = site.install(bundle, [], guarded=True)
+    check(result.rc != 0, "foreign watcher helper was replaced", result)
+    check(home_tree(site.home) == tree and states(site) == before, "foreign watcher rejection mutated state", result)
 
     print("--- no-mode upgrade migrates links/units and preserves env, connection, edge, TinyFugue")
     site = legacy_site("legacy-upgrade")
@@ -928,7 +941,7 @@ def legacy_upgrade(work, bundle, next_bundle, edge_bundle, uid):
     check(result.rc == 0 and "specify --connection" not in result.out, "legacy no-mode upgrade failed", result)
     data = site.home / ".local/share/imp"
     check(os.readlink(data / "current") == str(data / "releases" / new_version), "upgrade did not select the new release", result)
-    for name in ("imp-action-consumer", "imp-direct-wss"):
+    for name in ("imp-action-consumer", "imp-feed-watch", "imp-direct-wss"):
         check(
             os.readlink(site.home / ".local/bin" / name) == str(data / "current/bin" / name),
             f"{name} link not migrated to the frozen layout",
@@ -969,6 +982,14 @@ def legacy_upgrade(work, bundle, next_bundle, edge_bundle, uid):
         text=True,
     )
     check(done.returncode == 0 and "--session" in done.stdout, "migrated stable link does not run the frozen consumer", result)
+    done = subprocess.run(
+        site.guarded([site.home / ".local/bin/imp-feed-watch", "--help"]),
+        env=site.env(),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    check(done.returncode == 0 and "usage:" in done.stdout, "installed watcher helper does not run", result)
     if next_bundle is not None:
         print("--- upgrade between two real new-layout releases")
         next_version = (next_bundle / "VERSION").read_text().strip()
@@ -1024,6 +1045,7 @@ def frozen_upgrade(work, a, b, edge_a, uid):
             "relay",
             "gateway",
             "feed",
+            "feed-watch",
             "action-consumer",
             "direct-wss",
             "direct-edge",
@@ -1033,7 +1055,7 @@ def frozen_upgrade(work, a, b, edge_a, uid):
                 os.path.samestat((data / "current/bin" / f"imp-{role}").stat(), server.stat()),
                 f"{version}: imp-{role}",
             )
-        for name in ("imp-action-consumer", "imp-direct-wss"):
+        for name in ("imp-action-consumer", "imp-feed-watch", "imp-direct-wss"):
             link = site.home / ".local/bin" / name
             check(os.readlink(link) == str(data / "current/bin" / name), f"{name} stable link")
             check(os.path.samestat(link.stat(), server.stat()), f"{version}: stable {name} is not its alias")

@@ -130,9 +130,9 @@ The installer:
   reuses it, while a different bundle claiming the same version is rejected;
 - atomically selects the installed runtime through
   `~/.local/share/imp/current`;
-- installs the fixed `~/.local/bin/imp-action-consumer` and
-  `~/.local/bin/imp-direct-wss` links to `current/bin/<name>`, migrating
-  legitimate legacy helper links;
+- installs the fixed `~/.local/bin/imp-action-consumer`,
+  `~/.local/bin/imp-feed-watch`, and `~/.local/bin/imp-direct-wss` links to
+  `current/bin/<name>`, migrating legitimate legacy helper links;
 - installs `~/.config/imp/capture.tf`;
 - installs the relay, feed, and optional gateway user units;
 - enables and starts `imp-relay.service` and `imp-feed.service`;
@@ -147,13 +147,20 @@ that old release directory in place; a failed activation restores the prior
 units, links, and `current` selection, so rollback returns to the old release
 with its historical runtime prerequisites.
 
-If TinyFugue is already connected when the installer restarts `imp-feed`, the
-feed deliberately starts without retaining the previous selected-action
-context. Generate a fresh TinyFugue world-selection event after installation,
-for example by switching away from and back to the active world, or reconnect
-the character. Outbound actions remain fail-closed until the new selected
-context is established. A reconnect may also be necessary for MUDs that send
-complete character identity only during login.
+For an already-running TinyFugue using the old hook, run
+`/load ~/.config/imp/capture.tf` once after installing this update, before
+testing live restart recovery. Installing the hook file does not reload TF.
+The updated hook owns one reload-safe `imp-feed-watch` quote job, using the
+stable CLI link above (packaged role `imp-server feed-watch`); it checks the
+private readiness marker once per second with bounded reads and exits when
+TF closes its stdout pipe.
+
+After feed restart, readiness is not authority: the live TF hook reasserts its
+actual foreground context or null selection, never blindly trusting a saved
+selection. Matching normalized checkpoint values return as stale until fresh
+authoritative GMCP arrives. No MUD reconnect is required while cached identity
+survives. The checkpoint is ephemeral: reboot or checkpoint loss still requires
+fresh identity-bearing login GMCP under the documented TinyFugue prerequisites.
 
 Configuration and state directories are kept private to the user.
 

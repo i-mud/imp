@@ -45,6 +45,22 @@ def test_dispatch_preserves_role_arguments(argv: list[str], monkeypatch: pytest.
     assert invoked == [["imp-action-consumer", "--help"]]
 
 
+@pytest.mark.parametrize(
+    "argv", [["/r/bin/imp-feed-watch", "--help"], ["/r/bin/imp-server", "feed-watch", "--help"]]
+)
+def test_feed_watch_dispatch_preserves_arguments(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["test"])
+    invoked: list[list[str]] = []
+
+    def watch() -> None:
+        invoked.append(sys.argv.copy())
+
+    with pytest.raises(SystemExit) as exc:
+        server_runtime.main({"feed-watch": watch}, argv)
+    assert exc.value.code is None
+    assert invoked == [["imp-feed-watch", "--help"]]
+
+
 def _bundle(root: Path) -> None:
     (root / "bin").mkdir(parents=True)
     names = ["VERSION", "bin/imp-server"]
@@ -109,7 +125,7 @@ def test_runtime_check_rejects_wrong_versions(
         server_runtime.runtime_check("1.2.3", tmp_path)
 
 
-@pytest.mark.parametrize("name", ["imp-feed", "imp-action-consumer"])
+@pytest.mark.parametrize("name", ["imp-feed", "imp-feed-watch"])
 def test_runtime_check_rejects_missing_or_symlinked_entrypoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
