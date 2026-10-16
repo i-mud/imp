@@ -6,7 +6,7 @@ Imp is a compact desktop companion for MUDs. It displays live character state
 from your MUD client, provides configurable alerts, and lets you define trusted
 action shortcuts.
 
-Current published release artifacts include:
+Published release artifacts include:
 
 - a Windows x64 desktop installer, including the desktop-owned local Imp node
   and Mudlet helper/package;
@@ -54,8 +54,9 @@ On the VPS:
   loader, `libz.so.1`, and the system CA store (the bundle contains its own
   Python runtime, so no host Python is needed; musl is not supported);
 - for the normal automatic installer: Debian 12+ or Ubuntu 24.04+ with
-  `systemd`, `apt`, `iproute2`, and Caddy available from the supported system apt
-  repositories (arbitrary Linux is not an installer-supported target);
+  `systemd`, `apt`, and `iproute2` (arbitrary Linux is not an installer-supported
+  target); automatic Direct installs Caddy from the supported system apt
+  repositories, so do not preinstall it;
 - `systemd --user`;
 - TinyFugue already installed and configured for GMCP; and
 - a TinyFugue build whose GMCP support includes the `GMCP_LOGIN` hook.
@@ -111,8 +112,9 @@ operator-owned public edge. Both normal Direct topologies are supported:
 Imp automatically installs and owns a dedicated Caddy edge; operator-managed
 Caddy is refused. It verifies trusted TLS and authenticated WSS before the
 provisioning command displays a token once.
-Never redirect or capture that terminal output. Existing installations with
-no connection option preserve their connection state without prompting.
+Never redirect or capture that terminal output. Fresh SSH and install-only
+installations leave Direct disabled. Existing installations with no connection
+option preserve their connection state and credentials without prompting.
 
 The installer uses an existing `~/.tfrc` by default and adds the Imp capture
 hook to it.
@@ -356,8 +358,9 @@ Current limitations:
 - Linux and macOS desktop applications remain source-build targets;
 - TinyFugue itself remains operator-installed;
 - broader MUD normalization remains future work;
-- Direct WSS TLS termination and pairing-token provisioning are
-  operator-managed; and
+- automatic Direct requires the supported host and an Imp-owned public edge;
+  existing operator edges and unsupported environments require manual TLS and
+  gateway provisioning; and
 - automatic application updates are not included.
 
 ## Development

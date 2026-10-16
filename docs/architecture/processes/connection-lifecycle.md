@@ -11,8 +11,8 @@ is the most likely bug in this area:
   `services/relay/src/imp_relay/state.py` and reported as `status.feed`.
 
 A healthy socket with a dead feed is a real and common state: the node is
-reachable but its selected MUD-client producer is gone. The HUD must show
-"no data", not confidently stale vitals.
+reachable but its selected MUD-client producer is gone. The HUD retains last
+known values but must mark them as not fresh.
 
 ## Entry points
 
@@ -162,7 +162,7 @@ current. `apps/desktop/test/model.test.ts` pins this as a regression.
 | relay restarts             | HUD reconnects; publisher reconnects while idle and restores selection as stale |
 | one subscriber disconnects | others unaffected                                                               |
 | one subscriber blocks      | bounded delivery retires that socket; healthy peers and feed watchdog continue  |
-| producer dies              | snapshot retained, `feed` -> `down`, HUD shows no-data                          |
+| producer dies              | snapshot retained, `feed` -> `down`, HUD marks retained values as not fresh     |
 
 Backoff is exponential with jitter and a cap, so a long outage does not become
 a reconnect storm when the relay returns.
@@ -214,5 +214,10 @@ status, or text, and shutdown with no subscriber tasks remaining.
 Actual offline TinyFugue against a fake MUD additionally passed feed/relay
 restart with the same TF process and MUD socket, stale cached-state recovery
 then fresh-GMCP liveness, foreground/null changes during feed downtime,
-reload deduplication, and no action/text replay. Live deployment acceptance of
-this feed-recovery correction remains pending; see `docs/status.md`.
+reload deduplication, and no action/text replay. Subsequent disposable-host NAT
+acceptance with development-labelled artifacts passed a real service restart:
+the still-running TinyFugue selection recovered and the operator reported no MUD
+reconnect. The connection generation was not captured immediately before that
+restart, so that part is operator-reported rather than independently measured.
+This is not final-artifact or clean directly-addressed acceptance; Slice 25
+remains in progress. See `docs/status.md`.

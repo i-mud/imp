@@ -52,9 +52,10 @@ from Conventional Commits as documented in [`releases.md`](releases.md).
 The Slices 17–23 remediation program is complete; see the separate
 [remediation closure](audits/2026-10-05-remediation-closure.md) for landed
 PR identities, verification, and retained limitations. Slice 24 is complete
-with non-blocking follow-ups. Slice 25 is selected: connection-oriented server
-installation with a deliberately narrow automatic Direct WSS edge. Other
-candidate work remains provisional.
+with non-blocking follow-ups. Slice 25's implementation shipped in `v0.4.0`,
+but acceptance remains in progress: NAT passed; a clean directly-addressed
+automatic Direct VPS deployment remains outstanding. Other candidates remain
+provisional; no next slice is assigned.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -349,8 +350,8 @@ Detailed evidence lives in [`status.md`](status.md) and
 
 At Slice 11 completion, VPS installation and general TinyFugue installation
 workflow were still deferred; Slice 15 later added the packaged server installer.
-Reverse-proxy/certificate setup and pairing-token generation/rotation UX remain
-separate from the transport itself.
+Gateway/token provisioning followed in Slice 24 and supported automatic
+reverse-proxy/certificate provisioning in Slice 25.
 
 ## ✅ Slice 12 - Native connection settings
 
@@ -386,9 +387,9 @@ Detailed implementation and verification evidence lives in
 and
 [`architecture/boundaries/trust-boundary.md`](architecture/boundaries/trust-boundary.md).
 
-VPS installation was later delivered in Slice 15. Reverse-proxy/certificate
-provisioning, server-side pairing-token generation/rotation UX, live transport
-hot-switching, and multi-user credentials remain separate future work.
+VPS installation was later delivered in Slice 15, gateway/token provisioning in
+Slice 24, and supported automatic reverse-proxy/certificate provisioning in
+Slice 25. Live transport hot-switching and multi-user credentials remain future work.
 
 ## ✅ Slice 13 - First release readiness
 
@@ -455,7 +456,7 @@ Delivered:
 - stable relay, feed, gateway, and TinyFugue action-helper paths independent of
   a repository checkout;
 - optional idempotent TinyFugue startup-file integration with backup;
-- relay/feed activation by default while Direct WSS remains opt-in;
+- relay/feed activation by default, with Direct WSS opt-in at that milestone;
 - installation-wide rollback if activation fails;
 - bundle acceptance covering clean install, reinstall idempotency, package
   versions, permissions, tamper rejection, and failed-activation rollback;
@@ -709,17 +710,64 @@ is claimed.
 
 Complete; no slice completion marker. Shipped installed-bundle-only
 `imp-direct-wss setup|rotate|status` for the Linux target user's fixed config
-and user-systemd service paths. The normal installer stays default-off and
-upgrades preserve existing gateway enablement and active state. Terminal-only
+and user-systemd service paths. At Slice 24 / `v0.3.2`, the normal installer
+left Direct default-off and preserved gateway state on upgrade. Terminal-only
 token handoff, safe existing-config handling, active/inactive rotation,
-credential-free status, and handled rollback are implemented.
+credential-free status, and handled rollback were implemented.
 
-Public hostname, DNS, TLS certificate lifecycle, and reverse-proxy
-configuration remain operator-owned. Published `v0.3.2` Windows and server
+At that milestone, public hostname, DNS, TLS certificate lifecycle, and
+reverse-proxy configuration were operator-owned; Slice 25 added automatic
+provisioning for its supported topologies. Published `v0.3.2` Windows and server
 artifacts completed live acceptance with **PASS WITH LIMITATIONS**; see
 [Slice 24 evidence](status.md#slice-24---direct-wss-provisioning).
 The release first-launch gate and verifier diagnostics remain non-blocking
 candidate work below, not unfinished Slice 24 scope.
+
+## In-progress acceptance
+
+### Slice 25 - Connection-oriented server installation
+
+In progress; no slice completion marker. Implemented and released in
+[`v0.4.0`](https://github.com/i-mud/imp/releases/tag/v0.4.0):
+
+- self-contained Linux server runtime, with no host Python prerequisite;
+- SSH, Direct, and install-only connection selection, with upgrade preservation;
+- automatic Direct WSS on supported directly-addressed Debian/Ubuntu hosts and
+  explicit router/NAT deployments, using an Imp-restricted, owned Caddy edge;
+- schema-3 literal raw-target isolation and exact owned v1-direct/v2-NAT migration;
+  and
+- TinyFugue selection recovery after feed/service restart, without replaying
+  actions or text.
+
+[NAT live acceptance passed](status.md#slice-25---connection-oriented-server-installation):
+public-CA TLS, v2-to-v3 migration, public authentication/routing, GMCP, desktop
+Direct, feed restart, and idempotent reinstall. These runs used
+**DEVELOPMENT-labelled artifacts**, not the final published release artifacts.
+A full host reboot still needs a fresh identity-bearing login; service-restart
+recovery does not remove that requirement.
+
+The remaining Slice 25 acceptance requirement is a clean directly-addressed VPS
+automatic Direct deployment, including public-CA verification and live runtime
+acceptance. The published-artifact smoke below is also outstanding. Release
+publication alone does not complete the slice.
+
+#### Acceptance follow-ups
+
+These are retained priorities, not failed NAT acceptance checks or a new slice:
+
+- **Startup-file onboarding:** add the missing TinyFugue startup-file selection
+  UX for first-time operators.
+- **Nested includes:** detect duplicate hook loading through nested startup
+  includes.
+- **Upgrade messaging:** correct misleading Direct upgrade output when an
+  existing configuration is preserved rather than newly provisioned.
+- **Retained-edge recovery:** handle deleted `gateway.env` with a retained,
+  inactive legacy edge, without unsafe ownership adoption or credential recovery.
+- **Real-runtime CI:** run the real Caddy routing matrix and native TinyFugue
+  restart regression in CI rather than relying only on deterministic substitutes.
+- **Published release smoke:** exercise the exact published `v0.4.0` Windows
+  installer and Linux server bundle; development-artifact acceptance is not
+  evidence for those downloaded bytes.
 
 ## Candidate work
 
@@ -857,31 +905,6 @@ released verifier later passed final-token acceptance and previous-token
 rejection. This is not evidence of a Direct WSS correctness failure or a
 Slice 24 blocker.
 
-#### Direct WSS public-edge automation
-
-Selected as Slice 25. The connection-oriented installer and narrow Debian/Ubuntu
-Caddy path are implemented in the working tree; see
-[deployment connection selection](../deploy/README.md#connection-selection).
-Normal upgrades preserve gateway credentials/state and operator-owned edges;
-exact owned version-1 direct/version-2 NAT state migrates to schema-3 raw-target
-policy without a connection prompt when Direct is selected explicitly or the
-incoming gateway was enabled or active, including with `--no-start`.
-Inactive former-Direct SSH edges stay retained without a root/sudo requirement.
-Pending state, wrong UID, and config/unit drift are refused. The full original-URI CEL allowlist forwards only literal
-`/state`, `/action`, or `/healthz` with optional literal `?` query; the gateway
-still rejects noncanonical targets and queries. No authentication bypass was
-observed. Disposable Caddy 2.6.2 HTTPS/WebSocket-upgrade source-ledger matrices
-passed for both topologies, not public-CA or WSS frame/runtime acceptance.
-The self-contained frozen runtime is implemented. The user-reported NAT VM
-installation succeeded without host Python 3.12, with a publicly trusted
-TLS-ALPN certificate and external authenticated WSS, before acceptance stopped
-at the normalized-edge defect. Remaining live work is review, no-mode owned-edge
-migration and raw-path recheck, desktop GMCP/approved action where safe, and
-restart/upgrade preservation; no reboot without approval. Schedule directly-addressed
-acceptance as practical, but Slice 25 completion requires live acceptance of both
-directly-addressed Direct and real router/NAT TCP 443 deployments, including
-public-CA verification. This is not a release or slice-completion claim.
-
 #### Live connection reconfiguration
 
 Native Connection settings currently configure the next application start.
@@ -916,12 +939,13 @@ are established.
 #### Installation and onboarding friction
 
 Use real first-user installation experience to simplify the setup path,
-especially for users who are not already comfortable with Python environments,
-SSH configuration, or port forwarding.
+especially SSH configuration, port forwarding, and TinyFugue startup integration.
+The self-contained `v0.4.0` Linux server bundle has eliminated the host Python
+prerequisite; older distribution Python versions are no longer a normal
+release-installation blocker. Slice 25 follow-ups are listed above.
 
-Observed friction includes:
+Remaining observed friction includes:
 
-- distributions providing an older Python than Imp currently requires;
 - confusion between an SSH config alias and a hostname or IP address;
 - password-based SSH versus key-based SSH;
 - custom SSH ports;

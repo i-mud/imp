@@ -195,7 +195,9 @@ TLS alone is not authentication to Imp.
   WebSocket traffic without interpreting Imp authentication.
 - Protocol-v2 remains unchanged.
 - The installed Linux bundle provides target-user gateway setup, rotation, and
-  status commands; hostname, DNS, public TLS, and reverse-proxy provisioning
-  remain operator-owned.
+  status commands. The connection-oriented installer can additionally provision
+  an exact-owned Caddy edge for directly addressed hosts or explicit NAT;
+  operators still own DNS and, for NAT, the public TCP 443 forward. Manual
+  reverse-proxy deployments remain operator-owned and are never adopted.
 - Multi-user hosting and mutually untrusted local users remain outside the
   current supported trust boundary.

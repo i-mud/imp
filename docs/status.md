@@ -3,6 +3,46 @@
 Canonical status for Imp. Platform-independent checks run in WSL2; the
 native shell is also runtime-verified on Windows 11 x64.
 
+## Current release and acceptance
+
+[`v0.4.0`](https://github.com/i-mud/imp/releases/tag/v0.4.0) is published with
+a Windows x64 installer and a self-contained Linux x86_64 server bundle.
+The server needs no host Python. It ships SSH, Direct, and install-only
+installation, automatic Direct WSS for supported directly-addressed hosts,
+explicit router/NAT support, and an Imp-restricted Caddy edge with schema-3
+literal raw-target isolation. Runtime and migration work landed in
+[`5687cba`](https://github.com/i-mud/imp/commit/5687cba5cb70405cf781a02b84797433927c62cb);
+TinyFugue feed-restart recovery landed in
+[`5c1742b`](https://github.com/i-mud/imp/commit/5c1742b6efff03bfe4c07e8c17a502de21417d09).
+
+**Slice 25 remains In progress.** Recorded live acceptance:
+
+| Check                                                               | Result |
+| ------------------------------------------------------------------- | ------ |
+| Router/NAT deployment with publicly trusted TLS                     | PASS   |
+| Owned v2-to-v3 policy migration                                     | PASS   |
+| External authentication and raw-route isolation                     | PASS   |
+| TinyFugue GMCP and desktop Direct                                   | PASS   |
+| Real service/feed restart recovery                                  | PASS   |
+| Idempotent reinstall preserving credentials and certificate storage | PASS   |
+
+These checks used **DEVELOPMENT-labelled artifacts**, not the final published
+`v0.4.0` artifacts. No published-artifact smoke of the exact `v0.4.0` Windows
+installer and Linux bundle is recorded. Clean directly-addressed VPS automatic
+Direct acceptance remains outstanding.
+The final pre-push action-consumer singleton and pipe-loss fixes passed separate
+native TinyFugue and release-packaging checks, but were not retested on the NAT host.
+
+Feed-restart recovery is not reboot recovery: a full host reboot discards the
+ephemeral checkpoint and still requires a fresh identity-bearing MUD login.
+Existing TinyFugue sessions using the old hook need one
+`/load ~/.config/imp/capture.tf`; do not reboot without operator approval.
+The [Slice 25 evidence](#slice-25---connection-oriented-server-installation)
+preserves the initial failures and subsequent passing correction. Priorities
+from acceptance are recorded once in the
+[roadmap follow-ups](roadmap.md#acceptance-follow-ups); they are not NAT blockers
+or a Slice 26 assignment.
+
 ## Working end to end
 
 Imp currently supports TinyFugue and Mudlet as MUD-client adapters. Both feed
@@ -549,15 +589,18 @@ Windows desktop were smoke-tested under the renamed identity.
 Slice 15, `server-install-bootstrap`, is complete. It introduced the versioned
 Linux x86_64 server archive containing the relay and TinyFugue wheels, exact
 locked `websockets` wheel, TinyFugue hook, user-systemd units, installer, and
-internal checksum manifest. Current bundles also include the shared
+internal checksum manifest. Later pre-`v0.4.0` bundles added the shared
 `imp-adapter` wheel. An adjacent SHA-256 file protects the complete archive.
 
-The installer creates a private CPython 3.12 virtual environment from the
-bundle without network dependency resolution, uses versioned releases behind
-`~/.local/share/imp/current`, installs the stable action-consumer helper and
-TinyFugue hook, enables relay/feed only, and leaves Direct WSS opt-in. Failed
-activation restores the previous runtime, integration files, helper link,
+At Slice 15, the installer created a private CPython 3.12 virtual environment
+from the bundle without network dependency resolution, used versioned releases
+behind `~/.local/share/imp/current`, installed the stable action-consumer helper
+and TinyFugue hook, enabled relay/feed only, and left Direct WSS opt-in. Failed
+activation restored the previous runtime, integration files, helper link,
 TinyFugue startup file, service enablement, and prior running-service state.
+The [Slice 25 packaging cutover](#slice-25---connection-oriented-server-installation)
+replaced wheel/venv installation with the self-contained frozen runtime in
+`v0.4.0`.
 
 The reusable bundle acceptance passed on the target VPS environment for outer
 and internal integrity, clean install, idempotent reinstall, package versions,
@@ -1181,13 +1224,13 @@ active credential remained unchanged.
   [Public verifier failure diagnostics](roadmap.md#public-verifier-failure-diagnostics)
   remains a low-priority open follow-up, without token or secret logging.
 
-## In-progress implementation
+## In-progress acceptance
 
 ### Slice 25 - Connection-oriented server installation
 
-The working-tree installer supports `--connection ssh|direct|none`, conservative
-fresh-install prompting, preservation on ordinary upgrades, and a narrow
-Debian/Ubuntu Caddy path for Direct WSS. The dedicated edge has root-owned
+The installer released in `v0.4.0` supports `--connection ssh|direct|none`,
+conservative fresh-install prompting, preservation on ordinary upgrades, and a
+narrow Debian/Ubuntu Caddy path for Direct WSS. The dedicated edge has root-owned
 configuration, exact-byte ownership checks, and a pending state-restoration
 record. DNS and trusted HTTPS route rejection precede the terminal-only
 `imp-direct-wss setup --public-url` handoff. Existing credentials are preserved
@@ -1225,7 +1268,8 @@ selected implicit migration; explicit Direct selected inactive legacy state
 without credential or enablement changes. `--no-start` preserved the incoming
 user-service state while migrating eligible owned policy.
 
-Local validation passed:
+Historical local validation during development passed (artifact labels and test
+counts below belong to those runs, not to a fresh verification of `v0.4.0`):
 
 - Focused Direct edge, provisioning, gateway, and manual-verifier tests: 313 passed.
 - `npm run check`: 64 protocol, 152 desktop, 505 relay, 31 shared-adapter,
@@ -1334,7 +1378,7 @@ actual-Caddy fixture above proves raw-target routing only. Local trusted TLS,
 including a cached certificate, is not a fresh external port-forward reachability
 check. No desktop Connection UI was changed.
 
-Packaging cutover (working tree): the server bundle now contains one
+Packaging cutover (released in `v0.4.0`): the server bundle contains one
 PyInstaller onedir runtime, `<bundle>/bin/imp-server` with
 `<bundle>/bin/imp-server-runtime/`, selected through multicall roles and
 hardlinked role aliases. The target server needs no Python installation to
@@ -1351,15 +1395,17 @@ and ports: frozen relay/feed/gateway processes delivered state and the frozen
 action consumer received a trusted action. This isolated run is not live Caddy,
 sudo, or router/public-CA evidence.
 
-The user-reported live NAT VM succeeded with the self-contained installation
-and no host Python 3.12, Caddy 2.6.2 TLS-ALPN issuance of a publicly trusted
-certificate, and external authenticated WSS. The subsequent exact-owned
-schema-3 NAT policy migration, raw-route checks, authentication checks, and
-desktop live state/action acceptance passed. Live feed/relay restart acceptance
-then failed to recover the still-running TinyFugue selection; a TF relogin
-workaround restored the old live feed, not acceptance of the correction.
+The initial user-reported live NAT VM succeeded with the self-contained
+installation and no host Python 3.12, Caddy 2.6.2 TLS-ALPN issuance of a publicly
+trusted certificate, and external authenticated WSS. That run stopped at the
+normalized-`.path` edge defect. The schema-3 raw-target correction and exact-owned
+v2-to-v3 NAT migration, raw-route checks, authentication checks, and desktop live
+state/action acceptance subsequently passed. At that intermediate stage,
+feed/relay restart failed to recover the still-running TinyFugue selection; a
+TF relogin was only a workaround. The later passing restart acceptance below
+supersedes that failure, not the reboot-time fresh-login requirement.
 
-The working-tree correction adds one TF-owned, reload-safe `imp-feed-watch`
+The correction released in `v0.4.0` adds one TF-owned, reload-safe `imp-feed-watch`
 quote job and a private per-incarnation readiness marker. The feed clears old
 raw spools under lock but preserves normalized checkpoint values. Readiness
 does not restore authority: live TF reasserts its actual foreground or null
@@ -1385,15 +1431,23 @@ also emitted readiness and exited on pipe loss with `XDG_RUNTIME_DIR` unset.
 shared adapter 31, Mudlet 32, TinyFugue 112, plus lint/types, docs/version, E2E,
 and production frontend build. The retained native TF restart regression passed.
 
-Live NAT acceptance on a disposable host passed for this tree: migration,
-route isolation, authenticated WSS, TinyFugue GMCP, desktop Direct, a real
-service restart that recovered the still-connected TinyFugue selection without a
-reconnect, and an idempotent second install with credentials, ownership,
+Live NAT acceptance passed using development-labelled artifacts built during
+Slice 25. The final pre-push action-consumer singleton and pipe-loss fixes passed
+separate native TinyFugue and release-packaging checks, but were not retested on
+the NAT host. The published `v0.4.0` artifacts have not yet undergone live
+acceptance. The NAT run covered migration, route isolation, authenticated WSS,
+TinyFugue GMCP, desktop Direct, a real service restart that recovered the
+still-connected TinyFugue selection
+without a reconnect, and an idempotent second install with credentials, ownership,
 certificate and ACME storage unchanged. The connection generation was not
 captured immediately before the final restart, so "no reconnect" rests on the
 operator's report; session and generation matched. Old-hook TinyFugue sessions
 need one `/load ~/.config/imp/capture.tf` after installation. A host reboot
 still discards the ephemeral checkpoint and needs a fresh identity-bearing
 login. Do not reboot without operator approval.
+
+Clean directly-addressed automatic VPS acceptance remains the outstanding
+Slice 25 completion requirement. Smoke testing the final published `v0.4.0`
+artifact bytes is a separate evidence follow-up; the NAT run did not test them.
 
 For future candidate work, see [`roadmap.md`](roadmap.md).
