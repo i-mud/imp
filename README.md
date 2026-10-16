@@ -6,7 +6,7 @@ Imp is a compact desktop companion for MUDs. It displays live character state
 from your MUD client, provides configurable alerts, and lets you define trusted
 action shortcuts.
 
-The published v0.4.0 release artifacts include:
+Published release artifacts include:
 
 - a Windows x64 desktop installer, including the desktop-owned local Imp node
   and Mudlet helper/package;

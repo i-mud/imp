@@ -30,6 +30,8 @@ These checks used **DEVELOPMENT-labelled artifacts**, not the final published
 `v0.4.0` artifacts. No published-artifact smoke of the exact `v0.4.0` Windows
 installer and Linux bundle is recorded. Clean directly-addressed VPS automatic
 Direct acceptance remains outstanding.
+The final pre-push action-consumer singleton and pipe-loss fixes passed separate
+native TinyFugue and release-packaging checks, but were not retested on the NAT host.
 
 Feed-restart recovery is not reboot recovery: a full host reboot discards the
 ephemeral checkpoint and still requires a fresh identity-bearing MUD login.
@@ -1429,10 +1431,13 @@ also emitted readiness and exited on pipe loss with `XDG_RUNTIME_DIR` unset.
 shared adapter 31, Mudlet 32, TinyFugue 112, plus lint/types, docs/version, E2E,
 and production frontend build. The retained native TF restart regression passed.
 
-Final live NAT acceptance on a disposable host passed with
-DEVELOPMENT-labelled artifacts incorporating both release-input commits:
-migration, route isolation, authenticated WSS, TinyFugue GMCP, desktop Direct,
-a real service restart that recovered the still-connected TinyFugue selection
+Live NAT acceptance passed using development-labelled artifacts built during
+Slice 25. The final pre-push action-consumer singleton and pipe-loss fixes passed
+separate native TinyFugue and release-packaging checks, but were not retested on
+the NAT host. The published `v0.4.0` artifacts have not yet undergone live
+acceptance. The NAT run covered migration, route isolation, authenticated WSS,
+TinyFugue GMCP, desktop Direct, a real service restart that recovered the
+still-connected TinyFugue selection
 without a reconnect, and an idempotent second install with credentials, ownership,
 certificate and ACME storage unchanged. The connection generation was not
 captured immediately before the final restart, so "no reconnect" rests on the
