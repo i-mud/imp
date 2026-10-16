@@ -29,9 +29,15 @@ client-adapter transport.
 | healthy pre-existing relay on `8789`        | whoever started it              | Managed mode may adopt and monitor it; never owns or signals it    |
 | WebSocket reconnect and HUD state           | `RelayStateSource` / HUD model  | transport-independent freshness presentation                       |
 
+The released Linux bundle packages one self-contained frozen `imp-server`
+multicall runtime. Its stable `imp-*` aliases select relay, gateway, feed,
+feed-watch, action-consumer, direct-wss, direct-edge, and public-verify roles;
+installed operation needs neither host Python nor a virtualenv. Source/developer
+`uv` commands are a separate execution path.
+
 The installed-bundle `imp-direct-wss` command provisions the VPS gateway under
-the same target user's `systemd --user` manager; it does not configure DNS or
-the reverse proxy. The installer selects server `ssh`, `direct`, or `none`.
+the same target user's `systemd --user` manager; it does not itself configure DNS
+or the reverse proxy. The installer selects server `ssh`, `direct`, or `none`.
 Fresh interactive installs ask; fresh scripted installs require an explicit
 mode. No-option upgrades and `none` preserve credentials and connection state;
 `none` does not persist a transport transition or disable Direct.
@@ -109,6 +115,13 @@ checkpoint values via `select`; they remain stale until fresh authoritative
 GMCP. An already-running TF with the old hook needs a one-time
 `/load ~/.config/imp/capture.tf` after installation, before restart acceptance;
 the new hook does not require a MUD reconnect to recover cached identity.
+
+The hook also owns the current action-consumer quote ID: reselection replaces
+only its previous live quote, including when readiness reasserts the same
+context. Context equality alone cannot retire a duplicate helper. Feed SIGINT
+and SIGTERM wake its stop event, cancel pending delivery, clear the context
+marker, and close the publisher; polling and reconnect backoff do not defer
+shutdown.
 
 ## TinyFugue identity bootstrap
 
@@ -347,6 +360,8 @@ remain platform-owned.
   fixed-macro delivery
 - `integrations/tinyfugue/src/imp_tf/diagnostics.py` - opt-in bounded capture
 - `integrations/tinyfugue/imp.tf` - idempotent fixed-path hooks
+- `integrations/tinyfugue/src/imp_tf/feed_watch.py` - bounded readiness/reader-loss watch
+- `services/relay/src/imp_relay/server_runtime.py` - frozen roles and stable aliases
 - `deploy/systemd/` - VPS user units
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership and adopted-endpoint watch
 - `apps/desktop/src-tauri/src/node.rs` and `gateway.rs` - sidecar supervision
@@ -453,9 +468,10 @@ node while SSH and authenticated WSS remain independent node-to-UI transport
 choices.
 
 The deterministic gate and the live evidence prove different things, and neither
-substitutes for the other. The gate proves unit-level invariants: that a
-restarted feed does not publish a retained checkpoint without fresh input, and
-that the relay keeps its snapshot and advances its sequence only on new state
+substitutes for the other. The gate proves unit-level invariants: a restarted
+feed restores matching checkpoint values only after live TF reselection, through
+`select` as stale, and fresh authoritative GMCP alone restores liveness. The
+relay retains snapshots and advances its sequence only on changed state
 (`integrations/tinyfugue/tests/test_feed.py`,
 `services/relay/tests/test_server.py`, `tests/e2e/relay_roundtrip.py`). It
 cannot observe a real VPS reboot, actual `systemd` lingering, real

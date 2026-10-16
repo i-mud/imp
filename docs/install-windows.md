@@ -7,7 +7,8 @@ The Windows desktop application does not require Node.js, Rust, Python, WSL, or
 an Imp source checkout. For a local Mudlet setup, the installer carries the Imp
 node, Mudlet helper/runtime, and `Imp.mpackage`; no VPS installation is
 required. For remote TinyFugue deployments, install the Imp runtime separately
-from the Linux x86_64 server bundle. TinyFugue itself remains operator-installed.
+from the self-contained Linux x86_64 server bundle; v0.4.0 needs no host Python.
+TinyFugue itself remains operator-installed.
 See [`../deploy/README.md`](../deploy/README.md).
 
 ## Install Imp
@@ -80,11 +81,25 @@ reach every forwarded relay route.
 
 ## Direct WSS
 
-Direct mode does not use SSH. It requires an Imp authenticated gateway behind
-a publicly trusted TLS reverse proxy. On the Linux VPS, provision its pairing
-token with the installed bundle's `imp-direct-wss setup` command. The command
-prints the token only for deliberate one-time terminal handoff; never capture
-or redirect its output. Normal installation does not enable the gateway.
+Direct mode does not use SSH. On a supported Debian/Ubuntu Linux server, select
+**Direct WSS** during the release-bundle installation, or run:
+
+```bash
+./install.sh --connection direct --hostname imp.example.com
+```
+
+For a router/NAT deployment, use exactly one public IPv4 A record with no AAAA,
+forward router TCP 443 to the server, and add `--behind-nat`. Imp installs and
+owns a restricted Caddy edge, obtains publicly trusted TLS, and delegates
+authenticated WSS verification and the one-time token handoff to
+`imp-direct-wss`. Do not preinstall Caddy for this automatic workflow. Never
+capture or redirect the provisioning output.
+
+Fresh SSH and install-only installations leave Direct disabled; explicitly
+choosing Direct intentionally provisions it. Existing credentials and connection
+state are preserved on an ordinary reinstall/upgrade. An existing credential is
+not implicitly rotated or redisplayed, and does not constitute a newly verified
+authenticated handoff.
 
 In **Settings -> Connection -> Direct**:
 
@@ -94,9 +109,11 @@ In **Settings -> Connection -> Direct**:
 4. Save.
 5. Restart Imp.
 
-Gateway setup/rotation, safe public verification, and operator-owned
-hostname/DNS/TLS/proxy boundaries are documented in
-[`../deploy/README.md`](../deploy/README.md#direct-wss-gateway-advanced).
+See [server connection selection](../deploy/README.md#connection-selection) for
+automatic-path requirements. DNS/DDNS, router forwarding, and firewalls remain
+operator-owned. Existing operator public edges and unsupported environments
+require [advanced/manual gateway and TLS provisioning](../deploy/README.md#direct-wss-gateway-advanced);
+that section also covers status, safe public verification, and deliberate rotation.
 
 ## Mudlet integration
 
@@ -152,6 +169,7 @@ and pairing token against the deployment documentation.
   native desktop release binaries.
 - Linux x86_64 has a prebuilt server bundle for the Imp runtime; TinyFugue
   itself remains operator-installed.
-- Direct WSS TLS termination and pairing-token provisioning remain
-  operator-managed.
+- Automatic Direct provisions an Imp-owned TLS edge and gateway on supported
+  Linux hosts; existing operator public edges and unsupported environments
+  require manual provisioning.
 - Automatic application updates are not included.

@@ -34,7 +34,7 @@ The frozen server binary requires:
   musl and other loaders are unsupported. The release build enforces this with
   an ABI gate over every bundled ELF (loader, needed libraries, and required
   glibc/libstdc++/CXXABI/GCC symbol versions);
-- the self-contained runtime inside the bundle (the current packaged release
+- the self-contained runtime inside the bundle (the published v0.4.0 release
   and installer need no host Python installation to install, run, or recover).
   A retained pre-frozen virtual-environment release kept as a rollback target
   may still need its original interpreter/runtime to execute that old release
@@ -43,7 +43,8 @@ The frozen server binary requires:
   remains live acceptance evidence.
 
 The normal automatic installer is supported on Debian 12+ or Ubuntu 24.04+ with
-`systemd --user`, `apt`, `iproute2`, and Caddy for the Direct edge. It is not
+`systemd --user`, `apt`, and `iproute2`. Automatic Direct installs Caddy from the
+system apt repositories; do not preinstall Caddy for this path. It is not
 supported on arbitrary Linux distributions. The installer adds no OS version
 check; this is a support statement, not a runtime gate.
 
@@ -620,11 +621,13 @@ https://imp.example {
 If certificates are provisioned outside the reverse proxy, renewal must also
 reload the proxy after replacing its readable certificate/key copies.
 
-The Slice 11 live acceptance used Caddy and a publicly trusted certificate and
-verified the public `/healthz`, `/state`, and `/action` path while
+The older manual Slice 11 live acceptance used Caddy and a publicly trusted
+certificate and verified the public `/healthz`, `/state`, and `/action` path while
 `/ingest` and `/action-consumer` remained unreachable. This is historical
-evidence only; it does not verify Slice 24 provisioning or current live
-acceptance.
+advanced/manual-edge evidence, not the default automatic installation workflow
+or acceptance of current provisioning. See [implementation status](../docs/status.md)
+for the development-artifact NAT acceptance and outstanding clean
+directly-addressed acceptance; neither is final published-v0.4.0 live acceptance.
 
 ### Bounded public verification
 

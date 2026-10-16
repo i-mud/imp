@@ -141,6 +141,7 @@ Rust-test/NSIS workflow, and Windows-native runtime acceptance through the
 notifications, connection management, managed-SSH process lifecycle, live
 state/actions, and clean installer/reinstall acceptance.
 
-Linux and macOS remain source-build targets without release acceptance.
-Machine-specific version numbers are intentionally not treated as durable
-architecture; re-measure them when they matter.
+Linux and macOS desktop builds remain source-build targets without desktop
+release acceptance. The separately published self-contained Linux server is not
+a Linux desktop release. Machine-specific version numbers are intentionally not
+treated as durable architecture; re-measure them when they matter.

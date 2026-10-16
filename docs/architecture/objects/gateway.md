@@ -90,6 +90,13 @@ privileged relay routes are rejected before the relay is contacted.
 A TLS reverse proxy may publish the three gateway routes above, but must never
 proxy the relay listener itself.
 
+The Imp-owned schema-3 Caddy edge allowlists the original raw request target,
+not a normalized path: literal `/state`, `/action`, or `/healthz`, optionally
+followed by `?` and a query. The gateway independently requires the exact
+query-free endpoint, so queries and encoded, dot-segment, or slash variants
+cannot acquire a route through proxy normalization. This restriction does not
+change SSH's full-port forwarding trust boundary.
+
 ## Authentication
 
 Every `/state` or `/action` WebSocket begins with one gateway-owned text frame:
