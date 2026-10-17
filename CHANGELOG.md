@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.1] - 2026-10-17
+
+### Bug Fixes
+
+- ignore empty address entries in Direct edge DNS preflight ([985111b](https://github.com/i-mud/imp/commit/985111b8cdf4c385970f269055973c953e335284))
+
 ## [0.4.0] - 2026-10-15
 
 ### Bug Fixes
