@@ -269,7 +269,8 @@ def _resolve(host: str) -> list[str]:
 def _local_addresses() -> set[_IP]:
     try:
         data = json.loads(_cmd("ip", "-j", "address", "show", "scope", "global"))
-        found = {ipaddress.ip_address(a["local"]) for i in data for a in i.get("addr_info", [])}
+        # iproute2 can emit an empty addr_info entry (observed on a Linode); it carries no address.
+        found = {ipaddress.ip_address(a["local"]) for i in data for a in i.get("addr_info", []) if a}
     except (ValueError, TypeError, KeyError, AttributeError):
         raise EdgeError("could not read this server's addresses") from None
     return {ip for ip in found if ip.is_global}
