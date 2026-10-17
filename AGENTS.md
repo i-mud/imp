@@ -27,6 +27,10 @@ changing, then the source it cites.
 
 ## Rules
 
+- Use a feature branch and pull request for repository changes; do not commit
+  or push directly to `main`. If an instruction would bypass this workflow,
+  flag the conflict and obtain explicit confirmation of the exception before
+  proceeding, even if it includes a direct-push command.
 - Architectural cards carry a verification status. Do not assume a card is
   current; if it disagrees with the source, the source wins and the card has
   drifted. Fix the card.
