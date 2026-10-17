@@ -40,6 +40,7 @@ class Fake:
         self.calls: list[tuple[str, ...]] = []
         self.listeners: list[tuple[str, int, int]] = []
         self.local = [GLOBAL_V4, GLOBAL_V6]
+        self.empty_addr_info = False
         self.dns = [GLOBAL_V4]
         self.https: Callable[[str, str], int] = lambda host, path: 404
         self.probe_nat: list[bool] = []
@@ -88,7 +89,10 @@ class Fake:
         elif args[0] == "dpkg-query":
             rc = 0 if self.pkg_known else 1
         elif args[0] == "ip":
-            out = json.dumps([{"addr_info": [{"local": a} for a in self.local]}])
+            entries: list[dict[str, str]] = [{"local": a} for a in self.local]
+            if self.empty_addr_info:
+                entries.append({})
+            out = json.dumps([{"addr_info": entries}])
         elif args[0] == "ss":
             out = "".join(
                 f'{n} {"LISTEN" if n == "tcp" else "UNCONN"} 0 4096 *:{p} *:* users:(("x",pid={pid},fd=3))\n'
@@ -215,6 +219,11 @@ def test_dns_mismatch_reports_both_sides_and_rerun(fake: Fake, capsys: pytest.Ca
 def test_dns_one_unassigned_answer_rejected(fake: Fake) -> None:
     fake.dns = [GLOBAL_V4, "8.8.8.8"]  # e.g. proxy/CDN front in the answer set
     assert edge.main(["dns", HOST]) == 1
+
+
+def test_dns_ignores_empty_addr_info_entry(fake: Fake) -> None:
+    fake.empty_addr_info = True
+    assert edge.main(["dns", HOST]) == 0
 
 
 @pytest.mark.parametrize("answer", ["10.0.0.5", "192.168.1.9", "127.0.0.1", "fd00::1", "100.64.0.1"])
