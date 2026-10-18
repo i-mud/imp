@@ -219,5 +219,7 @@ acceptance with development-labelled artifacts passed a real service restart:
 the still-running TinyFugue selection recovered and the operator reported no MUD
 reconnect. The connection generation was not captured immediately before that
 restart, so that part is operator-reported rather than independently measured.
-This is not final-artifact or clean directly-addressed acceptance; Slice 25
-remains in progress. See `docs/status.md`.
+Published `v0.4.1` artifacts later passed the same recovery on a clean
+directly-addressed VPS, with the same TF process and context kept across a
+relay/feed/gateway restart and one action consumer. Slice 25 is complete. See
+`docs/status.md`.
