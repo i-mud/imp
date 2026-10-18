@@ -5,17 +5,20 @@ native shell is also runtime-verified on Windows 11 x64.
 
 ## Current release and acceptance
 
-[`v0.4.0`](https://github.com/i-mud/imp/releases/tag/v0.4.0) is published with
-a Windows x64 installer and a self-contained Linux x86_64 server bundle.
-The server needs no host Python. It ships SSH, Direct, and install-only
-installation, automatic Direct WSS for supported directly-addressed hosts,
-explicit router/NAT support, and an Imp-restricted Caddy edge with schema-3
-literal raw-target isolation. Runtime and migration work landed in
+[`v0.4.1`](https://github.com/i-mud/imp/releases/tag/v0.4.1) is the current
+release, published with a Windows x64 installer and a self-contained Linux x86_64
+server bundle. The server needs no host Python. It ships SSH, Direct, and
+install-only installation, automatic Direct WSS for supported directly-addressed
+hosts, explicit router/NAT support, and an Imp-restricted Caddy edge with schema-3
+literal raw-target isolation. `v0.4.0` introduced that work; `v0.4.1` fixes the
+directly-addressed DNS preflight on hosts where `ip -j` emits an empty address
+entry. Runtime and migration work landed in
 [`5687cba`](https://github.com/i-mud/imp/commit/5687cba5cb70405cf781a02b84797433927c62cb);
 TinyFugue feed-restart recovery landed in
 [`5c1742b`](https://github.com/i-mud/imp/commit/5c1742b6efff03bfe4c07e8c17a502de21417d09).
 
-**Slice 25 remains In progress.** Recorded live acceptance:
+**Slice 25 is complete.** Router/NAT live acceptance used **DEVELOPMENT-labelled
+artifacts**:
 
 | Check                                                               | Result |
 | ------------------------------------------------------------------- | ------ |
@@ -26,22 +29,24 @@ TinyFugue feed-restart recovery landed in
 | Real service/feed restart recovery                                  | PASS   |
 | Idempotent reinstall preserving credentials and certificate storage | PASS   |
 
-These checks used **DEVELOPMENT-labelled artifacts**, not the final published
-`v0.4.0` artifacts. No published-artifact smoke of the exact `v0.4.0` Windows
-installer and Linux bundle is recorded. Clean directly-addressed VPS automatic
-Direct acceptance remains outstanding.
-The final pre-push action-consumer singleton and pipe-loss fixes passed separate
-native TinyFugue and release-packaging checks, but were not retested on the NAT host.
+Published artifacts were then exercised:
+
+| Check                                                                                          | Result |
+| ---------------------------------------------------------------------------------------------- | ------ |
+| Published `v0.4.0` bundle and Windows installer smoke on the NAT host                          | PASS   |
+| Clean directly-addressed VPS, automatic Direct install, published `v0.4.1` bundle              | PASS   |
+| Public-CA certificate, raw-route isolation, external authentication, previous-token rejection  | PASS   |
+| TinyFugue, desktop Direct, service/feed and Caddy restart recovery, idempotent reinstall (VPS) | PASS   |
 
 Feed-restart recovery is not reboot recovery: a full host reboot discards the
 ephemeral checkpoint and still requires a fresh identity-bearing MUD login.
 Existing TinyFugue sessions using the old hook need one
 `/load ~/.config/imp/capture.tf`; do not reboot without operator approval.
 The [Slice 25 evidence](#slice-25---connection-oriented-server-installation)
-preserves the initial failures and subsequent passing correction. Priorities
+preserves the initial failures and subsequent passing corrections. Priorities
 from acceptance are recorded once in the
-[roadmap follow-ups](roadmap.md#acceptance-follow-ups); they are not NAT blockers
-or a Slice 26 assignment.
+[roadmap follow-ups](roadmap.md#acceptance-follow-ups); they are not acceptance
+blockers or a Slice 26 assignment.
 
 ## Working end to end
 
@@ -1224,8 +1229,6 @@ active credential remained unchanged.
   [Public verifier failure diagnostics](roadmap.md#public-verifier-failure-diagnostics)
   remains a low-priority open follow-up, without token or secret logging.
 
-## In-progress acceptance
-
 ### Slice 25 - Connection-oriented server installation
 
 The installer released in `v0.4.0` supports `--connection ssh|direct|none`,
@@ -1432,22 +1435,60 @@ shared adapter 31, Mudlet 32, TinyFugue 112, plus lint/types, docs/version, E2E,
 and production frontend build. The retained native TF restart regression passed.
 
 Live NAT acceptance passed using development-labelled artifacts built during
-Slice 25. The final pre-push action-consumer singleton and pipe-loss fixes passed
-separate native TinyFugue and release-packaging checks, but were not retested on
-the NAT host. The published `v0.4.0` artifacts have not yet undergone live
-acceptance. The NAT run covered migration, route isolation, authenticated WSS,
+Slice 25. The NAT run covered migration, route isolation, authenticated WSS,
 TinyFugue GMCP, desktop Direct, a real service restart that recovered the
-still-connected TinyFugue selection
-without a reconnect, and an idempotent second install with credentials, ownership,
-certificate and ACME storage unchanged. The connection generation was not
-captured immediately before the final restart, so "no reconnect" rests on the
-operator's report; session and generation matched. Old-hook TinyFugue sessions
-need one `/load ~/.config/imp/capture.tf` after installation. A host reboot
-still discards the ephemeral checkpoint and needs a fresh identity-bearing
-login. Do not reboot without operator approval.
+still-connected TinyFugue selection without a reconnect, and an idempotent second
+install with credentials, ownership, certificate and ACME storage unchanged. The
+connection generation was not captured immediately before the final restart, so
+"no reconnect" rests on the operator's report; session and generation matched.
+Old-hook TinyFugue sessions need one `/load ~/.config/imp/capture.tf` after
+installation. A host reboot still discards the ephemeral checkpoint and needs a
+fresh identity-bearing login. Do not reboot without operator approval.
 
-Clean directly-addressed automatic VPS acceptance remains the outstanding
-Slice 25 completion requirement. Smoke testing the final published `v0.4.0`
-artifact bytes is a separate evidence follow-up; the NAT run did not test them.
+The published `v0.4.0` Linux bundle and Windows installer then passed a smoke on
+the same NAT host as a normal upgrade. Credential, edge-ownership, Caddyfile and
+edge-unit hashes and Caddy storage metadata were unchanged through the upgrade, a
+Caddy restart and a second install. A fresh TinyFugue session, desktop Direct
+state, external authentication, and a relay/feed/gateway restart all passed; the
+restart kept the same TinyFugue process, session and context, with one action
+consumer and one feed watcher. The final action-consumer singleton and pipe-loss
+fixes were therefore exercised on published artifacts, not only in native
+TinyFugue and packaging checks.
+
+Clean directly-addressed acceptance ran on a VPS whose public IPv4 is assigned to
+its interface, after its earlier Imp and Caddy installation was removed and its
+DNS was an A record only. The published `v0.4.0` bundle failed its DNS preflight
+there and wrongly offered the NAT prompt, because `ip -j address show scope
+global` emitted an empty address entry that `_local_addresses()` could not read.
+Nothing was installed. [PR #45](https://github.com/i-mud/imp/pull/45) skips
+entries without an address, with a regression test that fails on the old code,
+and shipped as `v0.4.1`.
+
+The published `v0.4.1` bundle then passed on that host without a NAT question:
+edge marker `behind_nat` false and schema 3, Caddy from the Ubuntu repositories,
+a valid Let's Encrypt certificate for the hostname, and 404 for `/st%61te`, a
+dot-segment form of `/state`, `/%2e/state`, `/ingest`, `/action-consumer` and
+`/unknown`.
+External authentication passed with previous-token rejection after rotation. A
+real TinyFugue session and the desktop showed character, vitals and green status
+on fresh GMCP. The same TinyFugue process and context survived a
+relay/feed/gateway restart, with one consumer and one watcher observed for
+three seconds. The desktop recovered after that restart, a Caddy restart and a
+second install, and credential, edge-ownership, Caddyfile and edge-unit hashes
+were unchanged.
+
+Evidence limits: this run paired the published `0.4.0` Windows desktop with the
+`0.4.1` server; the `0.4.1` installer was not tested. Caddy certificate-storage
+comparisons covered paths, owners, modes and sizes, not modification times.
+Desktop status after each restart is the operator's observation.
+
+Published artifact SHA-256:
+
+- `imp-server-0.4.0-linux-x86_64.tar.gz`:
+  `2226a7f9a8a835a84c6f1a92a8ceff5337c3ed60199488cde541ad17e67d4db5`
+- `Imp_0.4.0_x64-setup.exe`:
+  `2157e580960b942b3431e4b0e7b38cc13a98e89fcf8d4d00c80a03432bc3ebf5`
+- `imp-server-0.4.1-linux-x86_64.tar.gz`:
+  `20cef1102a10237321a41f9e2323dc9a91d40cc6518468fe9e1cc6385fb66f8e`
 
 For future candidate work, see [`roadmap.md`](roadmap.md).

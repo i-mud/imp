@@ -43,7 +43,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`              |
 | Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
 | Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
-| Slice 25 - Connection-oriented server installation    | In progress | No slice completion marker            |
+| Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1` |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -52,10 +52,10 @@ from Conventional Commits as documented in [`releases.md`](releases.md).
 The Slices 17–23 remediation program is complete; see the separate
 [remediation closure](audits/2026-10-05-remediation-closure.md) for landed
 PR identities, verification, and retained limitations. Slice 24 is complete
-with non-blocking follow-ups. Slice 25's implementation shipped in `v0.4.0`,
-but acceptance remains in progress: NAT passed; a clean directly-addressed
-automatic Direct VPS deployment remains outstanding. Other candidates remain
-provisional; no next slice is assigned.
+with non-blocking follow-ups. Slice 25 is complete: its implementation shipped
+in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
+`v0.4.1`, plus retained follow-ups. Other candidates remain provisional; no next
+slice is assigned.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -723,12 +723,12 @@ artifacts completed live acceptance with **PASS WITH LIMITATIONS**; see
 The release first-launch gate and verifier diagnostics remain non-blocking
 candidate work below, not unfinished Slice 24 scope.
 
-## In-progress acceptance
-
 ### Slice 25 - Connection-oriented server installation
 
-In progress; no slice completion marker. Implemented and released in
-[`v0.4.0`](https://github.com/i-mud/imp/releases/tag/v0.4.0):
+Complete; no slice completion marker. Implemented in
+[`v0.4.0`](https://github.com/i-mud/imp/releases/tag/v0.4.0) and accepted on
+published artifacts, with a preflight fix in
+[`v0.4.1`](https://github.com/i-mud/imp/releases/tag/v0.4.1):
 
 - self-contained Linux server runtime, with no host Python prerequisite;
 - SSH, Direct, and install-only connection selection, with upgrade preservation;
@@ -741,19 +741,18 @@ In progress; no slice completion marker. Implemented and released in
 
 [NAT live acceptance passed](status.md#slice-25---connection-oriented-server-installation):
 public-CA TLS, v2-to-v3 migration, public authentication/routing, GMCP, desktop
-Direct, feed restart, and idempotent reinstall. These runs used
-**DEVELOPMENT-labelled artifacts**, not the final published release artifacts.
-A full host reboot still needs a fresh identity-bearing login; service-restart
-recovery does not remove that requirement.
-
-The remaining Slice 25 acceptance requirement is a clean directly-addressed VPS
-automatic Direct deployment, including public-CA verification and live runtime
-acceptance. The published-artifact smoke below is also outstanding. Release
-publication alone does not complete the slice.
+Direct, feed restart, and idempotent reinstall. Those runs used
+**DEVELOPMENT-labelled artifacts**. The published `v0.4.0` artifacts then passed a
+smoke on that host, and the published `v0.4.1` server bundle passed clean
+directly-addressed automatic Direct acceptance on a VPS, including public-CA
+verification and live runtime acceptance. That run also found a
+directly-addressed DNS preflight defect in `v0.4.0`, fixed in `v0.4.1`. A full
+host reboot still needs a fresh identity-bearing login; service-restart recovery
+does not remove that requirement.
 
 #### Acceptance follow-ups
 
-These are retained priorities, not failed NAT acceptance checks or a new slice:
+These are retained priorities, not failed acceptance checks or a new slice:
 
 - **Startup-file onboarding:** add the missing TinyFugue startup-file selection
   UX for first-time operators.
@@ -765,9 +764,6 @@ These are retained priorities, not failed NAT acceptance checks or a new slice:
   inactive legacy edge, without unsafe ownership adoption or credential recovery.
 - **Real-runtime CI:** run the real Caddy routing matrix and native TinyFugue
   restart regression in CI rather than relying only on deterministic substitutes.
-- **Published release smoke:** exercise the exact published `v0.4.0` Windows
-  installer and Linux server bundle; development-artifact acceptance is not
-  evidence for those downloaded bytes.
 
 ## Candidate work
 

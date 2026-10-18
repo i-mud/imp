@@ -626,8 +626,7 @@ certificate and verified the public `/healthz`, `/state`, and `/action` path whi
 `/ingest` and `/action-consumer` remained unreachable. This is historical
 advanced/manual-edge evidence, not the default automatic installation workflow
 or acceptance of current provisioning. See [implementation status](../docs/status.md)
-for the development-artifact NAT acceptance and outstanding clean
-directly-addressed acceptance; neither is final published-v0.4.0 live acceptance.
+for the recorded NAT, published-artifact, and clean directly-addressed acceptance.
 
 ### Bounded public verification
 
