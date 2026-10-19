@@ -97,26 +97,49 @@ the existing connection state. Existing Imp runtime/configuration paths,
 credentials, helper links, and user-service state all count as prior
 installation evidence; one missing file does not make an install fresh.
 
-The installer uses the existing `~/.tfrc` by default. Imp backs it up before
-adding:
+### TinyFugue startup file
+
+The installer uses an existing `~/.tfrc` by default. When startup inspection is
+safe, Imp backs it up, then prepends this line before all original commands:
 
 ```text
 /load ~/.config/imp/capture.tf
 ```
 
-If `~/.tfrc` does not exist, the installer stops rather than creating it.
-TinyFugue can fall back to startup files relative to its working directory, so
-creating a new `~/.tfrc` could otherwise change which configuration TinyFugue
-loads.
+The original bytes remain after the new line; ownership and permissions are
+preserved. Normal installation rollback restores the original content. Duplicate
+detection covers one level of literal absolute or `~/` `/load` paths. An existing
+exact hook is retained without rewriting; its ordering is not established.
 
-If TinyFugue uses a different startup file, provide that existing file
-explicitly:
+Recognized relative, deeper, or computed includes and `/eval` or `/require`
+commands make inspection uncertain. BOM-prefixed files and legacy plain-world
+lists are also not rewritten. In these cases the installer leaves the selected
+file unchanged, reports no insertion, and requires manual early-loading setup.
+Arbitrary startup macros cannot be fully inspected; this is not a TinyFugue
+configuration parser.
+
+If `~/.tfrc` is absent and both stdin and stdout are interactive, the installer
+asks for an explicit path to an existing startup file. It never creates one or
+guesses a custom file. TinyFugue can fall back to working-directory startup files,
+so creating `~/.tfrc` could change which configuration it loads. Without an
+interactive terminal, select the existing file explicitly:
 
 ```bash
-./install.sh --tf-startup /path/to/active/tinyfugue/startup-file
+./install.sh --tf-startup "/path/to/active TinyFugue/startup-file"
 ```
 
-This also covers custom layouts and TinyFugue launches that use `-f FILE`.
+`--tf-startup` is deterministic: an invalid or nonexistent file fails early,
+without falling back to another file. For `tf -f FILE`, select that actual
+`FILE`, not an assumed `~/.tfrc`.
+
+Always confirm that your actual TinyFugue invocation loads the selected file
+before any world connects or logs in. Installer success does not verify runtime
+invocation or ordering of an existing hook. For manual setup, copy the supplied
+hook to `~/.config/imp/capture.tf` and put the load line above first in a
+macro-format startup file, ahead of connection/login commands. For a legacy
+plain-world list, place the hook after all world definitions but before any
+connection/login command, or convert those definitions to `/addworld` first.
+Do not blindly prepend a command: it ends TF's legacy loader mode.
 
 The installer:
 
@@ -148,9 +171,9 @@ that old release directory in place; a failed activation restores the prior
 units, links, and `current` selection, so rollback returns to the old release
 with its historical runtime prerequisites.
 
-For an already-running TinyFugue using the old hook, run
-`/load ~/.config/imp/capture.tf` once after installing this update, before
-testing live restart recovery. Installing the hook file does not reload TF.
+For any already-running TinyFugue, run `/load ~/.config/imp/capture.tf` once
+after installing this update, before testing live restart recovery. Installing
+the hook file does not reload TF.
 The updated hook owns one reload-safe `imp-feed-watch` quote job, using the
 stable CLI link above (packaged role `imp-server feed-watch`); it checks the
 private readiness marker once per second with bounded reads and exits when
@@ -159,9 +182,11 @@ TF closes its stdout pipe.
 After feed restart, readiness is not authority: the live TF hook reasserts its
 actual foreground context or null selection, never blindly trusting a saved
 selection. Matching normalized checkpoint values return as stale until fresh
-authoritative GMCP arrives. No MUD reconnect is required while cached identity
-survives. The checkpoint is ephemeral: reboot or checkpoint loss still requires
-fresh identity-bearing login GMCP under the documented TinyFugue prerequisites.
+authoritative GMCP arrives. No MUD reconnect is required while matching cached
+identity survives. This cannot recover identity that was never captured because
+the hook loaded too late. The checkpoint is ephemeral: reboot or checkpoint loss
+still requires fresh identity-bearing login GMCP under the documented TinyFugue
+prerequisites, with the hook loaded before login.
 
 Configuration and state directories are kept private to the user.
 
@@ -748,13 +773,8 @@ The installer copies the shipped hook to:
 ~/.config/imp/capture.tf
 ```
 
-By default the installer adds the Imp `/load` line idempotently to an existing
-`~/.tfrc`. With `--tf-startup FILE`, it instead backs up and updates the
-explicitly selected existing startup file.
-
-TinyFugue's documented personal configuration is `$HOME/.tfrc`, but TinyFugue
-also supports alternate startup files. Operators using a different startup
-file should pass that same file to `--tf-startup`.
+See [TinyFugue startup file](#tinyfugue-startup-file) for existing-file selection,
+safe automatic insertion, and cases requiring manual early-loading setup.
 
 Load the hook before anything in that startup path can connect or log in to
 the MUD. AVATAR sends the full identity-bearing `Char.Status` only once, during

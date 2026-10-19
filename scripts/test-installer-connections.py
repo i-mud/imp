@@ -1114,6 +1114,212 @@ def frozen_upgrade(work, a, b, edge_a, uid):
     retained(result)
     check(sha(data / "releases" / va / "bin/imp-server") == ha, "A runtime was not retained for rollback")
 
+def startup_cases(work, bundle, *, guarded=True):
+    """Real installer selection, byte preservation, ordering, and rollback."""
+    hook = b"/load ~/.config/imp/capture.tf"
+    serial = itertools.count()
+
+    def site():
+        return Site(work, f"startup-{next(serial)}")
+
+    def install(s, *args, **kwargs):
+        result = s.install(bundle, ["--connection", "none", *args], guarded=guarded, **kwargs)
+        return result
+
+    def metadata(path):
+        st = path.stat()
+        return st.st_uid, st.st_gid, st.st_mode
+
+    def completed(result, path, status):
+        check(result.rc == 0, "startup install failed", result)
+        for text in (str(path), status, "tf -f FILE", "current TF session",
+                     "matching normalized checkpoint", "without that identity"):
+            check(text in result.out, f"missing onboarding output: {text}", result)
+        check("integration: configured" not in result.out, "unqualified configured claim", result)
+
+    for original in (b"/connect game.example 1234\n/echo retained\n",
+                     b"/connect game.example 1234\r\n/echo retained\r\n",
+                     b"/connect game.example 1234", b"; comment\n\n  /connect retained\n", b""):
+        s = site()
+        path = s.home / ".tfrc"
+        path.write_bytes(original)
+        path.chmod(0o640)
+        before = metadata(path)
+        result = install(s, "--no-start")
+        completed(result, path, "inserted before original startup commands")
+        newline = b"\r\n" if original.startswith(b"/connect game.example 1234\r\n") else b"\n"
+        expected = hook + newline + original
+        check(path.read_bytes() == expected and metadata(path) == before, "prepend lost bytes or metadata", result)
+        backups = list(s.home.glob(".tfrc.imp-backup.*"))
+        check(len(backups) == 1 and backups[0].read_bytes() == original, "original backup missing", result)
+        result = install(s, "--no-start")
+        completed(result, path, "already exact")
+        check(path.read_bytes() == expected and len(list(s.home.glob(".tfrc.imp-backup.*"))) == 1,
+              "reinstall duplicated or rewrote hook", result)
+        path.write_bytes(original)
+        result = install(s, "--no-start")
+        check(result.rc == 0 and len(list(s.home.glob(".tfrc.imp-backup.*"))) == 2
+              and backups[0].read_bytes() == original, "reinstall overwrote prior backup", result)
+
+    s = site()
+    default = s.home / ".tfrc"
+    default.unlink()
+    custom = s.home / "custom startup.tf"
+    custom.write_bytes(b"/connect retained\n")
+    result = install(s, "--no-start", tty=True, keys=str(custom) + "\n")
+    completed(result, custom, "inserted before original startup commands")
+    check("Enter an existing TinyFugue startup file" in result.out and not default.exists(),
+          "missing default did not select an existing file", result)
+    check(custom.read_bytes() == hook + b"\n/connect retained\n", "custom path with spaces mishandled", result)
+
+    s = site()
+    default = s.home / ".tfrc"
+    untouched = default.read_bytes()
+    custom = s.home / "explicit startup.tf"
+    custom.write_bytes(b"/connect retained\n")
+    result = install(s, "--no-start", "--tf-startup", str(custom))
+    completed(result, custom, "inserted before original startup commands")
+    check(default.read_bytes() == untouched and custom.read_bytes() == hook + b"\n/connect retained\n",
+          "explicit startup override changed wrong file", result)
+
+    for kind in ("missing-default", "missing-explicit", "directory", "dangling", "fifo", "readonly"):
+        s = site()
+        default = s.home / ".tfrc"
+        default.unlink()
+        path = s.home / "invalid startup"
+        if kind == "directory":
+            path.mkdir()
+        elif kind == "dangling":
+            path.symlink_to(s.home / "absent")
+        elif kind == "fifo":
+            os.mkfifo(path)
+        elif kind == "readonly":
+            path.write_bytes(b"/echo retained\n")
+            path.chmod(0o400)
+        before = home_tree(s.home)
+        args = [] if kind == "missing-default" else ["--tf-startup", str(path)]
+        result = install(s, "--no-start", *args, tty=kind == "missing-explicit", timeout=30)
+        check(result.rc != 0 and "TinyFugue startup" in result.out, f"{kind} not rejected", result)
+        if kind == "missing-explicit":
+            check("Enter an existing TinyFugue startup file" not in result.out,
+                  "explicit nonexistent startup prompted instead of failing", result)
+        check(home_tree(s.home) == before and not (s.home / ".local").exists(),
+              f"{kind} mutated installation before rejection", result)
+
+    for original in (hook + b"\n/connect retained\n", b"/connect retained\n" + hook + b"\n",
+                     b"  \t" + hook + b"\n/connect retained\n",
+                     hook + b"\r\n" + hook + b"\r\n", b"\xef\xbb\xbf/connect retained\r\n"):
+        s = site()
+        path = s.home / ".tfrc"
+        path.write_bytes(original)
+        result = install(s, "--no-start", "--tf-startup", str(path))
+        completed(result, path, "load order not established")
+        check(path.read_bytes() == original and not list(s.home.glob(".tfrc.imp-backup.*")),
+              "existing hook or BOM file rewritten", result)
+        if original.count(hook) > 1:
+            check("multiple Imp hook loads found" in result.out, "duplicate hook warning absent", result)
+        if original.startswith(b"\xef\xbb\xbf"):
+            check("No new hook inserted" in result.out and "Manually arrange" in result.out,
+                  "BOM manual action missing", result)
+        if original.startswith(b"  \t"):
+            check("existing hook preserved; no duplicate added" in result.out and "already exact" not in result.out,
+                  "indented hook falsely described as exact canonical line", result)
+
+    for original in (b"# legacy worlds\nworld character password game.example 1234\n",
+                     b"  world character password game.example 1234\n/connect retained\n",
+                     b"\t/eval /load %{startup}\n/connect retained\n",
+                     b"  /require %{startup}\n/connect retained\n"):
+        s = site()
+        path = s.home / ".tfrc"
+        path.write_bytes(original)
+        result = install(s, "--no-start")
+        completed(result, path, "load order not established")
+        check(path.read_bytes() == original and not list(s.home.glob(".tfrc.imp-backup.*")),
+              "legacy or computed startup content rewritten", result)
+        check("No new hook inserted" in result.out and "Manually arrange" in result.out,
+              "legacy or computed startup lacks manual action", result)
+        if b"world character" in original:
+            check("after legacy world definitions" in result.out and "/addworld" in result.out
+                  and "Do not blindly prepend" in result.out, "legacy format guidance missing", result)
+
+    for alias in (False, True):
+        s = site()
+        path = s.home / ".tfrc"
+        capture = s.home / ".config/imp/capture.tf"
+        target = capture
+        if alias:
+            capture.parent.mkdir(parents=True)
+            capture.write_bytes(b"; existing capture fixture\n")
+            target = s.home / "capture alias.tf"
+            target.symlink_to(capture)
+        original = f"  /load {target}\n/connect retained\n".encode()
+        path.write_bytes(original)
+        for _ in range(2):
+            result = install(s, "--no-start")
+            completed(result, path, "existing hook preserved; no duplicate added")
+            check("already exact" not in result.out, "absolute or alias hook falsely described as exact", result)
+            check(path.read_bytes() == original and not list(s.home.glob(".tfrc.imp-backup.*")),
+                  "absolute or alias hook duplicated on fresh install/reinstall", result)
+
+    for prefix in ("absolute", "home", "relative", "deeper", "duplicates"):
+        s = site()
+        path = s.home / ".tfrc"
+        nested = s.home / "nested startup.tf"
+        nested.write_bytes(hook + b"\r\n")
+        include = str(nested) if prefix == "absolute" else "~/nested startup.tf"
+        if prefix == "relative":
+            include = "nested startup.tf"
+        elif prefix == "deeper":
+            nested.write_bytes(b"/load ~/deeper.tf\n")
+            (s.home / "deeper.tf").write_bytes(hook + b"\n")
+        elif prefix == "duplicates":
+            nested.write_bytes(hook + b"\n" + hook + b"\n")
+        original = f"/load {include}\n/connect retained\n".encode()
+        path.write_bytes(original)
+        result = install(s, "--no-start")
+        completed(result, path, "load order not established")
+        check(path.read_bytes() == original, "nested integration rewritten or duplicated", result)
+        if prefix in ("relative", "deeper"):
+            check("No new hook inserted" in result.out and "Manually arrange" in result.out,
+                  "unsupported include lacked manual action", result)
+        else:
+            check("nested hook preserved" in result.out, "nested hook was not detected", result)
+        if prefix == "duplicates":
+            check("multiple Imp hook loads found" in result.out, "nested duplicate warning absent", result)
+
+    s = site()
+    path = s.home / ".tfrc"
+    original = b"/connect retained\r\n/echo exact rollback\r\n"
+    path.write_bytes(original)
+    path.chmod(0o640)
+    before = metadata(path)
+    result = install(s, extra={"IMP_TEST_FAIL_RESTART": "imp-feed.service"})
+    check(result.rc != 0 and (s.units / "failed-once").exists(), "post-mutation failure not reached", result)
+    check(path.read_bytes() == original and metadata(path) == before, "startup rollback lost bytes or metadata", result)
+    check(not list(s.home.glob(".tfrc.imp-backup.*")), "rollback stranded startup backup", result)
+    print("TinyFugue startup onboarding: PASS")
+
+
+def installer_shims(work):
+    shims = work / "shims"
+    shims.mkdir()
+    for name, text in (
+        ("systemctl", SYSTEMCTL),
+        ("cp", CP_SHIM),
+        *((n, PYTHON_GUARD) for n in ("python", "python3", "python3.12", "pip", "pip3")),
+    ):
+        (shims / name).write_text(text)
+        (shims / name).chmod(0o755)
+    return shims
+
+
+def startup_main(bundle):
+    with tempfile.TemporaryDirectory(prefix="imp-tf-startup-") as directory:
+        work = Path(directory)
+        installer_shims(work)
+        startup_cases(work, Path(bundle))
+
+
 
 def main(bundle, next_bundle):
     work = Path(tempfile.mkdtemp(prefix="imp-connections-"))
@@ -1144,15 +1350,8 @@ def edge_fixture_bundle(bundle, work, name):
 
 
 def run_all(work, shipping, next_shipping):
-    shims = work / "shims"
-    shims.mkdir()
-    for name, text in (
-        ("systemctl", SYSTEMCTL),
-        ("cp", CP_SHIM),
-        *((n, PYTHON_GUARD) for n in ("python", "python3", "python3.12", "pip", "pip3")),
-    ):
-        (shims / name).write_text(text)
-        (shims / name).chmod(0o755)
+    shims = installer_shims(work)
+    startup_cases(work, shipping)
     bundle = edge_fixture_bundle(shipping, work / "fixtures", "bundle")
     next_bundle = edge_fixture_bundle(next_shipping, work / "fixtures", "next") if next_shipping else None
     uid = os.getuid()
@@ -2450,7 +2649,9 @@ def run_all(work, shipping, next_shipping):
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--edge-driver"]:
         edge_driver(sys.argv[2:])
+    elif sys.argv[1:2] == ["--tf-startup-only"] and len(sys.argv) == 3:
+        startup_main(sys.argv[2])
     elif len(sys.argv) in (2, 3):
         main(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else None)
     else:
-        sys.exit(f"usage: {sys.argv[0]} BUNDLE_DIR [NEXT_BUNDLE_DIR]")
+        sys.exit(f"usage: {sys.argv[0]} BUNDLE_DIR [NEXT_BUNDLE_DIR] | --tf-startup-only BUNDLE_DIR")

@@ -78,8 +78,9 @@ which remains `stale` until fresh authoritative GMCP is published.
 
 ## Running (normal production path)
 
-Copy the unchanged hook to `~/.config/imp/capture.tf`, then add this line
-to the startup file used by the operator's actual TinyFugue invocation:
+Copy the unchanged hook to `~/.config/imp/capture.tf`, then put this line first
+in the macro-format startup file used by the operator's actual TinyFugue
+invocation, before any connection/login commands:
 
 ```text
 /load ~/.config/imp/capture.tf
@@ -88,16 +89,33 @@ to the startup file used by the operator's actual TinyFugue invocation:
 TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
 config. For example, when starting from `~/avatar/tf` with
 `tf -f./.tfrc -n`, the load belongs in `~/avatar/tf/.tfrc`, not an assumed
-`~/.tfrc`. Load it before any world connects or logs in. The hook is additive:
+`~/.tfrc`. Confirm that your actual invocation loads it early. The hook is additive:
 it does not replace the operator's GMCP negotiation or connection macros and
-sends no GMCP of its own. Installation must not create or overwrite an
-operator startup file. See [`../../deploy/README.md`](../../deploy/README.md)
-for the VPS systemd setup.
+sends no GMCP of its own.
 
-After installing the updated hook into an already-running TinyFugue that still
-has the old hook loaded, run `/load ~/.config/imp/capture.tf` once before testing
-restart recovery. Installing the file does not reload that process. No MUD
-reconnect is needed when the normalized checkpoint still contains identity.
+The installer uses an existing `~/.tfrc` by default. If it is absent, interactive
+stdin and stdout allow an explicit existing-file selection; otherwise supply
+`./install.sh --tf-startup "/path/to/your TinyFugue/startup-file"`.
+An invalid explicit file fails early; no startup file is created or guessed.
+When startup inspection is safe, the installer backs up the selected file and
+prepends the load line, preserving its original bytes, ownership and permissions.
+Duplicate detection covers one level of literal absolute or `~/` `/load` paths.
+An existing exact hook is left unchanged with an ordering warning. Recognized unsafe
+includes, BOM-prefixed files, and legacy plain-world lists remain unchanged for
+manual early-loading setup. For a legacy world list, place the hook after all
+world definitions but before connection/login, or convert the definitions to
+`/addworld` first. Do not blindly prepend a command: it ends TF's legacy loader
+mode. Arbitrary startup macros cannot be fully inspected. Neither existing-hook
+ordering nor the runtime invocation is verified by installation. See
+[`../../deploy/README.md`](../../deploy/README.md#tinyfugue-startup-file)
+for startup selection and the VPS systemd setup.
+
+For any already-running TinyFugue, run `/load ~/.config/imp/capture.tf` once
+after installation, before testing restart recovery. Installing the file does
+not reload that process. No MUD reconnect is needed when the matching normalized
+checkpoint still contains previously captured identity. It cannot recover
+identity never captured by a late-loaded hook; checkpoint loss or reboot also
+requires a fresh identity-bearing login with the hook loaded early.
 
 The hook writes to the fixed path `~/.local/state/imp/spool`.
 `imp-feed` creates that path as a symlink into its private runtime

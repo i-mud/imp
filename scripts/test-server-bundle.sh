@@ -214,6 +214,8 @@ printf '\n=== frozen relay/feed/gateway/action-consumer flow + native user syste
   grep -Fxc '/load ~/.config/imp/capture.tf' "$HOME_DIR/.tfrc"
 )" -eq 1 ]] ||
   die "TinyFugue load line is not idempotent"
+[[ "$(< "$HOME_DIR/.tfrc")" == $'/load ~/.config/imp/capture.tf\n/echo existing TinyFugue startup' ]] ||
+  die "TinyFugue hook was not prepended before original startup commands"
 
 mapfile -t TF_BACKUPS < <(
   find "$HOME_DIR" \

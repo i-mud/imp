@@ -183,13 +183,73 @@ if ((BEHIND_NAT)) && [[ "$CONNECTION" != direct ]]; then
   die "--behind-nat is supported only with --connection direct"
 fi
 
-if [[ ! -f "$TF_STARTUP" ]]; then
-  if ((TF_STARTUP_EXPLICIT)); then
-    die "TinyFugue startup file does not exist: $TF_STARTUP"
+if [[ ! -e "$TF_STARTUP" && ! -L "$TF_STARTUP" ]] && ((!TF_STARTUP_EXPLICIT)); then
+  if [[ -t 0 && -t 1 ]]; then
+    printf '\nDefault TinyFugue startup file does not exist: %s\n' "$TF_STARTUP"
+    read -r -p 'Enter an existing TinyFugue startup file: ' TF_STARTUP ||
+      die "TinyFugue startup selection interrupted"
+    case "$TF_STARTUP" in '~/'*) TF_STARTUP="$HOME/${TF_STARTUP:2}" ;; esac
+  else
+    die "default TinyFugue startup file does not exist: $TF_STARTUP; use --tf-startup FILE for an existing startup file"
   fi
-
-  die "default TinyFugue startup file does not exist: $TF_STARTUP; use --tf-startup FILE for a different startup file"
 fi
+[[ -f "$TF_STARTUP" ]] || die "TinyFugue startup must be an existing regular file: $TF_STARTUP"
+[[ -O "$TF_STARTUP" && -r "$TF_STARTUP" && -w "$TF_STARTUP" ]] ||
+  die "TinyFugue startup must be owned by the current user, readable and writable: $TF_STARTUP"
+
+LOAD_LINE='/load ~/.config/imp/capture.tf'
+TF_DIRECT_HOOKS=0
+TF_EXACT_HOOK=0
+TF_NESTED_HOOKS=0
+TF_UNCERTAIN=0
+TF_BOM=0
+TF_LEGACY=0
+TF_INCLUDES=()
+TF_NEWLINE=$'\n'
+# shortcut: inspect only one level of literal /load paths; complex TF programs need operator review.
+inspect_tf_startup() {
+  local file="$1" depth="$2" line first=1 include
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if ((!depth)) && [[ "${line%$'\r'}" == "$LOAD_LINE" ]]; then TF_EXACT_HOOK=1; fi
+    if ((first)); then
+      if [[ "$line" == $'\xef\xbb\xbf'* ]]; then TF_BOM=1; TF_UNCERTAIN=1; fi
+      if ((!depth)) && [[ "$line" == *$'\r' ]]; then TF_NEWLINE=$'\r\n'; fi
+      line="${line#$'\xef\xbb\xbf'}"
+      first=0
+    fi
+    line="${line%$'\r'}"
+    case "$line" in ';'*|'#'*) continue ;; esac
+    line="${line#"${line%%[![:space:]]*}"}"
+    case "$line" in
+      '') continue ;;
+      /eval|/eval[[:space:]]*|/require|/require[[:space:]]*) TF_UNCERTAIN=1; continue ;;
+      /*) ;;
+      *) TF_LEGACY=1; TF_UNCERTAIN=1; continue ;;
+    esac
+    if [[ "$line" == /load[[:space:]]* ]]; then
+      include="${line#/load}"
+      include="${include#"${include%%[![:space:]]*}"}"
+      case "$include" in
+        '~/'*) include="$HOME/${include:2}" ;;
+        /*) ;;
+        *) TF_UNCERTAIN=1; continue ;;
+      esac
+      if [[ "$include" == "$CONFIG_DIR/capture.tf" || "$include" -ef "$CONFIG_DIR/capture.tf" ]]; then
+        if ((depth)); then
+          TF_NESTED_HOOKS=$((TF_NESTED_HOOKS + 1))
+        else
+          TF_DIRECT_HOOKS=$((TF_DIRECT_HOOKS + 1))
+        fi
+      elif ((depth)) || [[ ! -f "$include" || ! -r "$include" ]]; then
+        TF_UNCERTAIN=1
+      else
+        TF_INCLUDES+=("$include")
+      fi
+    fi
+  done < "$file"
+}
+inspect_tf_startup "$TF_STARTUP" 0
+for include in "${TF_INCLUDES[@]}"; do inspect_tf_startup "$include" 1; done
 
 DIRECT_HAS_CREDENTIAL=0
 if [[ -e "$CONFIG_DIR/gateway.env" || -L "$CONFIG_DIR/gateway.env" ]]; then
@@ -517,22 +577,23 @@ for unit in imp-relay.service imp-feed.service imp-gateway.service; do
     "$SYSTEMD_DIR/$unit"
 done
 
-LOAD_LINE='/load ~/.config/imp/capture.tf'
-TF_CONFIGURED=0
-
-if grep -Fxq "$LOAD_LINE" "$TF_STARTUP"; then
-  printf 'TinyFugue startup already contains the Imp hook: %s\n' "$TF_STARTUP"
+if ((TF_EXACT_HOOK)); then
+  TF_STATUS='already exact; preserved without moving or rewriting'
+elif ((TF_DIRECT_HOOKS)); then
+  TF_STATUS='existing hook preserved; no duplicate added'
+elif ((TF_NESTED_HOOKS)); then
+  TF_STATUS='nested hook preserved; no duplicate added'
+elif ((TF_UNCERTAIN)); then
+  TF_STATUS='load order not established; manual integration required'
 else
-  BACKUP="${TF_STARTUP}.imp-backup.$(date +%Y%m%d%H%M%S)"
-  cp -p -- "$TF_STARTUP" "$BACKUP"
-  TF_STARTUP_BACKUP="$BACKUP"
+  TF_STARTUP_BACKUP="$(mktemp "${TF_STARTUP}.imp-backup.XXXXXXXX")"
+  cp -p -- "$TF_STARTUP" "$TF_STARTUP_BACKUP"
   TF_STARTUP_CHANGED=1
-  printf '\n%s\n' "$LOAD_LINE" >> "$TF_STARTUP"
-  printf 'Updated TinyFugue startup file: %s\n' "$TF_STARTUP"
-  printf 'Backup: %s\n' "$BACKUP"
+  { printf '%s%s' "$LOAD_LINE" "$TF_NEWLINE"; cat -- "$TF_STARTUP_BACKUP"; } > "$TF_STARTUP"
+  chmod --reference="$TF_STARTUP_BACKUP" -- "$TF_STARTUP"
+  TF_STATUS='inserted before original startup commands'
+  printf 'Backup: %s\n' "$TF_STARTUP_BACKUP"
 fi
-
-TF_CONFIGURED=1
 
 if ((START_SERVICES)); then
   printf 'Installing Imp systemd user services...\n'
@@ -635,13 +696,27 @@ else
   printf 'Services: installed but not started (--no-start).\n'
 fi
 
-if ((TF_CONFIGURED)); then
-  printf 'TinyFugue startup integration: configured.\n'
-else
-  printf '\nTinyFugue startup integration still requires this line:\n'
-  printf '  %s\n' "$LOAD_LINE"
-  printf 'Re-run with --tf-startup FILE to install it automatically.\n'
+printf 'TinyFugue startup: %s\n' "$TF_STARTUP"
+printf 'TinyFugue integration: %s.\n' "$TF_STATUS"
+if ((TF_DIRECT_HOOKS || TF_NESTED_HOOKS || TF_UNCERTAIN)); then
+  printf 'warning: TinyFugue load order not established; inspect startup commands and nested loads.\n'
 fi
+if ((TF_BOM)); then
+  printf 'warning: BOM-prefixed startup preserved; native TinyFugue BOM handling is not established. Review encoding and hook execution manually.\n'
+fi
+if ((TF_DIRECT_HOOKS + TF_NESTED_HOOKS > 1)); then
+  printf 'warning: multiple Imp hook loads found; duplicate loading is possible; preserved unchanged.\n'
+fi
+if [[ "$TF_STATUS" == 'load order not established; manual integration required' ]]; then
+  printf 'No new hook inserted: legacy syntax, unsupported loads, or a BOM require manual review; preserve existing file encoding when editing.\n'
+  printf 'Manually arrange this before connection/login commands: %s\n' "$LOAD_LINE"
+fi
+if ((TF_LEGACY)); then
+  printf 'Possible legacy world-list startup preserved: place the hook after legacy world definitions but before the first connection/login command, or convert world definitions to /addworld before using an early /load. Do not blindly prepend the hook.\n'
+fi
+printf 'Confirm your actual TinyFugue invocation (for example, tf -f FILE) loads this selected file and the hook before connection/login commands.\n'
+printf 'For the current TF session, manually run: %s\n' "$LOAD_LINE"
+printf 'A matching normalized checkpoint can recover prior authoritative identity without reconnecting; without that identity, recovery is not guaranteed.\n'
 
 if command -v loginctl >/dev/null 2>&1; then
   LINGER="$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)"
