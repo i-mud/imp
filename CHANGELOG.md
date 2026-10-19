@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.2] - 2026-10-19
+
+### Bug Fixes
+
+- make TinyFugue startup onboarding explicit and early ([#48](https://github.com/i-mud/imp/issues/48)) ([9e78b09](https://github.com/i-mud/imp/commit/9e78b09628af0655e7a60927bb0062e8dfae1ac4))
+
 ## [0.4.1] - 2026-10-17
 
 ### Bug Fixes
