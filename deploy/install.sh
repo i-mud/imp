@@ -218,6 +218,7 @@ inspect_tf_startup() {
       first=0
     fi
     line="${line%$'\r'}"
+    # TF checks column-zero comments before stripping whitespace (src/command.c).
     case "$line" in ';'*|'#'*) continue ;; esac
     line="${line#"${line%%[![:space:]]*}"}"
     case "$line" in

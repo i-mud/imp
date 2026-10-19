@@ -117,6 +117,9 @@ lists are also not rewritten. In these cases the installer leaves the selected
 file unchanged, reports no insertion, and requires manual early-loading setup.
 Arbitrary startup macros cannot be fully inspected; this is not a TinyFugue
 configuration parser.
+Only column-zero `;` and `#` are treated as comments, matching TinyFugue's
+startup reader. Indented comment markers are not valid comments; they leave the
+file unchanged and require manual review, including in legacy world lists.
 
 If `~/.tfrc` is absent and both stdin and stdout are interactive, the installer
 asks for an explicit path to an existing startup file. It never creates one or

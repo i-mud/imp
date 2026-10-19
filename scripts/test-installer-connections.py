@@ -1139,7 +1139,9 @@ def startup_cases(work, bundle, *, guarded=True):
 
     for original in (b"/connect game.example 1234\n/echo retained\n",
                      b"/connect game.example 1234\r\n/echo retained\r\n",
-                     b"/connect game.example 1234", b"; comment\n\n  /connect retained\n", b""):
+                     b"/connect game.example 1234", b"; comment\n\n  /connect retained\n",
+                     b"; column-zero comment\n \t \n \t/connect retained\n\t /echo retained\n",
+                     b"# column-zero comment\n\t \t\n\t /connect retained\n \t/echo retained\n", b""):
         s = site()
         path = s.home / ".tfrc"
         path.write_bytes(original)
@@ -1228,16 +1230,21 @@ def startup_cases(work, bundle, *, guarded=True):
     for original in (b"# legacy worlds\nworld character password game.example 1234\n",
                      b"  world character password game.example 1234\n/connect retained\n",
                      b"\t/eval /load %{startup}\n/connect retained\n",
-                     b"  /require %{startup}\n/connect retained\n"):
+                     b"  /require %{startup}\n/connect retained\n",
+                     *(prefix + marker + b" indented comment\n" + commands
+                       for prefix in (b"  ", b"\t", b" \t ")
+                       for marker in (b";", b"#")
+                       for commands in (b"/connect retained\n",
+                                        b"world character password game.example 1234\n/connect retained\n"))):
         s = site()
         path = s.home / ".tfrc"
         path.write_bytes(original)
         result = install(s, "--no-start")
         completed(result, path, "load order not established")
         check(path.read_bytes() == original and not list(s.home.glob(".tfrc.imp-backup.*")),
-              "legacy or computed startup content rewritten", result)
+              "legacy, indented comment, or computed startup content rewritten", result)
         check("No new hook inserted" in result.out and "Manually arrange" in result.out,
-              "legacy or computed startup lacks manual action", result)
+              "legacy, indented comment, or computed startup lacks manual action", result)
         if b"world character" in original:
             check("after legacy world definitions" in result.out and "/addworld" in result.out
                   and "Do not blindly prepend" in result.out, "legacy format guidance missing", result)
