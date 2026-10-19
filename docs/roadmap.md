@@ -44,6 +44,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
 | Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
 | Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1` |
+| Slice 26 - Installation reliability and onboarding    | In progress | No slice marker                       |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -54,8 +55,8 @@ The Slices 17–23 remediation program is complete; see the separate
 PR identities, verification, and retained limitations. Slice 24 is complete
 with non-blocking follow-ups. Slice 25 is complete: its implementation shipped
 in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
-`v0.4.1`, plus retained follow-ups. Other candidates remain provisional; no next
-slice is assigned.
+`v0.4.1`, plus retained follow-ups. Slice 26 is in progress with the bounded
+scope below. Other candidates remain provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -764,6 +765,25 @@ These are retained priorities, not failed acceptance checks or a new slice:
   inactive legacy edge, without unsafe ownership adoption or credential recovery.
 - **Real-runtime CI:** run the real Caddy routing matrix and native TinyFugue
   restart regression in CI rather than relying only on deterministic substitutes.
+
+## In progress
+
+### Slice 26 - Installation reliability and onboarding
+
+In progress. Bounded scope:
+
+1. TinyFugue onboarding/startup integration (**only this PR**): explicit
+   existing-file selection, early hook loading, one-level literal absolute/`~/`
+   include duplicate detection, manual setup when inspection is unsafe, and
+   honest operator confirmation of actual startup ordering.
+2. Warning before discarding saved Direct credentials.
+3. Correct NAT preflight error classification.
+4. Recovery of an exact-owned inactive legacy edge when `gateway.env` is missing.
+5. Installation documentation and completion-message corrections.
+
+This PR does not change Direct provisioning, credentials, or the protocol, and
+does not claim live infrastructure acceptance. The remaining Slice 26 items are
+not implemented by this PR.
 
 ## Candidate work
 

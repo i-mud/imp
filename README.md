@@ -116,16 +116,29 @@ Never redirect or capture that terminal output. Fresh SSH and install-only
 installations leave Direct disabled. Existing installations with no connection
 option preserve their connection state and credentials without prompting.
 
-The installer uses an existing `~/.tfrc` by default and adds the Imp capture
-hook to it.
-
-If TinyFugue uses a different startup file:
+The installer uses an existing `~/.tfrc` by default. If it is absent and both
+stdin and stdout are interactive, it asks for the explicit path of an existing
+startup file; it never creates one or guesses a custom file. For a deterministic
+selection (required without an interactive terminal when the default is absent):
 
 ```bash
-./install.sh --tf-startup /path/to/your/tinyfugue/startup-file
+./install.sh --tf-startup "/path/to/your TinyFugue/startup-file"
 ```
 
-The installer does not create a missing TinyFugue startup file.
+An invalid or missing explicit file fails early. When startup inspection is safe,
+the installer backs up the selected file and prepends
+`/load ~/.config/imp/capture.tf` before its original commands. Duplicate detection
+covers one level of literal absolute or `~/` `/load` paths. An existing exact hook
+is preserved without rewriting; its ordering is not verified. Recognized unsafe
+includes, BOM-prefixed files, and legacy plain-world lists are left unchanged
+for manual setup. Arbitrary startup macros cannot be fully inspected.
+Confirm that your actual launch loads this file before any connection/login:
+`tf -f FILE` uses `FILE`, not the normal personal startup file. If managing the
+hook manually, put the load line first in a macro-format startup file. For a
+legacy plain-world list, put it after all world definitions but before connecting,
+or convert the definitions to `/addworld` first. Do not blindly prepend a command:
+that ends TinyFugue's legacy loader mode. Installer success alone does not
+establish runtime startup ordering.
 
 Check the required services:
 
@@ -158,8 +171,11 @@ loginctl enable-linger "$USER"
 
 Otherwise an administrator can enable lingering for your account.
 
-After installing the hook, restart TinyFugue and connect to the MUD so Imp sees
-a fresh login and world-selection context.
+For an already-running TinyFugue, run `/load ~/.config/imp/capture.tf` now;
+installing files does not reload that process. A matching normalized checkpoint
+can recover previously captured identity without reconnecting, but cannot recover
+identity the hook never captured. Otherwise, restart with the hook loaded early
+and make a fresh identity-bearing MUD login.
 
 For custom TinyFugue layouts, detailed verification, diagnostics, upgrades, or
 Direct WSS deployment, see [VPS deployment](deploy/README.md).

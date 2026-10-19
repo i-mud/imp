@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "test-installer-connections.py"
 
@@ -91,3 +95,30 @@ def test_systemctl_double_signals_its_parent(tmp_path: Path) -> None:
     done = subprocess.run(["sh", "-c", script, str(double.script)], env=env, capture_output=True)
     assert done.returncode == 42
     assert double.has("active", "imp-feed.service")
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="installer must run as the target non-root user")
+def test_tinyfugue_startup_onboarding(tmp_path: Path) -> None:
+    """Exercise real install.sh without building the frozen runtime."""
+    root = tmp_path / "bundle"
+    root.mkdir()
+    shutil.copyfile(SCRIPT.parents[1] / "deploy/install.sh", root / "install.sh")
+    (root / "install.sh").chmod(0o755)
+    (root / "VERSION").write_text("0.0.0+startup.fixture\n")
+    (root / "capture.tf").write_text("; capture payload fixture\n")
+    (root / "bin").mkdir()
+    runtime = root / "bin/imp-server"
+    runtime.write_text("#!/bin/sh\nexit 0\n")
+    runtime.chmod(0o755)
+    (root / "systemd").mkdir()
+    for name in ("relay", "feed", "gateway"):
+        (root / f"systemd/imp-{name}.service").write_text("[Service]\nExecStart=/bin/true\n")
+    (root / "SHA256SUMS").write_text(
+        "".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root)}\n"
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        )
+    )
+    harness.installer_shims(tmp_path)
+    harness.startup_cases(tmp_path, root, guarded=False)
