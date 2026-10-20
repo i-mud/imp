@@ -16,7 +16,23 @@ export default defineConfig({
     target: 'esnext',
   },
   test: {
-    environment: 'node',
-    include: ['test/**/*.test.ts'],
+    projects: [
+      {
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: ['test/**/*.test.ts'],
+          exclude: ['test/**/*.dom.test.ts'],
+        },
+      },
+      {
+        resolve: { conditions: ['browser'] },
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          include: ['test/**/*.dom.test.ts'],
+        },
+      },
+    ],
   },
 });

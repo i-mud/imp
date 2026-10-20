@@ -259,7 +259,15 @@ Reading settings does not return the existing token.
 Writes are canonical by mode. Local and External clear unrelated transport
 material; Managed requires a non-empty trimmed SSH target; Direct requires the
 strict `wss:` endpoint plus a canonical 256-bit pairing token. Switching away
-from Direct removes the stored Direct credential.
+from Direct removes the stored Direct URL and credential. When the persisted
+mode is Direct and a token exists, the connection dialog requires an inline
+confirmation before submitting a mode-away save. Cancel preserves the saved
+configuration and pending edits without submitting; Close and Escape never
+confirm. Changing the destination mode or SSH target, or a failed save, requires
+fresh confirmation. Returning to Direct requires the URL and token again;
+if the token is unavailable, deliberate server-side rotation obtains a new one.
+This renderer warning does not change native validation or canonical deletion,
+and saving Direct with a blank token still preserves the stored credential.
 
 Configuration persistence stages a complete replacement before replacing
 `tunnel.json`; failed validation or persistence leaves the previous usable
