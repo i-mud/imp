@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.3] - 2026-10-21
+
+### Bug Fixes
+
+- warn before discarding Direct credentials ([58c0b19](https://github.com/i-mud/imp/commit/58c0b19279f6f9d84bdea7bbcd11a0279b2305b1))
+
 ## [0.4.2] - 2026-10-19
 
 ### Bug Fixes
