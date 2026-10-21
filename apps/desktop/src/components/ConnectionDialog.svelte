@@ -1,5 +1,6 @@
 <script lang="ts">
   import X from '@lucide/svelte/icons/x';
+  import { tick } from 'svelte';
 
   import type { ConnectionMode, ConnectionSettings, ConnectionSettingsUpdate } from '../lib/tunnel.ts';
 
@@ -23,6 +24,9 @@
   let pairingToken = $state('');
   let saving = $state(false);
   let saved = $state(false);
+  let confirmingDiscard = $state(false);
+  let cancelDiscardButton = $state<HTMLButtonElement>();
+  let saveButton = $state<HTMLButtonElement>();
   let modeGroup = $state<HTMLDivElement>();
   let initialFocusApplied = false;
 
@@ -34,6 +38,7 @@
     sshTarget = current.sshTarget;
     remoteUrl = current.remoteUrl;
     pairingToken = '';
+    confirmingDiscard = false;
 
     if (!initialFocusApplied) {
       initialFocusApplied = true;
@@ -52,11 +57,22 @@
 
   function chooseMode(nextMode: ConnectionMode): void {
     mode = nextMode;
+    confirmingDiscard = false;
     saved = false;
   }
 
-  async function save(): Promise<void> {
-    if (settings === null || saving) return;
+  async function save(discardConfirmed = false): Promise<void> {
+    if (settings === null || saving || (discardConfirmed && !confirmingDiscard)) return;
+
+    if (settings.mode === 'direct' && settings.hasPairingToken && mode !== 'direct' && !discardConfirmed) {
+      if (!confirmingDiscard) {
+        confirmingDiscard = true;
+        saved = false;
+        await tick();
+        cancelDiscardButton?.focus();
+      }
+      return;
+    }
 
     let update: ConnectionSettingsUpdate;
 
@@ -85,12 +101,17 @@
     }
 
     saving = true;
+    confirmingDiscard = false;
     saved = false;
 
     try {
       saved = await onsave(update);
     } finally {
       saving = false;
+      if (discardConfirmed) {
+        await tick();
+        saveButton?.focus();
+      }
     }
   }
 </script>
@@ -170,6 +191,7 @@
               disabled={saving}
               oninput={() => {
                 saved = false;
+                confirmingDiscard = false;
               }}
             />
           </label>
@@ -231,10 +253,38 @@
           <p class="saved-message" role="status">Saved. Restart Imp to use this connection.</p>
         {/if}
 
+        {#if confirmingDiscard}
+          <p id="discard-direct-warning" class="mode-help" role="alert">
+            Saving this mode removes the locally stored Direct URL and pairing token. Cancel keeps your saved
+            configuration and pending changes. Returning to Direct requires re-entering the URL and token; if
+            the token is no longer available, obtain a new token by deliberately rotating the server
+            credential. Changes take effect after restart.
+          </p>
+        {/if}
+
         <div class="form-actions">
-          <button class="manager-btn primary" type="submit" disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          {#if confirmingDiscard}
+            <button
+              bind:this={cancelDiscardButton}
+              class="manager-btn secondary"
+              type="button"
+              onclick={async () => {
+                confirmingDiscard = false;
+                await tick();
+                saveButton?.focus();
+              }}>Cancel</button
+            >
+            <button
+              class="manager-btn danger"
+              type="button"
+              aria-describedby="discard-direct-warning"
+              onclick={() => void save(true)}>Remove credentials and save</button
+            >
+          {:else}
+            <button bind:this={saveButton} class="manager-btn primary" type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          {/if}
           <button class="manager-btn secondary" type="button" disabled={saving} onclick={onclose}>
             Close
           </button>

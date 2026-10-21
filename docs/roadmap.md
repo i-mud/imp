@@ -772,18 +772,21 @@ These are retained priorities, not failed acceptance checks or a new slice:
 
 In progress. Bounded scope:
 
-1. TinyFugue onboarding/startup integration (**only this PR**): explicit
+1. TinyFugue onboarding/startup integration (PR1): explicit
    existing-file selection, early hook loading, one-level literal absolute/`~/`
    include duplicate detection, manual setup when inspection is unsafe, and
    honest operator confirmation of actual startup ordering.
-2. Warning before discarding saved Direct credentials.
+2. Warning before discarding saved Direct credentials (implemented in PR2):
+   inline confirmation before saving another mode removes the saved Direct URL
+   and token; cancel preserves pending edits without saving. Explicit token
+   replacement while staying Direct is unchanged.
 3. Correct NAT preflight error classification.
 4. Recovery of an exact-owned inactive legacy edge when `gateway.env` is missing.
 5. Installation documentation and completion-message corrections.
 
-This PR does not change Direct provisioning, credentials, or the protocol, and
-does not claim live infrastructure acceptance. The remaining Slice 26 items are
-not implemented by this PR.
+PR2 does not change Direct provisioning, native credential persistence, or the
+protocol, and does not claim native desktop or live infrastructure verification.
+Items 3–5 remain unimplemented.
 
 ## Candidate work
 

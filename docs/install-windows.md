@@ -109,6 +109,19 @@ In **Settings -> Connection -> Direct**:
 4. Save.
 5. Restart Imp.
 
+The saved token is never displayed. Leave the token field blank when saving
+Direct settings to keep it; after server-side rotation, paste the replacement
+token, save, and restart Imp.
+
+If Direct has a saved token, saving another mode first warns that the locally
+stored Direct URL and token will be removed. **Cancel** keeps the saved
+configuration and your pending edits unchanged; **Remove credentials and save**
+saves the new mode and removes both. Returning to Direct requires re-entering
+the URL and token. If you no longer have the token, deliberately rotate it on
+the server to obtain a replacement; rotation invalidates the old token for
+other paired desktops too. Closing the dialog or pressing Escape does not
+confirm or save. Connection changes still take effect only after restarting Imp.
+
 See [server connection selection](../deploy/README.md#connection-selection) for
 automatic-path requirements. DNS/DDNS, router forwarding, and firewalls remain
 operator-owned. Existing operator public edges and unsupported environments
