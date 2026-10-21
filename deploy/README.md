@@ -241,12 +241,22 @@ credential generation. Two normal Direct deployment shapes are supported:
 | Home / NAT               | Exactly one global IPv4 A points to the router; router TCP 443 forwards to this server TCP 443. No AAAA records.    | `--behind-nat`   |
 
 The default directly-addressed policy is unchanged. A fresh interactive Direct
-install whose single public A is not local offers NAT confirmation; **stop/no is
-the default**. It asks nothing extra when directly-addressed DNS passes.
+install offers NAT confirmation only after successfully inspecting the server's
+interfaces and finding that its single global IPv4 A is not assigned among the
+public addresses, including when no public interface address exists. This can
+indicate NAT or another externally routed topology; it does not prove that a
+router or working port forward exists. **Stop/no is the default**. Confirm that
+TCP 443 is forwarded here before accepting; the installer revalidates NAT DNS
+after acceptance. It asks nothing extra when directly-addressed DNS passes.
+Missing or failing `ip`, malformed interface data, and DNS failures stop with
+their actual diagnostics, not a NAT suggestion. Fix the reported inspection or
+DNS problem before retrying.
 Non-interactive mismatches require explicit `--behind-nat`; NAT is never inferred.
-NAT rejects multiple A answers and any AAAA, including a locally valid IPv6
-address: remove AAAA or use the directly-addressed path. Private, CGNAT,
-documentation, reserved, multicast, and other non-global addresses are rejected.
+Explicit `--behind-nat` keeps its existing DNS validation and does not require a
+public address on the server. NAT rejects multiple A answers and any AAAA,
+including a locally valid IPv6 address: remove AAAA or use the directly-addressed
+path. Private, CGNAT, documentation, reserved, multicast, and other non-global
+DNS addresses are rejected.
 DNS must point directly to the router, not a CDN/reverse proxy.
 
 Configure the router's TCP 443 forward yourself before installation. Imp does

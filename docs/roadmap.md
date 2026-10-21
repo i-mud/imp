@@ -780,13 +780,18 @@ In progress. Bounded scope:
    inline confirmation before saving another mode removes the saved Direct URL
    and token; cancel preserves pending edits without saving. Explicit token
    replacement while staying Direct is unchanged.
-3. Correct NAT preflight error classification.
+3. Correct NAT preflight error classification (implemented in PR3): a read-only
+   Python classifier distinguishes directly-addressed DNS from successfully
+   inspected NAT-eligible mismatches. Failed interface inspection and invalid
+   DNS do not offer NAT; accepted offers rerun authoritative NAT validation.
 4. Recovery of an exact-owned inactive legacy edge when `gateway.env` is missing.
 5. Installation documentation and completion-message corrections.
 
 PR2 does not change Direct provisioning, native credential persistence, or the
-protocol, and does not claim native desktop or live infrastructure verification.
-Items 3–5 remain unimplemented.
+protocol. PR3 changes only read-only preflight classification and its installer
+decision; public-edge ownership, provisioning, credentials, and rollback remain
+unchanged. Neither PR claims live infrastructure acceptance.
+Items 4–5 remain unimplemented.
 
 ## Candidate work
 
