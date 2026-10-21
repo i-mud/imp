@@ -267,6 +267,7 @@ def edge_driver(args):
     sys.dont_write_bytecode = True
     from imp_relay import direct_edge as mod
     real_run = mod._run
+    original_resolve = mod._resolve
 
     def under(value):
         return str(root / str(value).lstrip("/"))
@@ -346,7 +347,26 @@ def edge_driver(args):
                 lines += [CADDY_LISTENER.format(port=p) for p in (80, 443)]
             out = "\n".join(lines) + "\n"
         elif tool == "ip":
-            out = json.dumps([{"addr_info": [{"local": a} for a in state["addrs"]]}])
+            failure = state.get("ip_failure")
+            if failure in ("missing", "unexecutable", "timeout"):
+                save(state)
+                original_run = subprocess.run
+
+                def fail_ip(*unused, **kwargs):
+                    if failure == "timeout":
+                        raise subprocess.TimeoutExpired(argv, timeout)
+                    if failure == "missing":
+                        raise FileNotFoundError("ip fixture missing")
+                    raise PermissionError("ip fixture unexecutable")
+
+                subprocess.run = fail_ip
+                try:
+                    return real_run(argv, timeout)
+                finally:
+                    subprocess.run = original_run
+            if failure == "nonzero":
+                rc, err = 1, "injected ip inspection failure"
+            out = state.get("ip_output", json.dumps([{"addr_info": [{"local": a} for a in state["addrs"]]}]))
         elif tool == "dpkg-query":
             rc = 0 if state.get("dpkg_caddy") else 1
         elif tool == "apt-get" and rest[:1] == ["install"]:
@@ -382,7 +402,22 @@ def edge_driver(args):
         return subprocess.CompletedProcess(argv, rc, out, err)
 
     def resolve(host):
-        dns = load()["dns"]
+        state = load()
+        state["resolve_calls"] = state.get("resolve_calls", 0) + 1
+        sequence = state.get("dns_sequence")
+        dns = sequence[min(state["resolve_calls"] - 1, len(sequence) - 1)] if sequence else state["dns"]
+        save(state)
+        if state.get("resolver_failure"):
+            original_getaddrinfo = mod.socket.getaddrinfo
+
+            def fail_resolver(*unused, **kwargs):
+                raise mod.socket.gaierror("injected resolver failure")
+
+            mod.socket.getaddrinfo = fail_resolver
+            try:
+                return original_resolve(host)
+            finally:
+                mod.socket.getaddrinfo = original_getaddrinfo
         if host not in dns:
             raise mod.EdgeError(f"{host} does not resolve in DNS; create an A/AAAA record for this server")
         return dns[host]
@@ -475,7 +510,7 @@ def edge_driver(args):
         rc = mod.main(args)
     with open(os.environ["IMP_TEST_EVENTS"], "a") as events:
         events.write(
-            f"edge {' '.join(args[:2] if args[:1] in (['hostname'], ['dns']) else args[:1])} rc={rc}\n"
+            f"edge {' '.join(args if args[:1] in (['hostname'], ['dns'], ['preflight']) else args[:1])} rc={rc}\n"
         )
     if rc == 0 and args[:1] == [os.environ.get("IMP_TEST_SIGNAL_PHASE")]:
         os.kill(os.getppid(), getattr(signal, os.environ["IMP_TEST_SIGNAL"]))
@@ -1459,7 +1494,7 @@ def run_all(work, shipping, next_shipping):
         check(result.rc != 0, f"hostname {bad!r} accepted", result)
         check(site.pristine(), f"hostname {bad!r}: mutated HOME", result)
         check(
-            not any(e.startswith(("edge dns", "edge enable", "wss")) for e in site.events_list()),
+            not any(e.startswith(("edge preflight", "edge dns", "edge enable", "wss")) for e in site.events_list()),
             f"{bad!r}: went past hostname validation",
         )
         shutil.rmtree(site.root)
@@ -1473,46 +1508,112 @@ def run_all(work, shipping, next_shipping):
     check(site.pristine(), "bad interactive choice mutated HOME", result)
     shutil.rmtree(site.root)
 
-    print("=== DNS mismatch fails before any installer mutation (interactive hostname prompt) ===")
+    print("=== read-only Direct preflight: NAT offers, inspection/DNS failures, and revalidation ===")
+
+    def preflight_refuses(name, updates, *, tty=True, keys="1\n", message, offer=False):
+        candidate = Site(work, "preflight-" + name)
+        candidate.set_edge(**updates)
+        before = (home_tree(candidate.home), home_tree(candidate.units), home_tree(candidate.edge_root))
+        result = candidate.install(
+            bundle, ["--connection", "direct", "--hostname", HOST], tty=tty, keys=keys
+        )
+        check(result.rc != 0 and message in result.out, f"{name}: missing diagnostic {message!r}", result)
+        check(("Choice [2]" in result.out) == offer, f"{name}: incorrect NAT offer", result)
+        unit_tree = home_tree(candidate.units)
+        manager_calls = unit_tree.pop("calls.log", b"").decode().splitlines()
+        check(all(call.split()[0] in ("is-enabled", "is-active", "show") for call in manager_calls),
+              f"{name}: mutated user manager: {manager_calls}", result)
+        check(
+            before == (home_tree(candidate.home), unit_tree, home_tree(candidate.edge_root))
+            and not candidate.wss_calls() and not candidate.edge().get("sudo_calls")
+            and all(call.startswith("ip ") for call in candidate.edge()["calls"])
+            and all(event.startswith(("edge hostname ", "edge preflight ", "edge dns "))
+                    for event in candidate.events_list()),
+            f"{name}: preflight changed files, credentials, services, or public edge",
+            result,
+        )
+        check("Imp Direct WSS is ready" not in result.out, f"{name}: claimed readiness", result)
+        if not offer:
+            check("--behind-nat" not in result.out and "1. Yes" not in result.out,
+                  f"{name}: suggested NAT after rejection", result)
+        if f"edge preflight {HOST} rc=1" in candidate.events_list():
+            check("verify DNS and iproute2" in result.out
+                  and "ip -j address show scope global" in result.out
+                  and not any(event.startswith("edge dns ") for event in candidate.events_list()),
+                  f"{name}: failed inspection lacked recovery guidance or retried DNS-only", result)
+        shutil.rmtree(candidate.root)
+
+    eligible = (
+        ("mismatch", {}, "not assigned"),
+        ("private-only", {"addrs": ["192.168.1.12"]}, "no public interface"),
+        ("empty-interfaces", {"ip_output": "[]"}, "no public interface"),
+        ("empty-entry", {"ip_output": '[{"addr_info": [{}]}]'}, "no public interface"),
+    )
+    for name, updates, fact in eligible:
+        updates = {"dns": {HOST: [WRONG]}, **updates}
+        for choice in ("\n", "2\n"):
+            preflight_refuses(name + "-decline-" + str(len(choice)), updates, keys=choice,
+                              message=fact, offer=True)
+        preflight_refuses(name + "-noninteractive", updates, tty=False,
+                          message="interactive topology decision")
+        preflight_refuses(
+            name + "-revalidation", {**updates, "dns_sequence": [{HOST: [WRONG]}, {HOST: [WRONG, GLOBAL]}]},
+            message="exactly one global IPv4", offer=True,
+        )
+        preflight_refuses(
+            name + "-revalidation-failure", {**updates, "dns_sequence": [{HOST: [WRONG]}, {}]},
+            message="does not resolve", offer=True,
+        )
+
+    for failure in ("missing", "unexecutable", "timeout", "nonzero"):
+        preflight_refuses(failure, {"ip_failure": failure, "dns": {HOST: [WRONG]}},
+                          message="injected ip inspection failure" if failure == "nonzero" else "could not run ip")
+    malformed_ip = (
+        "", "{", "{}", "null", "[null]", "[false]", "[0]", '[""]', "[[]]", "[{}]",
+        '[{"addr_info": null}]', '[{"addr_info": {}}]', '[{"addr_info": ""}]',
+        '[{"addr_info": [null]}]', '[{"addr_info": [false]}]', '[{"addr_info": [0]}]',
+        '[{"addr_info": [""]}]', '[{"addr_info": [[]]}]', '[{"addr_info": [{"family": "inet"}]}]',
+        '[{"addr_info": [{"local": null}]}]', '[{"addr_info": [{"local": 1234}]}]',
+        '[{"addr_info": [{"local": "invalid"}]}]',
+    )
+    for number, raw in enumerate(malformed_ip):
+        preflight_refuses(f"malformed-{number}", {"ip_output": raw, "dns": {HOST: [WRONG]}},
+                          message="could not read this server's addresses")
+    for name, updates, diagnostic in (
+        ("resolver", {"resolver_failure": True}, "does not resolve"),
+        ("missing-dns", {"dns": {}}, "does not resolve"),
+        ("empty-dns", {"dns": {HOST: []}}, "does not resolve"),
+        ("malformed-dns", {"dns": {HOST: ["invalid"]}}, "unparseable"),
+        ("private-dns", {"dns": {HOST: ["10.0.0.5"]}}, "non-public"),
+        ("cgnat-dns", {"dns": {HOST: ["100.64.1.2"]}}, "non-public"),
+        ("multi-a", {"dns": {HOST: [WRONG, "1.1.1.1"]}}, "update DNS"),
+        ("mismatch-dual", {"dns": {HOST: [WRONG, "2606:2800:220:1::1"]}}, "update DNS"),
+        ("no-public-multi", {"addrs": [], "dns": {HOST: [WRONG, GLOBAL]}}, "no globally routable address"),
+        ("no-public-dual", {"addrs": [], "dns": {HOST: [WRONG, "2606:2800:220:1::1"]}},
+         "no globally routable address"),
+        ("ipv6-only", {"dns": {HOST: ["2606:2800:220:1::1"]}}, "update DNS"),
+        ("private-dual", {"dns": {HOST: [GLOBAL, "fd00::1"]}}, "non-public"),
+    ):
+        preflight_refuses(name, updates, message=diagnostic)
+    for name, updates in (
+        ("matching", {}),
+        ("matching-dual", {"dns": {HOST: [GLOBAL, "2606:2800:220:1::1"]},
+                           "addrs": [GLOBAL, "2606:2800:220:1::1"]}),
+    ):
+        preflight_refuses(name, updates, tty=False, message="requires interactive stdin and stdout")
+
     site = Site(work, "dns")
     site.set_edge(dns={HOST: [WRONG]})
     result = site.install(bundle, [], tty=True, keys=f"2\n{HOST}\n\n")
-    check(
-        result.rc != 0 and "router/NAT" in result.out and "Choice [2]" in result.out,
-        "DNS mismatch did not offer default-stop NAT authorization",
-        result,
-    )
-    for needle in (HOST, WRONG, "fix DNS"):
-        check(needle in result.out, f"NAT decline output missing {needle}", result)
-    check(site.pristine(), "DNS mismatch mutated HOME", result)
-    check(
-        not site.wss_calls() and not any("enable" in e for e in site.events_list()),
-        "DNS mismatch reached edge/provisioning",
-    )
-    check(not (site.edge_root / "etc/imp").exists(), "DNS mismatch created edge state")
-    result = site.install(bundle, ["--connection", "direct", "--hostname", HOST])
-    check(
-        result.rc != 0 and "--behind-nat" in result.out and site.pristine(),
-        "noninteractive mismatch inferred NAT",
-        result,
-    )
+    check(result.rc != 0 and "router/NAT" in result.out and site.pristine(),
+          "interactive hostname selection skipped NAT authorization", result)
     for addresses in ([WRONG, GLOBAL], [WRONG, "2606:2800:220:1::1"], ["100.64.1.2"]):
         site.set_edge(dns={HOST: addresses})
         result = site.install(
             bundle, ["--connection", "direct", "--hostname", HOST, "--behind-nat"], tty=True
         )
-        check(
-            result.rc != 0 and site.pristine() and not site.wss_calls(),
-            f"invalid NAT DNS mutated installation: {addresses}",
-            result,
-        )
-    site.set_edge(dns={HOST: ["10.0.0.5"]})
-    result = site.install(bundle, ["--connection", "direct", "--hostname", HOST], tty=True)
-    check(
-        result.rc != 0 and "non-public" in result.out and site.pristine(),
-        "private DNS answer accepted",
-        result,
-    )
+        check(result.rc != 0 and site.pristine() and not site.wss_calls(),
+              f"invalid explicit NAT DNS mutated installation: {addresses}", result)
     shutil.rmtree(site.root)
 
     print("=== fresh interactive SSH (builds the runtime) ===")
@@ -1587,9 +1688,13 @@ def run_all(work, shipping, next_shipping):
         )
 
     print("=== NAT explicit/interactive authorization, loopback handoff, and preservation ===")
-    for authorized in (True, False):
+    for authorized, updates in (
+        (True, {"addrs": ["192.168.1.12"]}),
+        *((False, updates) for _, updates, _ in eligible),
+        (False, {"dns_sequence": [{HOST: [WRONG]}, {HOST: ["1.1.1.1"]}]}),
+    ):
         site.reset()
-        site.set_edge(dns={HOST: [WRONG]}, addrs=["192.168.1.12"])
+        site.set_edge(dns={HOST: [WRONG]}, **updates)
         result = direct(behind_nat=authorized, keys="" if authorized else "1\n")
         check(result.rc == 0 and "Imp Direct WSS is ready." in result.out, "NAT Direct failed", result)
         check(
@@ -1597,6 +1702,16 @@ def run_all(work, shipping, next_shipping):
             "explicit NAT prompted or interactive mismatch skipped authorization",
             result,
         )
+        events = site.events_list()
+        dns_event = f"edge dns {HOST} --behind-nat rc=0"
+        check(dns_event in events and events.index(dns_event) < events.index("edge enable rc=0")
+              and (f"edge preflight {HOST} rc=0" in events) == (not authorized),
+              "NAT did not revalidate DNS before enabling the edge", result)
+        if not authorized:
+            check(events.index(f"edge preflight {HOST} rc=0") < events.index(dns_event)
+                  and "TCP 443 is forwarded here" in result.out
+                  and WRONG in result.out and HOST in result.out,
+                  "NAT authorization omitted observed facts or explicit forwarding affirmation", result)
         check(
             site.wss_calls()[0]["argv"]
             == ["setup", "--public-url", f"wss://{HOST}/state", "--verify-via-loopback"]
@@ -1635,7 +1750,7 @@ def run_all(work, shipping, next_shipping):
                 edge_state
                 == (site.marker(), site.unit_state(), (site.edge_root / "etc/imp/Caddyfile").read_text())
                 and not site.wss_calls()
-                and not any(e.startswith(("edge enable", "edge dns")) for e in site.events_list()),
+                and not any(e.startswith(("edge enable", "edge dns", "edge preflight")) for e in site.events_list()),
                 "NAT upgrade reprovisioned edge or claimed a new handoff",
                 result,
             )
@@ -2046,12 +2161,20 @@ def run_all(work, shipping, next_shipping):
             result,
         )
         check(
-            not any(e.startswith(("edge dns", "edge enable")) for e in site.events_list()),
+            not any(e.startswith(("edge preflight", "edge dns", "edge enable")) for e in site.events_list()),
             "existing credential touched the edge",
         )
         check(site.gateway_state() == (True, True), "existing credential changed gateway state", result)
 
     print("=== new Direct: success, route isolation, inherited TTY ===")
+    site.reset()
+    site.set_edge(dns={HOST: [GLOBAL, "2606:2800:220:1::1"]},
+                  addrs=[GLOBAL, "2606:2800:220:1::1"])
+    result = direct()
+    check(result.rc == 0 and "Choice [2]" not in result.out
+          and site.marker()["behind_nat"] is False
+          and site.wss_calls()[0]["argv"] == ["setup", "--public-url", f"wss://{HOST}/state"],
+          "matching dual-stack Direct was rejected or selected NAT", result)
     site.reset()
     result = direct()
     check(result.rc == 0 and "Imp Direct WSS is ready." in result.out, "Direct install failed", result)
@@ -2063,7 +2186,7 @@ def run_all(work, shipping, next_shipping):
     events = [e.split(" rc=")[0] for e in site.events_list()]
     expected = [
         "edge hostname " + HOST,
-        "edge dns " + HOST,
+        "edge preflight " + HOST,
         "edge enable",
         f"wss setup --public-url wss://{HOST}/state",
         "edge commit",
