@@ -426,9 +426,11 @@ hostname and topology, no pending transaction, intact stock masks, and an exact
 loaded public-edge unit that is disabled, inactive and has PID 0. It validates
 the current policy before activation and keeps one enable journal through the
 existing setup/token handoff and commit. Each new Direct installer attempt
-assigns that journal a fresh transaction ID; its automatic commit and cleanup
-rollback require that same ID. Refusing an older or replaced journal cannot
-authorize cleanup to change it. Setup generates a new token; it does
+assigns that journal a fresh transaction ID. Automatic commit requires a matching
+pending journal; a disappeared or already-cleared journal is an error, not proof
+of successful installation. Guarded rollback still does nothing when no journal
+remains. Refusing an older or replaced journal cannot authorize cleanup to
+change it. Setup generates a new token; it does
 not recover the lost token or digest. Previously paired desktops need the new
 token. The user gateway must be inactive for setup; its active-gateway refusal
 is unchanged. Do not delete a retained credential to force this flow.

@@ -2348,7 +2348,7 @@ def test_transaction_retained_through_enable_publications_and_owned_recovery(
     if baseline is not None and op == "rollback":
         assert (Path(edge.MARKER).read_bytes(), Path(edge.CADDYFILE).read_bytes()) == baseline
     fake.calls.clear()
-    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == 0
+    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == (1 if op == "commit" else 0)
     assert not fake.calls
 
 
@@ -2380,9 +2380,110 @@ def test_enable_failure_cleanup_does_not_undo_replaced_transaction(
 
 
 @pytest.mark.parametrize("op", ["commit", "rollback"])
-def test_guarded_recovery_absent_state_is_noop(fake: Fake, op: str) -> None:
-    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == 0
-    assert not fake.calls and not Path(edge.IMP_DIR).exists()
+@pytest.mark.parametrize("transaction", [None, TRANSACTION])
+@pytest.mark.parametrize("unprivileged", [False, True])
+def test_recovery_absent_state_requires_pending_only_for_guarded_commit(
+    fake: Fake,
+    op: str,
+    transaction: str | None,
+    unprivileged: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    args = [op, str(UID), *(["--transaction", transaction] if transaction is not None else [])]
+    refused = op == "commit" and transaction is not None
+    assert edge.main(args) == (1 if refused else 0)
+    if refused:
+        assert "no pending Direct edge transaction to commit" in capsys.readouterr().err
+    assert not fake.calls and not fake.sudo_calls
+    assert not Path(edge.IMP_DIR).exists()
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+@pytest.mark.parametrize("transaction", [None, TRANSACTION])
+@pytest.mark.parametrize("unprivileged", [False, True])
+def test_recovery_committed_state_requires_pending_only_for_guarded_commit(
+    fake: Fake,
+    op: str,
+    transaction: str | None,
+    unprivileged: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    assert edge.main(["commit", str(UID), "--transaction", TRANSACTION]) == 0
+    assert fake.marker()["pending"] is None
+    paths = [edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH, *edge.STOCK_UNITS]
+    before = [(Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths]
+    state = fake.state()
+    fake.calls.clear()
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    args = [op, str(UID), *(["--transaction", transaction] if transaction is not None else [])]
+    refused = op == "commit" and transaction is not None
+    assert edge.main(args) == (1 if refused else 0)
+    if refused:
+        assert "no pending Direct edge transaction to commit" in capsys.readouterr().err
+    assert [
+        (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+    ] == before
+    assert fake.state() == state
+    assert not fake.calls and not fake.sudo_calls
+
+
+def test_guarded_commit_rechecks_pending_under_root_lock_after_manual_rollback(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    paths = [edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH, *edge.STOCK_UNITS]
+    expected: list[tuple[int, int, bytes]] = []
+    lock = edge._lock
+    locked = False
+
+    @contextlib.contextmanager
+    def tracked_lock(*, create: bool) -> Any:
+        nonlocal locked
+        with lock(create=create):
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+
+    inspect = edge._inspect
+
+    def inspect_locked(uid: int) -> tuple[str, dict[str, Any] | None]:
+        assert locked
+        return inspect(uid)
+
+    requested = ["commit", str(UID), "--transaction", TRANSACTION]
+
+    def sudo(args: list[str], *, interactive: bool) -> int:
+        assert args == requested and not locked and not interactive
+        fake.sudo_calls.append((args, interactive))
+        monkeypatch.setattr(edge, "_euid", lambda: 0)
+        assert edge.main(["rollback", str(UID)]) == 0
+        assert fake.marker()["pending"] is None
+        assert fake.state() == (False, False)
+        expected.extend(
+            (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+        )
+        fake.calls.clear()
+        return edge.main(args)
+
+    monkeypatch.setattr(edge, "_lock", tracked_lock)
+    monkeypatch.setattr(edge, "_inspect", inspect_locked)
+    monkeypatch.setattr(edge, "_sudo", sudo)
+    assert edge.main(requested) == 1
+    assert "no pending Direct edge transaction to commit" in capsys.readouterr().err
+    assert fake.sudo_calls == [(requested, False)]
+    assert [
+        (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+    ] == expected
+    assert fake.state() == (False, False) and not fake.calls
 
 
 @pytest.mark.parametrize("op", ["commit", "rollback"])

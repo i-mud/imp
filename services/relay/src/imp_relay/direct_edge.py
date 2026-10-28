@@ -806,7 +806,11 @@ def _restore_pending(uid: int, marker: dict[str, Any]) -> None:
     _write_marker(uid, marker["hostname"], None, _nat(marker), version=marker["version"])
 
 
-def _check_transaction(marker: dict[str, Any] | None, transaction: str | None) -> None:
+def _check_transaction(
+    marker: dict[str, Any] | None, transaction: str | None, *, require_pending: bool = False
+) -> None:
+    if transaction is not None and require_pending and (marker is None or marker["pending"] is None):
+        raise EdgeError("no pending Direct edge transaction to commit; nothing changed")
     if (
         transaction is not None
         and marker is not None
@@ -952,7 +956,7 @@ def _commit(uid: int, transaction: str | None = None) -> None:
     with _lock(create=False):
         status, marker = _inspect(uid)
         _recovery_check(status, marker)
-        _check_transaction(marker, transaction)
+        _check_transaction(marker, transaction, require_pending=True)
         if status == "owned" and marker is not None and marker["pending"]:
             if marker["pending"]["prep"] is not None:
                 raise EdgeError("Direct edge preparation did not finish; roll it back, then enable again")
@@ -1200,7 +1204,7 @@ def _dispatch(args: list[str]) -> int:
                 _preflight_fresh()
         else:
             _recovery_check(status, marker)
-            _check_transaction(marker, transaction)
+            _check_transaction(marker, transaction, require_pending=cmd == "commit")
             if status != "owned" or marker is None:
                 if cmd == "disable":
                     print("no Imp-owned Direct edge; nothing changed")

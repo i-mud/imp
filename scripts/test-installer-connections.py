@@ -476,6 +476,7 @@ def edge_driver(args):
     mod._run = run
     mod._resolve = resolve
     mod._https_status = https_status
+    mod._sudo = sudo
     if args[:1] == ["migrate"] and load().get("migration_fail") == "publication":
         original_atomic = mod._atomic
 
@@ -503,7 +504,19 @@ def edge_driver(args):
         state["replacement_sudo_calls"] = state.get("sudo_calls", 0)
         state["replacement_call_count"] = len(state["calls"])
         save(state)
-    mod._sudo = sudo
+    if args[:1] == ["commit"] and os.environ.get("IMP_TEST_ROLLBACK_BEFORE_COMMIT"):
+        actor_rc = mod.main(["rollback", args[1]])
+        with open(os.environ["IMP_TEST_EVENTS"], "a") as events:
+            events.write(f"manual rollback rc={actor_rc}\n")
+        state = load()
+        state["rollback_actor_rc"] = actor_rc
+        state["rollback_actor_tree"] = {
+            path: data.hex() if isinstance(data, bytes) else data
+            for path, data in home_tree(root).items()
+        }
+        state["rollback_actor_sudo_calls"] = state.get("sudo_calls", 0)
+        state["rollback_actor_call_count"] = len(state["calls"])
+        save(state)
     publication = os.environ.get("IMP_TEST_PUBLICATION_SIGNAL")
     if publication and args[:1] == ["enable"]:
         original_atomic = mod._atomic
@@ -3047,6 +3060,48 @@ def run_all(work, shipping, next_shipping):
             and (site.home / ".local/share/imp/current").is_symlink()
             and site.gateway_state() == (True, True),
             f"{boundary}: refused cleanup lost the handed-off credential/runtime",
+            result,
+        )
+
+    print("=== manual rollback after handoff refuses guarded commit without pending journal ===")
+    for version in (1, 2):
+        edge_tree = retained_legacy(version)
+        result = direct(behind_nat=version == 2, extra={"IMP_TEST_ROLLBACK_BEFORE_COMMIT": "1"})
+        transaction = installer_transaction(site, ["enable", "commit", "rollback"], result)
+        state, events, calls = site.edge(), site.events_list(), site.wss_calls()
+        check(
+            result.rc != 0 and "Imp Direct WSS is ready" not in result.out
+            and "edge commit rc=1" in events and "edge rollback rc=0" in events
+            and state["rollback_actor_rc"] == 0
+            and events.index("token-generated") < events.index("manual rollback rc=0")
+            < events.index("edge commit rc=1") < events.index("edge rollback rc=0")
+            and len(calls) == 1 and calls[0]["edge_version"] == version
+            and calls[0]["edge_pending"]["transaction"] == transaction,
+            f"v{version}: cleared journal let installer commit or bypassed post-handoff rollback race",
+            result,
+        )
+        after = home_tree(site.edge_root)
+        check(
+            site.unit_state() == (False, False) and site.marker()["pending"] is None
+            and after == edge_tree
+            and {path: data.hex() if isinstance(data, bytes) else data for path, data in after.items()}
+            == state["rollback_actor_tree"]
+            and state["sudo_calls"] == state["rollback_actor_sudo_calls"]
+            and all(call.split()[0] in ("is-enabled", "is-active", "show")
+                    for call in (entry.removeprefix("systemctl ")
+                                 for entry in state["calls"][state["rollback_actor_call_count"]:])),
+            f"v{version}: commit/absent-journal cleanup mutated root state after manual rollback",
+            result,
+        )
+        tokens = re.findall(r"PAIRING-TOKEN:(\S+)", result.out)
+        check(
+            len(tokens) == 1 and events.count("token-generated") == 1
+            and site.config().read_text() == f"IMP_GATEWAY_TOKEN_SHA256={hashlib.sha256(tokens[0].encode()).hexdigest()}\n"
+            and (site.home / ".local/share/imp/current").is_symlink()
+            and site.gateway_state() == (True, True)
+            and all((site.home / ".config/systemd/user" / name).is_file()
+                    for name in ("imp-relay.service", "imp-feed.service", "imp-gateway.service")),
+            f"v{version}: cleared-journal commit failure lost handed-off credential/runtime",
             result,
         )
     print("=== NAT pre-handoff failure rolls back; post-handoff failure retains identity ===")

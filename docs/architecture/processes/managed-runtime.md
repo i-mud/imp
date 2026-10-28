@@ -89,8 +89,10 @@ recognizes only the precise stopped baseline and exact old/current templates.
 It remains pending across policy validation, activation and the existing
 new-token handoff; successful commit publishes schema 3. Installer enable
 journals include a per-invocation transaction ID, checked before sudo and again
-under the root lock by guarded commit/rollback. Automatic cleanup cannot act on
-an older or replaced transaction. Rollback proves strict quiescence before
+under the root lock by guarded commit/rollback. Guarded commit requires a
+matching pending journal; absence is a failure. Guarded rollback remains a no-op
+when the journal is absent. Automatic cleanup cannot act on an older or replaced
+transaction. Rollback proves strict quiescence before
 restoring legacy policy and marker bytes. Existing journals are not permission
 to resume setup, and no credential is reconstructed. Deliberate manual recovery
 without an ID and ordinary policy-only migration retain their existing behavior.
