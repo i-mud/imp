@@ -1,6 +1,7 @@
 """Manage the dedicated Imp Caddy edge for Direct WSS.
 
-Commands: hostname HOST | dns HOST | enable HOST UID | commit UID | rollback UID | disable UID.
+Commands: hostname HOST | dns HOST | preflight HOST | enable HOST UID |
+commit UID | rollback UID | disable UID.
 No credential ever enters this helper. Mutations run as root (via sudo) and are
 recorded as a pending transaction in a root-owned marker until `commit`.
 """
@@ -269,37 +270,54 @@ def _resolve(host: str) -> list[str]:
 def _local_addresses() -> set[_IP]:
     try:
         data = json.loads(_cmd("ip", "-j", "address", "show", "scope", "global"))
-        # iproute2 can emit an empty addr_info entry (observed on a Linode); it carries no address.
-        found = {ipaddress.ip_address(a["local"]) for i in data for a in i.get("addr_info", []) if a}
+        if not isinstance(data, list):
+            raise ValueError
+        found: set[_IP] = set()
+        for interface in data:
+            if not isinstance(interface, dict) or not isinstance(interface.get("addr_info"), list):
+                raise ValueError
+            for address in interface["addr_info"]:
+                if not isinstance(address, dict):
+                    raise ValueError
+                # iproute2 can emit an empty entry (observed on a Linode); it carries no address.
+                if not address:
+                    continue
+                if not isinstance(address.get("local"), str):
+                    raise ValueError
+                found.add(ipaddress.ip_address(address["local"]))
     except (ValueError, TypeError, KeyError, AttributeError):
         raise EdgeError("could not read this server's addresses") from None
     return {ip for ip in found if ip.is_global}
 
 
-def _nat_candidate(host: str) -> str:
-    """The one global IPv4 A of a NAT hostname; any AAAA, extra, or non-global answer is refused."""
+def _dns_addresses(host: str) -> set[_IP]:
     try:
-        resolved = [ipaddress.ip_address(a) for a in _resolve(host)]
+        return {ipaddress.ip_address(a) for a in _resolve(host)}
     except ValueError:
         raise EdgeError(f"{host} resolved to an unparseable address") from None
+
+
+def _nat_candidate(host: str, resolved: set[_IP] | None = None) -> str:
+    """The one global IPv4 A of a NAT hostname; any AAAA, extra, or non-global answer is refused."""
+    if resolved is None:
+        resolved = _dns_addresses(host)
     if any(ip.version != 4 for ip in resolved):
         raise EdgeError(f"{host} has an AAAA record; behind NAT it must have one global IPv4 A record only")
     if len(resolved) != 1:
         raise EdgeError(f"{host} needs exactly one global IPv4 A record behind NAT, found {len(resolved)}")
-    ip = resolved[0]
+    ip = next(iter(resolved))
     if not ip.is_global or ip.is_multicast or ip.is_reserved:
         raise EdgeError(f"{host} resolves to non-global address {ip}; behind NAT it must be your public IPv4")
     return str(ip)
 
 
-def _check_dns(host: str, behind_nat: bool = False) -> None:
-    if behind_nat:
-        _nat_candidate(host)
-        return
-    try:
-        resolved = {ipaddress.ip_address(a) for a in _resolve(host)}
-    except ValueError:
-        raise EdgeError(f"{host} resolved to an unparseable address") from None
+class _AddressMismatch(EdgeError):
+    def __init__(self, message: str, status: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _check_direct_dns(host: str, resolved: set[_IP]) -> None:
     if not resolved:
         raise EdgeError(f"{host} does not resolve in DNS; create an A/AAAA record for this server")
     shown = ", ".join(sorted(map(str, resolved)))
@@ -310,13 +328,41 @@ def _check_dns(host: str, behind_nat: bool = False) -> None:
         )
     local = _local_addresses()
     if not local:
-        raise _refuse("this server has no globally routable address assigned (NAT, proxy or private hosting)")
+        raise _AddressMismatch(
+            str(
+                _refuse(
+                    "this server has no globally routable address assigned (NAT, proxy or private hosting)"
+                )
+            ),
+            "nat-no-public",
+        )
     if not resolved <= local:
-        raise EdgeError(
+        raise _AddressMismatch(
             f"{host} resolves to: {shown}\n"
             f"this server addresses: {', '.join(sorted(map(str, local)))}\n"
-            f"update DNS so {host} resolves only to this server, then rerun: {_rerun(host)}"
+            f"update DNS so {host} resolves only to this server, then rerun: {_rerun(host)}",
+            "nat-mismatch",
         )
+
+
+def _check_dns(host: str, behind_nat: bool = False) -> None:
+    if behind_nat:
+        _nat_candidate(host)
+        return
+    _check_direct_dns(host, _dns_addresses(host))
+
+
+def _preflight(host: str) -> str:
+    resolved = _dns_addresses(host)
+    try:
+        _check_direct_dns(host, resolved)
+    except _AddressMismatch as mismatch:
+        try:
+            address = _nat_candidate(host, resolved)
+        except EdgeError:
+            raise mismatch from None
+        return f"{mismatch.status} {address}"
+    return "direct"
 
 
 def _walk(directory: str) -> bool:
@@ -949,14 +995,14 @@ def _migrate(uid: int) -> None:
 
 
 _USAGE = (
-    "usage: imp-direct-edge hostname HOST | dns HOST [--behind-nat] | nat-candidate HOST | "
+    "usage: imp-direct-edge hostname HOST | dns HOST [--behind-nat] | preflight HOST | "
     "enable HOST UID [--behind-nat] | commit UID | rollback UID | disable UID | owned-hostname UID | "
     "ssh-committed HOST UID | migration-needed UID | migrate UID"
 )
 _ARITY = {
     "hostname": 1,
     "dns": 1,
-    "nat-candidate": 1,
+    "preflight": 1,
     "enable": 2,
     "commit": 1,
     "rollback": 1,
@@ -976,14 +1022,14 @@ def _dispatch(args: list[str]) -> int:
     if not args or args[0] not in _ARITY or len(args) - 1 != _ARITY[args[0]]:
         raise EdgeError(_USAGE)
     cmd = args[0]
-    host = args[1] if cmd in ("hostname", "dns", "nat-candidate", "enable", "ssh-committed") else ""
-    if cmd in ("hostname", "dns", "nat-candidate", "enable", "ssh-committed") and not _valid_host(host):
+    host = args[1] if cmd in ("hostname", "dns", "preflight", "enable", "ssh-committed") else ""
+    if cmd in ("hostname", "dns", "preflight", "enable", "ssh-committed") and not _valid_host(host):
         raise EdgeError("hostname must be a lowercase ASCII public domain name (no URL, port, IP or spaces)")
     if cmd == "hostname":
         return 0
-    if cmd == "nat-candidate":
+    if cmd == "preflight":
         _check_platform()
-        print(_nat_candidate(host))
+        print(_preflight(host))
         return 0
     if cmd == "dns":
         _check_platform()

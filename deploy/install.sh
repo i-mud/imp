@@ -260,20 +260,29 @@ if [[ "$CONNECTION" == direct ]] && ((!DIRECT_HAS_CREDENTIAL)); then
   if ((BEHIND_NAT)); then
     DIRECT_EDGE_OPTIONS=(--behind-nat)
     "$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" "${DIRECT_EDGE_OPTIONS[@]}"
-  elif dns_error="$("$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" 2>&1)"; then
-    printf '%s\n' "$dns_error"
-  elif [[ -t 0 && -t 1 ]] &&
-       nat_address="$("$BUNDLE_DIR/bin/imp-server" direct-edge nat-candidate "$PUBLIC_HOSTNAME" 2>/dev/null)"; then
-    printf '\n%s resolves to %s, but that address is not assigned\ndirectly to this machine.\n\n' "$PUBLIC_HOSTNAME" "$nat_address"
-    printf 'Is this machine behind a router/NAT with TCP port 443 forwarded here?\n\n1. Yes, use NAT / port-forwarded Direct\n2. No, stop and fix DNS\n'
-    read -r -p 'Choice [2]: ' nat_choice || die "NAT selection interrupted"
-    [[ "$nat_choice" == 1 ]] || die "Direct stopped; fix DNS or forward TCP 443 and rerun with --behind-nat"
-    BEHIND_NAT=1
-    DIRECT_EDGE_OPTIONS=(--behind-nat)
-    "$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" "${DIRECT_EDGE_OPTIONS[@]}"
+  elif preflight="$("$BUNDLE_DIR/bin/imp-server" direct-edge preflight "$PUBLIC_HOSTNAME")"; then
+    case "$preflight" in
+      direct) ;;
+      nat-mismatch\ *|nat-no-public\ *)
+        nat_address="${preflight#* }"
+        if [[ "$preflight" == nat-mismatch\ * ]]; then
+          printf '\n%s resolves to %s, but that address is not assigned\ndirectly to this machine.\n' "$PUBLIC_HOSTNAME" "$nat_address"
+        else
+          printf '\n%s resolves to %s; this machine has no public interface address.\n' "$PUBLIC_HOSTNAME" "$nat_address"
+        fi
+        [[ -t 0 && -t 1 ]] ||
+          die "Direct preflight requires an interactive topology decision; rerun from a terminal"
+        printf '\nA router/NAT or another external network topology may explain this.\nIs TCP port 443 forwarded to this machine?\n\n1. Yes, TCP 443 is forwarded here; use NAT / port-forwarded Direct\n2. No, stop and check DNS/network configuration\n'
+        read -r -p 'Choice [2]: ' nat_choice || die "NAT selection interrupted"
+        [[ "$nat_choice" == 1 ]] || die "Direct stopped; check DNS/network configuration and TCP 443 forwarding"
+        BEHIND_NAT=1
+        DIRECT_EDGE_OPTIONS=(--behind-nat)
+        "$BUNDLE_DIR/bin/imp-server" direct-edge dns "$PUBLIC_HOSTNAME" "${DIRECT_EDGE_OPTIONS[@]}"
+        ;;
+      *) die "unexpected Direct preflight result; check the server bundle and rerun" ;;
+    esac
   else
-    printf '%s\n' "$dns_error" >&2
-    die "Direct DNS preflight failed; NAT requires explicit --behind-nat and one global A record with no AAAA"
+    die "Direct preflight failed; verify DNS and iproute2 ('ip -j address show scope global'), correct the reported error, and rerun"
   fi
   [[ -t 0 && -t 1 ]] || die "new Direct provisioning requires interactive stdin and stdout; rerun from a terminal"
   if ((BEHIND_NAT)); then

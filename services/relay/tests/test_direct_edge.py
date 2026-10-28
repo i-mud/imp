@@ -26,6 +26,7 @@ GLOBAL_V6 = "2606:2800:220:1::1"
 REAL_SUDO = edge._sudo
 REAL_HTTPS_STATUS = edge._https_status
 REAL_RUN = edge._run
+REAL_RESOLVE = edge._resolve
 
 
 class Fake:
@@ -192,7 +193,7 @@ def owned_enabled(fake: Fake) -> None:
     ],
 )
 def test_malformed_hostnames_rejected(fake: Fake, host: str, capsys: pytest.CaptureFixture[str]) -> None:
-    for cmd in (["hostname", host], ["dns", host], ["enable", host, str(UID)]):
+    for cmd in (["hostname", host], ["dns", host], ["preflight", host], ["enable", host, str(UID)]):
         assert edge.main(cmd) == 1
     assert not fake.calls
 
@@ -248,6 +249,234 @@ def test_dns_failure_rejected(fake: Fake, monkeypatch: pytest.MonkeyPatch) -> No
     assert edge.main(["dns", HOST]) == 1
 
 
+@pytest.fixture
+def readonly(fake: Fake, monkeypatch: pytest.MonkeyPatch) -> Callable[[list[str]], int]:
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
+        raise AssertionError("read-only preflight reached a privilege or mutation boundary")
+
+    for name in ("_euid", "_sudo", "_lock"):
+        monkeypatch.setattr(edge, name, forbidden)
+
+    def invoke(args: list[str]) -> int:
+        before = {
+            p.relative_to(fake.root): p.read_bytes() if p.is_file() else None for p in fake.root.rglob("*")
+        }
+        result = edge.main(args)
+        after = {
+            p.relative_to(fake.root): p.read_bytes() if p.is_file() else None for p in fake.root.rglob("*")
+        }
+        assert after == before
+        assert fake.state() == (False, False) and not fake.sudo_calls
+        assert all(call == ("ip", "-j", "address", "show", "scope", "global") for call in fake.calls)
+        return result
+
+    return invoke
+
+
+@pytest.mark.parametrize(
+    ("answers", "local", "expected"),
+    [
+        ([GLOBAL_V4], [GLOBAL_V4], "direct"),
+        ([GLOBAL_V4, GLOBAL_V6], [GLOBAL_V4, GLOBAL_V6], "direct"),
+        (["8.8.8.8"], [GLOBAL_V4], "nat-mismatch 8.8.8.8"),
+        (["8.8.8.8"], ["10.1.2.3"], "nat-no-public 8.8.8.8"),
+        (["8.8.8.8"], [], "nat-no-public 8.8.8.8"),
+    ],
+)
+def test_preflight_classifies_once_readonly(
+    fake: Fake,
+    readonly: Callable[[list[str]], int],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    answers: list[str],
+    local: list[str],
+    expected: str,
+) -> None:
+    fake.local = local
+    fake.empty_addr_info = True
+    lookups: list[str] = []
+
+    def resolve(host: str) -> list[str]:
+        lookups.append(host)
+        return list(answers)
+
+    monkeypatch.setattr(edge, "_resolve", resolve)
+    for _ in range(2):
+        assert readonly(["preflight", HOST]) == 0
+        captured = capsys.readouterr()
+        assert captured.out == expected + "\n" and captured.err == ""
+    assert lookups == [HOST, HOST]
+    assert len(fake.calls) == 2
+
+
+@pytest.mark.parametrize("data", [[], [{"addr_info": []}], [{"addr_info": [{}]}]])
+def test_preflight_successfully_empty_interfaces_allow_nat(
+    fake: Fake,
+    readonly: Callable[[list[str]], int],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    data: Any,
+) -> None:
+    monkeypatch.setattr(
+        edge, "_run", lambda args, timeout=120: SimpleNamespace(returncode=0, stdout=json.dumps(data))
+    )
+    assert readonly(["preflight", HOST]) == 0
+    assert capsys.readouterr().out == f"nat-no-public {GLOBAL_V4}\n"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{",
+        "{}",
+        "null",
+        '""',
+        "0",
+        "false",
+        "[null]",
+        "[false]",
+        "[0]",
+        "[[]]",
+        "[{}]",
+        '[{"addr_info": null}]',
+        '[{"addr_info": {}}]',
+        '[{"addr_info": ""}]',
+        '[{"addr_info": [null]}]',
+        '[{"addr_info": [false]}]',
+        '[{"addr_info": [0]}]',
+        '[{"addr_info": [""]}]',
+        '[{"addr_info": [[]]}]',
+        '[{"addr_info": [{"family": "inet"}]}]',
+        '[{"addr_info": [{"local": null}]}]',
+        '[{"addr_info": [{"local": false}]}]',
+        '[{"addr_info": [{"local": 134744072}]}]',
+        '[{"addr_info": [{"local": []}]}]',
+        '[{"addr_info": [{"local": ""}]}]',
+        '[{"addr_info": [{"local": "134744072"}]}]',
+        '[{"addr_info": [{"local": "broken"}]}]',
+        '[{"addr_info": [{"local": "999.1.2.3"}]}]',
+        '[{"addr_info": [{"local": "8.8.8.8/32"}]}]',
+        '[{"addr_info": [{"local": "8.8.8.8"}, false]}]',
+        '[{"addr_info": [{"local": "8.8.8.8"}]}, {}]',
+    ],
+)
+def test_malformed_interfaces_never_allow_nat_or_enable(
+    fake: Fake,
+    readonly: Callable[[list[str]], int],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    payload: str,
+) -> None:
+    def run(args: list[str], timeout: float = 120) -> SimpleNamespace:
+        fake.calls.append(tuple(args))
+        return SimpleNamespace(returncode=0, stdout=payload)
+
+    monkeypatch.setattr(edge, "_run", run)
+    for command in ("preflight", "dns"):
+        assert readonly([command, HOST]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == "" and "could not read this server's addresses" in captured.err
+    # The privileged revalidation uses the same strict discovery before creating its lock or files.
+    monkeypatch.setattr(edge, "_euid", lambda: 0)
+    assert enable() == 1
+    assert not os.path.exists(edge.IMP_DIR) and fake.state() == (False, False)
+    assert all(call[0] == "ip" for call in fake.calls)
+
+
+@pytest.mark.parametrize("failure", ["missing", "permission", "nonzero", "timeout"])
+def test_preflight_ip_failure_never_allows_nat(
+    fake: Fake,
+    readonly: Callable[[list[str]], int],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    def run(args: list[str], **kwargs: Any) -> SimpleNamespace:
+        fake.calls.append(tuple(args))
+        if failure == "missing":
+            raise FileNotFoundError("ip missing")
+        if failure == "permission":
+            raise PermissionError("ip not executable")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        return SimpleNamespace(returncode=1, stdout="", stderr="inspection denied")
+
+    monkeypatch.setattr(edge, "_run", REAL_RUN)
+    monkeypatch.setattr(subprocess, "run", run)
+    assert readonly(["preflight", HOST]) == 1
+    captured = capsys.readouterr()
+    expected = "ip -j failed: inspection denied" if failure == "nonzero" else "could not run ip"
+    assert captured.out == "" and expected in captured.err
+    assert len(fake.calls) == 1
+    assert readonly(["dns", HOST, "--behind-nat"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{HOST} resolves to one public IPv4\n" and captured.err == ""
+    assert len(fake.calls) == 1
+
+
+@pytest.mark.parametrize("answers", [[], ["10.1.2.3"], ["127.0.0.1"], ["fd00::1"], ["broken"]])
+def test_preflight_invalid_dns_never_allows_nat(
+    fake: Fake,
+    readonly: Callable[[list[str]], int],
+    capsys: pytest.CaptureFixture[str],
+    answers: list[str],
+) -> None:
+    fake.dns = answers
+    assert readonly(["preflight", HOST]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err
+    assert not fake.calls
+
+
+def test_preflight_dns_failure_preserves_diagnostic(
+    readonly: Callable[[list[str]], int],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> NoReturn:
+        raise socket.gaierror("resolver unavailable")
+
+    monkeypatch.setattr(edge, "_resolve", REAL_RESOLVE)
+    monkeypatch.setattr(socket, "getaddrinfo", fail)
+    assert readonly(["preflight", HOST]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"{HOST} does not resolve in DNS; create an A/AAAA record for this server" in captured.err
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [[GLOBAL_V4, "8.8.8.8"], ["8.8.8.8", GLOBAL_V6], [GLOBAL_V6]],
+)
+@pytest.mark.parametrize("local", [[GLOBAL_V4], []])
+def test_preflight_nat_rejections_preserve_direct_diagnostic(
+    fake: Fake,
+    readonly: Callable[[list[str]], int],
+    capsys: pytest.CaptureFixture[str],
+    answers: list[str],
+    local: list[str],
+) -> None:
+    fake.dns = answers
+    fake.local = local
+    assert readonly(["dns", HOST]) == 1
+    direct = capsys.readouterr()
+    assert readonly(["preflight", HOST]) == 1
+    preflight = capsys.readouterr()
+    assert direct.out == preflight.out == "" and direct.err == preflight.err
+    if local:
+        assert (
+            "this server addresses:" in preflight.err and "./install.sh --connection direct" in preflight.err
+        )
+    else:
+        assert "no globally routable address assigned" in preflight.err
+
+
+def test_removed_nat_candidate_command_rejected(fake: Fake, capsys: pytest.CaptureFixture[str]) -> None:
+    assert edge.main(["nat-candidate", HOST]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "usage:" in captured.err and not fake.calls
+
+
 def test_platform_rejects_other_distro(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     release = tmp_path / "os-release"
     release.write_text("ID=fedora\n")
@@ -298,8 +527,7 @@ def test_nat_dns_accepts_unmatched_single_global_a(fake: Fake, capsys: pytest.Ca
     fake.local = ["10.1.2.3"]  # no local public address is required behind NAT
     fake.dns = ["8.8.8.8"]
     assert edge.main(["dns", HOST, "--behind-nat"]) == 0
-    assert edge.main(["nat-candidate", HOST]) == 0
-    assert capsys.readouterr().out.splitlines()[-1] == "8.8.8.8"
+    assert capsys.readouterr().out == f"{HOST} resolves to one public IPv4\n"
     assert not fake.calls  # read-only: no local address or systemd probing
 
 
@@ -326,13 +554,12 @@ def test_nat_dns_rejects_everything_but_one_global_a(
 ) -> None:
     fake.dns = answers
     assert edge.main(["dns", HOST, "--behind-nat"]) == 1
-    assert edge.main(["nat-candidate", HOST]) == 1
     assert enable(nat=True) == 1
     assert capsys.readouterr().out == "" and not os.path.exists(edge.IMP_DIR)
 
 
 def test_nat_dns_flag_only_on_dns_and_enable(fake: Fake) -> None:
-    for cmd in (["commit", str(UID), "--behind-nat"], ["nat-candidate", HOST, "--behind-nat"]):
+    for cmd in (["commit", str(UID), "--behind-nat"], ["preflight", HOST, "--behind-nat"]):
         assert edge.main(cmd) == 1
     assert not fake.calls
 

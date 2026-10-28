@@ -55,6 +55,12 @@ global IPs or explicitly authorized `--behind-nat` (one global IPv4 A, no AAAA),
 dedicated exact-owned config/unit/marker, and a pending enabled/active rollback
 record. Operator edges are never adopted. NAT config disables HTTP ACME challenges
 but retains TLS-ALPN-01 through the operator's public TCP 443 forward.
+Before offering NAT automatically, a read-only Python preflight must successfully
+inspect interfaces and establish a nonlocal single global IPv4 A with no AAAA.
+A valid empty/private-only interface result may qualify; failed or malformed
+inspection never does. The installer requires explicit TCP 443 forwarding
+confirmation and reruns authoritative NAT DNS validation before proceeding.
+Explicit `--behind-nat` remains independent of interface discovery.
 Trusted HTTPS 404 readiness precedes the installer's direct inherited-terminal
 `imp-direct-wss setup --public-url ...` invocation; NAT adds `--verify-via-loopback`,
 which dials only `127.0.0.1:443` while preserving the public TLS/SNI/Host identity.
