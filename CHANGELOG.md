@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.4] - 2026-10-28
+
+### Bug Fixes
+
+- classify Direct NAT preflight failures correctly ([6e849e4](https://github.com/i-mud/imp/commit/6e849e4ea4bbb3323f1116c1fc5537cf342c635f))
+
 ## [0.4.3] - 2026-10-21
 
 ### Bug Fixes
