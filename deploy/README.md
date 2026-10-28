@@ -413,12 +413,40 @@ handled failure before edge commit. An incomplete restoration retains the journa
 This does not renew public reachability evidence or request a new token, and
 does not promise arbitrary crash/power-loss atomicity.
 
-For an unchanged Imp-owned edge disabled by an SSH transition, an operator can
+For an unchanged current-policy Imp-owned edge disabled by an SSH transition, an operator can
 reactivate `imp-caddy.service` with `sudo systemctl enable --now imp-caddy.service`.
 Enable and start the existing gateway with `systemctl --user enable --now imp-gateway.service`
 before deliberate rotation. For operator-owned public edges, use that edge's
 own lifecycle. Do not assume the hostname requested during an existing-credential
 install was publicly authenticated.
+
+If `gateway.env` is already missing, explicit Direct installation can reuse an
+exact-owned schema-1 Direct or schema-2 NAT edge only with the original UID,
+hostname and topology, no pending transaction, intact stock masks, and an exact
+loaded public-edge unit that is disabled, inactive and has PID 0. It validates
+the current policy before activation and keeps one enable journal through the
+existing setup/token handoff and commit. Each new Direct installer attempt
+assigns that journal a fresh transaction ID; its automatic commit and cleanup
+rollback require that same ID. Refusing an older or replaced journal cannot
+authorize cleanup to change it. Setup generates a new token; it does
+not recover the lost token or digest. Previously paired desktops need the new
+token. The user gateway must be inactive for setup; its active-gateway refusal
+is unchanged. Do not delete a retained credential to force this flow.
+
+Before handoff, rollback of an owned recovery transaction restores the exact
+legacy files and inactive edge. After possible handoff, the installer retains
+the new credential/runtime and closes/restores only its own public-edge
+transaction. A pre-existing or replaced journal is left untouched and reported
+for manual recovery. Rollback proves the public listener stopped before
+restoring legacy policy. Unrelated operator state and changed identity/topology
+are never adopted. No-option and `none` installs do not implicitly create a
+replacement identity.
+An interrupted enable may carry a transaction ID or temporarily pair a legacy
+marker with exact current policy; use the updated bundle for rollback/commit.
+Older helpers do not recognize an identified journal: they change nothing but
+may report success without completing recovery. Manual operator commit/rollback
+without an ID remains available in the updated helper after deliberately
+inspecting the owned state; the ID is not a pairing credential.
 
 The root-owned marker retains pending state if edge restoration is incomplete.
 Manual recovery commands must run from the **extracted bundle directory**.

@@ -155,8 +155,13 @@ def _nat(marker: dict[str, Any]) -> bool:
     return bool(marker.get("behind_nat", False))
 
 
-def _pending(op: str, enabled: bool, active: bool, prep: list[str] | None = None) -> dict[str, Any]:
-    return {"op": op, "prior_enabled": enabled, "prior_active": active, "prep": prep}
+def _pending(
+    op: str, enabled: bool, active: bool, prep: list[str] | None = None, *, transaction: str | None = None
+) -> dict[str, Any]:
+    pending: dict[str, Any] = {"op": op, "prior_enabled": enabled, "prior_active": active, "prep": prep}
+    if transaction is not None:
+        pending["transaction"] = transaction
+    return pending
 
 
 def _marker_bytes(
@@ -166,6 +171,14 @@ def _marker_bytes(
     if version in (2, 3):
         body["behind_nat"] = behind_nat
     return (json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+
+
+def _valid_transaction(transaction: Any) -> bool:
+    return (
+        isinstance(transaction, str)
+        and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", transaction)
+        is not None
+    )
 
 
 def _valid_host(host: str) -> bool:
@@ -420,7 +433,14 @@ def _parse_marker(data: bytes, uid: int) -> dict[str, Any] | None:
                 pending is None
                 or (
                     set(pending)
-                    == _PENDING_KEYS | ({"prior_marker", "prior_caddyfile"} if migration else set())
+                    == _PENDING_KEYS
+                    | ({"prior_marker", "prior_caddyfile"} if migration else set())
+                    | ({"transaction"} if "transaction" in pending else set())
+                    and (
+                        "transaction" not in pending
+                        or pending["op"] == "enable"
+                        and _valid_transaction(pending["transaction"])
+                    )
                     and pending["op"] in ("enable", "disable", "migrate")
                     and isinstance(pending["prior_enabled"], bool)
                     and isinstance(pending["prior_active"], bool)
@@ -449,6 +469,15 @@ def _parse_marker(data: bytes, uid: int) -> dict[str, Any] | None:
     except (ValueError, TypeError, KeyError, AttributeError):
         return None
     return marker if valid else None
+
+
+def _legacy_enable(marker: dict[str, Any]) -> bool:
+    pending = marker["pending"]
+    return (
+        marker["version"] in (1, 2)
+        and pending is not None
+        and pending == _pending("enable", False, False, transaction=pending.get("transaction"))
+    )
 
 
 def _inspect(uid: int) -> tuple[str, dict[str, Any] | None]:
@@ -481,6 +510,8 @@ def _inspect(uid: int) -> tuple[str, dict[str, Any] | None]:
             and caddy_data is None
             or migrating
             and caddy_data == marker["pending"]["prior_caddyfile"].encode("ascii")
+            or _legacy_enable(marker)
+            and caddy_data == _caddyfile(marker["hostname"], _nat(marker))
         )
         and (unit_data == _UNIT or preparing and unit_data is None)
     )
@@ -696,7 +727,7 @@ def _verify_edge(host: str, behind_nat: bool = False) -> None:
             break
 
 
-def _restore(pending: dict[str, Any]) -> None:
+def _restore(pending: dict[str, Any], *, require_success: bool = False) -> None:
     """Attempt both prior-state operations, even if one fails; incomplete restoration keeps the journal."""
     prior = (pending["prior_enabled"], pending["prior_active"])
     actions = (
@@ -715,7 +746,9 @@ def _restore(pending: dict[str, Any]) -> None:
         except EdgeError as exc:
             problems.append(str(exc))
     try:
-        if (not problems or pending["op"] != "migrate") and _unit_state(strict=False)[:2] == prior:
+        if (not problems or not require_success and pending["op"] != "migrate") and _unit_state(strict=False)[
+            :2
+        ] == prior:
             return
         problems.append("state differs from the prior state")
     except EdgeError as exc:
@@ -751,6 +784,15 @@ def _restore_pending(uid: int, marker: dict[str, Any]) -> None:
     if pending["prep"] is not None:
         _abort_prep(pending["prep"])
         return
+    if _legacy_enable(marker):
+        _check_masks()
+        _restore(pending, require_success=True)
+        if _unit_state() != (False, False, 0):
+            raise EdgeError("legacy edge rollback did not stop and disable the exact owned unit")
+        _check_listeners(0)
+        _atomic(CADDYFILE, _caddyfile(marker["hostname"], _nat(marker), version=marker["version"]))
+        _write_marker(uid, marker["hostname"], None, _nat(marker), version=marker["version"])
+        return
     if pending["op"] == "migrate":
         _check_masks()
         _unit_state(strict=False)
@@ -764,18 +806,29 @@ def _restore_pending(uid: int, marker: dict[str, Any]) -> None:
     _write_marker(uid, marker["hostname"], None, _nat(marker), version=marker["version"])
 
 
-def _undo(uid: int) -> None:
+def _check_transaction(marker: dict[str, Any] | None, transaction: str | None) -> None:
+    if (
+        transaction is not None
+        and marker is not None
+        and marker["pending"] is not None
+        and marker["pending"].get("transaction") != transaction
+    ):
+        raise EdgeError("pending Direct edge transaction belongs to another invocation; nothing changed")
+
+
+def _undo(uid: int, transaction: str | None = None) -> None:
     """Roll back from persisted state, so it also covers interruptions between steps."""
     status, marker = _inspect(uid)
     _recovery_check(status, marker)
+    _check_transaction(marker, transaction)
     if status == "owned" and marker is not None and marker["pending"]:
         _restore_pending(uid, marker)
 
 
-def _failed(exc: BaseException, uid: int) -> None:
+def _failed(exc: BaseException, uid: int, transaction: str | None = None) -> None:
     with _signal_handlers(signal.SIG_IGN):
         try:
-            _undo(uid)
+            _undo(uid, transaction)
         except EdgeError as undo:
             raise EdgeError(
                 f"{exc or 'interrupted'}; rollback incomplete, pending record kept ({undo})"
@@ -800,60 +853,71 @@ def _admit_enable(status: str, marker: dict[str, Any] | None, host: str, behind_
             raise EdgeError("Imp edge is already configured with a different NAT topology; refusing change")
         _admit_change(marker)
         if marker["version"] != 3:
-            raise EdgeError(
-                "legacy Direct edge must be migrated before enable; "
-                "run ./install.sh without --connection, then retry Direct"
-            )
+            _check_masks()
+            if _unit_state() != (False, False, 0):
+                raise EdgeError("legacy Direct edge must be disabled, inactive and have no MainPID")
+            _check_listeners(0)
 
 
-def _enable(host: str, uid: int, behind_nat: bool = False) -> None:
+def _enable(host: str, uid: int, behind_nat: bool = False, transaction: str | None = None) -> None:
     _check_platform()
     _check_dns(host, behind_nat)
     with _lock(create=True), _signal_handlers(_raise_interrupted):
         status, marker = _inspect(uid)
         _admit_enable(status, marker, host, behind_nat)
         fresh = status == "absent"
+        legacy = marker is not None and marker["version"] in (1, 2)
         prior = (False, False)
         if fresh:
             _preflight_fresh()
         else:
             # Validate the existing owned edge before any write or daemon-reload.
             _check_masks()
-            prior = _unit_state(allow_unloaded=True)[:2]
+            state = _unit_state(allow_unloaded=not legacy)
+            if legacy and state != (False, False, 0):
+                raise EdgeError("legacy Direct edge must be disabled, inactive and have no MainPID")
+            prior = state[:2]
         try:
             # Pre-package journal, durable before any generated file or mask: records which stock
             # masks Imp may create, so rollback can undo exactly those and the files published next.
             prep = [os.path.basename(p) for p in STOCK_UNITS if not _is_mask(p)] if fresh else None
-            _write_marker(uid, host, _pending("enable", *prior, prep), behind_nat)
+            pending = _pending("enable", *prior, prep, transaction=transaction)
+            version = marker["version"] if marker is not None and legacy else 3
+            _write_marker(uid, host, pending, behind_nat, version=version)
             if fresh:
                 for path, data in ((CADDYFILE, _caddyfile(host, behind_nat)), (UNIT_PATH, _UNIT)):
                     _atomic(path, data, exclusive=True)
                 _mask_stock()
-                _write_marker(uid, host, _pending("enable", *prior), behind_nat)  # package boundary
+                _write_marker(uid, host, _pending("enable", *prior, transaction=transaction), behind_nat)
             _ensure_package()
+            if legacy:
+                assert marker is not None
+                marker["pending"] = pending
+                _publish_policy(uid, marker)
             _cmd("systemctl", "daemon-reload")
             _, active, pid = _unit_state()
             _check_listeners(pid if active else 0)
-            _cmd(
-                "runuser",
-                "-u",
-                "caddy",
-                "--",
-                CADDY_BIN,
-                "validate",
-                "--config",
-                CADDYFILE,
-                "--adapter",
-                "caddyfile",
-            )
+            if not legacy:
+                _cmd(
+                    "runuser",
+                    "-u",
+                    "caddy",
+                    "--",
+                    CADDY_BIN,
+                    "validate",
+                    "--config",
+                    CADDYFILE,
+                    "--adapter",
+                    "caddyfile",
+                )
             _cmd("systemctl", "enable", "--now", UNIT_NAME)
             enabled, active, pid = _unit_state()
-            if not (enabled and active):
+            if not (enabled and active) or legacy and pid <= 0:
                 raise EdgeError(f"{UNIT_NAME} did not become enabled and active")
             _check_listeners(pid)
             _verify_edge(host, behind_nat)
         except BaseException as exc:
-            _failed(exc, uid)
+            _failed(exc, uid, transaction)
             raise
     print(f"Direct edge for {host} is serving 404 on unrelated paths (pending commit)")
 
@@ -884,13 +948,24 @@ def _disable(uid: int) -> None:
     print("Direct edge disabled (pending commit)")
 
 
-def _commit(uid: int) -> None:
+def _commit(uid: int, transaction: str | None = None) -> None:
     with _lock(create=False):
         status, marker = _inspect(uid)
         _recovery_check(status, marker)
+        _check_transaction(marker, transaction)
         if status == "owned" and marker is not None and marker["pending"]:
             if marker["pending"]["prep"] is not None:
                 raise EdgeError("Direct edge preparation did not finish; roll it back, then enable again")
+            if _legacy_enable(marker):
+                if _read_owned(CADDYFILE) != _caddyfile(marker["hostname"], _nat(marker)):
+                    raise EdgeError("legacy Direct edge enable did not finish; roll it back")
+                enabled, active, pid = _unit_state()
+                if not (enabled and active and pid > 0):
+                    raise EdgeError("legacy Direct edge enable is not enabled and active with a MainPID")
+                _check_masks()
+                _check_listeners(pid)
+                _write_marker(uid, marker["hostname"], None, _nat(marker))
+                return
             if marker["pending"]["op"] == "migrate":
                 if _read_owned(CADDYFILE) != _caddyfile(marker["hostname"], _nat(marker)):
                     raise EdgeError("Direct edge migration did not finish; roll it back, then migrate again")
@@ -903,10 +978,11 @@ def _commit(uid: int) -> None:
             _write_marker(uid, marker["hostname"], None, _nat(marker), version=marker["version"])
 
 
-def _rollback(uid: int) -> None:
+def _rollback(uid: int, transaction: str | None = None) -> None:
     with _lock(create=False), _signal_handlers(signal.SIG_IGN):
         status, marker = _inspect(uid)
         _recovery_check(status, marker)
+        _check_transaction(marker, transaction)
         if status == "owned" and marker is not None and marker["pending"]:
             _restore_pending(uid, marker)
 
@@ -922,6 +998,47 @@ def _migration_needed(uid: int) -> bool:
     _check_masks()
     _unit_state()
     return marker["version"] in (1, 2)
+
+
+def _publish_policy(uid: int, marker: dict[str, Any]) -> None:
+    host, nat = marker["hostname"], _nat(marker)
+    # A unique validation file never replaces the live config until Caddy accepts it.
+    old = signal.pthread_sigmask(signal.SIG_BLOCK, _TERMINATION)
+    try:
+        fd, candidate = tempfile.mkstemp(dir=IMP_DIR, prefix=".Caddyfile.validate.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(_caddyfile(host, nat))
+                handle.flush()
+                os.fchmod(handle.fileno(), 0o644)
+            signal.pthread_sigmask(signal.SIG_SETMASK, old)
+            _cmd(
+                "runuser",
+                "-u",
+                "caddy",
+                "--",
+                CADDY_BIN,
+                "validate",
+                "--config",
+                candidate,
+                "--adapter",
+                "caddyfile",
+            )
+            status, current = _inspect(uid)
+            if status != "owned" or current != marker:
+                raise EdgeError("Direct edge changed during migration validation")
+            if _legacy_enable(marker):
+                _check_masks()
+                if _unit_state() != (False, False, 0):
+                    raise EdgeError("legacy Direct edge changed during policy validation")
+            _atomic(CADDYFILE, _caddyfile(host, nat))
+        finally:
+            signal.pthread_sigmask(signal.SIG_BLOCK, _TERMINATION)
+            os.unlink(candidate)
+    except OSError as exc:
+        raise EdgeError(f"could not stage edge migration: {exc.strerror}") from None
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old)
 
 
 def _migrate(uid: int) -> None:
@@ -947,39 +1064,7 @@ def _migrate(uid: int) -> None:
         marker.update(version=3, behind_nat=nat, pending=pending)
         try:
             _write_marker(uid, host, pending, nat)
-            # A unique validation file never replaces the live config until Caddy accepts it.
-            old = signal.pthread_sigmask(signal.SIG_BLOCK, _TERMINATION)
-            try:
-                fd, candidate = tempfile.mkstemp(dir=IMP_DIR, prefix=".Caddyfile.validate.", suffix=".tmp")
-                try:
-                    with os.fdopen(fd, "wb") as handle:
-                        handle.write(_caddyfile(host, nat))
-                        handle.flush()
-                        os.fchmod(handle.fileno(), 0o644)
-                    signal.pthread_sigmask(signal.SIG_SETMASK, old)
-                    _cmd(
-                        "runuser",
-                        "-u",
-                        "caddy",
-                        "--",
-                        CADDY_BIN,
-                        "validate",
-                        "--config",
-                        candidate,
-                        "--adapter",
-                        "caddyfile",
-                    )
-                    status, current = _inspect(uid)
-                    if status != "owned" or current != marker:
-                        raise EdgeError("Direct edge changed during migration validation")
-                    _atomic(CADDYFILE, _caddyfile(host, nat))
-                finally:
-                    signal.pthread_sigmask(signal.SIG_BLOCK, _TERMINATION)
-                    os.unlink(candidate)
-            except OSError as exc:
-                raise EdgeError(f"could not stage edge migration: {exc.strerror}") from None
-            finally:
-                signal.pthread_sigmask(signal.SIG_SETMASK, old)
+            _publish_policy(uid, marker)
             if active:
                 _cmd("systemctl", "restart", UNIT_NAME)
             now_enabled, now_active, pid = _unit_state()
@@ -996,7 +1081,8 @@ def _migrate(uid: int) -> None:
 
 _USAGE = (
     "usage: imp-direct-edge hostname HOST | dns HOST [--behind-nat] | preflight HOST | "
-    "enable HOST UID [--behind-nat] | commit UID | rollback UID | disable UID | owned-hostname UID | "
+    "enable HOST UID [--behind-nat] [--transaction UUID] | commit UID [--transaction UUID] | "
+    "rollback UID [--transaction UUID] | disable UID | owned-hostname UID | "
     "ssh-committed HOST UID | migration-needed UID | migrate UID"
 )
 _ARITY = {
@@ -1016,12 +1102,31 @@ _ARITY = {
 
 def _dispatch(args: list[str]) -> int:
     full = args
-    behind_nat = bool(args) and args[0] in ("dns", "enable") and args[-1] == "--behind-nat"
-    if behind_nat:
-        args = args[:-1]
-    if not args or args[0] not in _ARITY or len(args) - 1 != _ARITY[args[0]]:
+    if not args or args[0] not in _ARITY:
         raise EdgeError(_USAGE)
     cmd = args[0]
+    positional = _ARITY[cmd] + 1
+    options = args[positional:]
+    args = args[:positional]
+    behind_nat = False
+    transaction = None
+    while options:
+        if options[0] == "--behind-nat" and cmd in ("dns", "enable") and not behind_nat:
+            behind_nat = True
+            options = options[1:]
+        elif (
+            options[0] == "--transaction"
+            and cmd in ("enable", "commit", "rollback")
+            and transaction is None
+            and len(options) >= 2
+            and _valid_transaction(options[1])
+        ):
+            transaction = options[1]
+            options = options[2:]
+        else:
+            raise EdgeError(_USAGE)
+    if len(args) != positional:
+        raise EdgeError(_USAGE)
     host = args[1] if cmd in ("hostname", "dns", "preflight", "enable", "ssh-committed") else ""
     if cmd in ("hostname", "dns", "preflight", "enable", "ssh-committed") and not _valid_host(host):
         raise EdgeError("hostname must be a lowercase ASCII public domain name (no URL, port, IP or spaces)")
@@ -1068,15 +1173,15 @@ def _dispatch(args: list[str]) -> int:
         if os.environ.get("SUDO_UID") != str(uid):
             raise EdgeError("run as the target user; sudo is invoked internally")
         if cmd == "enable":
-            _enable(host, uid, behind_nat)
+            _enable(host, uid, behind_nat, transaction)
         elif cmd == "migrate":
             _migrate(uid)
         elif cmd == "disable":
             _disable(uid)
         elif cmd == "commit":
-            _commit(uid)
+            _commit(uid, transaction)
         else:
-            _rollback(uid)
+            _rollback(uid, transaction)
         return 0
     if uid != os.getuid():
         raise EdgeError("UID must be the invoking user")
@@ -1085,23 +1190,25 @@ def _dispatch(args: list[str]) -> int:
             if not _migration_needed(uid):
                 return 0
         return _sudo(full, interactive=True)
-    status, marker = _inspect(uid)
-    if cmd == "enable":
-        _check_platform()
-        _check_dns(host, behind_nat)
-        _admit_enable(status, marker, host, behind_nat)
-        if status == "absent":
-            _preflight_fresh()
-    else:
-        _recovery_check(status, marker)
-        if status != "owned" or marker is None:
+    with _lock(create=False):
+        status, marker = _inspect(uid)
+        if cmd == "enable":
+            _check_platform()
+            _check_dns(host, behind_nat)
+            _admit_enable(status, marker, host, behind_nat)
+            if status == "absent":
+                _preflight_fresh()
+        else:
+            _recovery_check(status, marker)
+            _check_transaction(marker, transaction)
+            if status != "owned" or marker is None:
+                if cmd == "disable":
+                    print("no Imp-owned Direct edge; nothing changed")
+                return 0
             if cmd == "disable":
-                print("no Imp-owned Direct edge; nothing changed")
-            return 0
-        if cmd == "disable":
-            _admit_change(marker)
-        elif not marker["pending"]:
-            return 0
+                _admit_change(marker)
+            elif not marker["pending"]:
+                return 0
     return _sudo(full, interactive=cmd in ("enable", "disable"))
 
 

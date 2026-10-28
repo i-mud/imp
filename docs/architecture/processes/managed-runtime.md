@@ -81,12 +81,26 @@ NAT config/unit/marker state, refusing pending transactions, wrong UID, or drift
 preserves connection/topology/hostname, credentials, certificate data, and
 service state; existing journal snapshots and commit/rollback restore the old
 files/state on handled failure before edge commit, retaining the journal if restoration is incomplete.
+When a missing `gateway.env` selects fresh setup, explicit Direct enable may
+reuse exact committed schema-1/schema-2 state only for the same UID, hostname
+and topology with intact masks and an exact loaded disabled/inactive unit with
+PID 0 and no unrelated public listener. The legacy-version enable journal
+recognizes only the precise stopped baseline and exact old/current templates.
+It remains pending across policy validation, activation and the existing
+new-token handoff; successful commit publishes schema 3. Installer enable
+journals include a per-invocation transaction ID, checked before sudo and again
+under the root lock by guarded commit/rollback. Automatic cleanup cannot act on
+an older or replaced transaction. Rollback proves strict quiescence before
+restoring legacy policy and marker bytes. Existing journals are not permission
+to resume setup, and no credential is reconstructed. Deliberate manual recovery
+without an ID and ordinary policy-only migration retain their existing behavior.
 An existing credential is preserved with an explicit not-verified continuation,
 never treated as a newly authenticated handoff. Failed provisioning restores the
 public listener and ordinary runtime/user-service state when no new credential
 remains. If provisioning started and a new credential is present, possible
 handoff conservatively retains the local identity/runtime for recovery while
-restoring/closing the public edge. INT/TERM/HUP enter nonzero installer cleanup;
+restoring/closing its owned public-edge transaction. A replaced journal is left
+untouched and reported for manual recovery. INT/TERM/HUP enter nonzero installer cleanup;
 errexit and diagnostic-write failures cannot abort independent restoration
 attempts after terminal loss. Restoration remains best-effort if service or
 filesystem operations themselves fail.
