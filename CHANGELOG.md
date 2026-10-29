@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.5] - 2026-10-29
+
+### Bug Fixes
+
+- recover retained legacy Direct edges safely ([#51](https://github.com/i-mud/imp/issues/51)) ([71c7bf0](https://github.com/i-mud/imp/commit/71c7bf0b7653cdfef23122da22fd5374cc40ef6b))
+
 ## [0.4.4] - 2026-10-28
 
 ### Bug Fixes
