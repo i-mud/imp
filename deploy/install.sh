@@ -334,6 +334,7 @@ GATEWAY_CONNECTION_CHANGED=0
 SSH_CONNECTION_COMMITTED=0
 commit_status=0
 EDGE_PENDING=0
+EDGE_TRANSACTION_OPTIONS=()
 DIRECT_PROVISIONING_STARTED=0
 TARGET_UID="$(id -u)"
 
@@ -419,7 +420,7 @@ cleanup() {
 
   if ((status != 0)); then
     if ((EDGE_PENDING)); then
-      "$BUNDLE_DIR/bin/imp-server" direct-edge rollback "$TARGET_UID" ||
+      "$BUNDLE_DIR/bin/imp-server" direct-edge rollback "$TARGET_UID" "${EDGE_TRANSACTION_OPTIONS[@]}" ||
         printf 'error: public-edge restoration failed; inspect imp-caddy.service before retrying\n' >&2 || true
     fi
     # The child may have handed off its token before a pending parent signal runs.
@@ -669,15 +670,18 @@ if [[ "$CONNECTION" == ssh ]] && ((START_SERVICES)); then
   trap 'exit 129' HUP
   ((commit_status == 0)) || exit "$commit_status"
 elif [[ "$CONNECTION" == direct ]] && ((!DIRECT_HAS_CREDENTIAL)); then
+  IFS= read -r edge_transaction < /proc/sys/kernel/random/uuid ||
+    die "could not obtain a Direct installer transaction identity"
+  EDGE_TRANSACTION_OPTIONS=(--transaction "$edge_transaction")
   EDGE_PENDING=1
-  "$BUNDLE_DIR/bin/imp-server" direct-edge enable "$PUBLIC_HOSTNAME" "$TARGET_UID" "${DIRECT_EDGE_OPTIONS[@]}"
+  "$BUNDLE_DIR/bin/imp-server" direct-edge enable "$PUBLIC_HOSTNAME" "$TARGET_UID" "${DIRECT_EDGE_OPTIONS[@]}" "${EDGE_TRANSACTION_OPTIONS[@]}"
   if [[ -e "$CONFIG_DIR/gateway.env" || -L "$CONFIG_DIR/gateway.env" ]]; then
     die "a Direct credential appeared during edge preparation; preserved without a verified token handoff"
   fi
   # Credentials and their one-time terminal output belong exclusively to this command.
   DIRECT_PROVISIONING_STARTED=1
   "$DIRECT_WSS_LINK" setup --public-url "wss://$PUBLIC_HOSTNAME/state" "${PUBLIC_VERIFY_OPTIONS[@]}"
-  "$BUNDLE_DIR/bin/imp-server" direct-edge commit "$TARGET_UID"
+  "$BUNDLE_DIR/bin/imp-server" direct-edge commit "$TARGET_UID" "${EDGE_TRANSACTION_OPTIONS[@]}"
   EDGE_PENDING=0
 elif [[ "$CONNECTION" != ssh ]] && ((EXISTING_INSTALL)) &&
      { [[ "$CONNECTION" == direct ]] || ((GATEWAY_WAS_ENABLED || GATEWAY_WAS_ACTIVE)); }; then

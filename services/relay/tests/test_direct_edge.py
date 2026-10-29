@@ -27,6 +27,8 @@ REAL_SUDO = edge._sudo
 REAL_HTTPS_STATUS = edge._https_status
 REAL_RUN = edge._run
 REAL_RESOLVE = edge._resolve
+TRANSACTION = "12345678-1234-4234-8234-123456789abc"
+OTHER_TRANSACTION = "abcdefab-abcd-4abc-8abc-abcdefabcdef"
 
 
 class Fake:
@@ -842,7 +844,9 @@ def test_preexisting_masks_are_never_adopted_or_unmasked(fake: Fake) -> None:
 
 
 def test_failure_before_marker_removes_created_files(fake: Fake, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(uid: int, host: str, pending: dict[str, Any] | None, behind_nat: bool = False) -> NoReturn:
+    def boom(
+        uid: int, host: str, pending: dict[str, Any] | None, behind_nat: bool = False, *, version: int = 3
+    ) -> NoReturn:
         raise edge.EdgeError("disk")
 
     monkeypatch.setattr(edge, "_write_marker", boom)
@@ -1706,3 +1710,868 @@ def test_migration_refuses_operator_edit_during_validation(
     assert not list(Path(edge.IMP_DIR).glob(".Caddyfile*.tmp"))
     if managed == "UNIT_PATH":
         assert Path(edge.CADDYFILE).read_bytes() == config
+
+
+def inactive_legacy_edge(fake: Fake, nat: bool) -> tuple[bytes, bytes]:
+    baseline = legacy_edge(fake, nat)
+    assert edge.main(["disable", str(UID)]) == 0
+    assert edge.main(["commit", str(UID)]) == 0
+    fake.calls.clear()
+    return baseline
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("finish", ["commit", "rollback"])
+def test_inactive_legacy_enable_stages_current_policy_with_legacy_journal(
+    fake: Fake, nat: bool, finish: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    credential = fake.root / "gateway.env"
+    credential.write_bytes(b"retained identity\n")
+    untouched = credential.read_bytes(), credential.stat().st_mtime_ns
+    run = fake.run
+    candidates = []
+
+    def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+        if args[0] == "runuser":
+            candidate = Path(args[args.index("--config") + 1])
+            candidates.append(candidate)
+            assert candidate != Path(edge.CADDYFILE)
+            assert candidate.read_bytes() == edge._caddyfile(HOST, nat)
+            assert Path(edge.CADDYFILE).read_bytes() == config
+            assert fake.marker() == json.loads(
+                edge._marker_bytes(
+                    UID, HOST, edge._pending("enable", False, False), nat, version=2 if nat else 1
+                )
+            )
+        return run(args, timeout)
+
+    monkeypatch.setattr(edge, "_run", commands)
+    assert enable(nat=nat) == 0
+    assert fake.state() == (True, True)
+    assert len(candidates) == 1 and not candidates[0].exists()
+    assert Path(edge.CADDYFILE).read_bytes() == edge._caddyfile(HOST, nat)
+    assert edge._inspect(UID)[0] == "owned"
+    assert fake.marker()["pending"] == edge._pending("enable", False, False)
+    assert fake.marker()["version"] == (2 if nat else 1)
+    assert edge.main([finish, str(UID)]) == 0
+    if finish == "commit":
+        assert Path(edge.MARKER).read_bytes() == edge._marker_bytes(UID, HOST, None, nat)
+        assert fake.state() == (True, True)
+    else:
+        assert Path(edge.MARKER).read_bytes() == marker
+        assert Path(edge.CADDYFILE).read_bytes() == config
+        assert fake.state() == (False, False)
+    assert (credential.read_bytes(), credential.stat().st_mtime_ns) == untouched
+    assert Path(edge.UNIT_PATH).read_bytes() == edge._UNIT
+    assert all(os.readlink(p) == "/dev/null" for p in edge.STOCK_UNITS)
+    assert not fake.ran("apt-get") and not fake.ran("systemctl", "restart")
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("unprivileged", [False, True])
+@pytest.mark.parametrize(
+    "drift",
+    [
+        "uid",
+        "hostname",
+        "topology",
+        "config",
+        "unit",
+        "mode",
+        "owner",
+        "symlink",
+        "mask",
+        "pending",
+        "enabled",
+        "active",
+        "pid",
+        "unloaded",
+        "stale",
+        "dropins",
+    ],
+)
+def test_inactive_legacy_enable_refuses_drift_before_mutation_or_sudo(
+    fake: Fake, nat: bool, unprivileged: bool, drift: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inactive_legacy_edge(fake, nat)
+    if drift == "uid":
+        Path(edge.MARKER).write_bytes(edge._marker_bytes(UID + 1, HOST, None, nat, version=2 if nat else 1))
+    elif drift == "hostname":
+        other = "other.example.org"
+        Path(edge.MARKER).write_bytes(edge._marker_bytes(UID, other, None, nat, version=2 if nat else 1))
+        Path(edge.CADDYFILE).write_bytes(edge._caddyfile(other, nat, version=2 if nat else 1))
+    elif drift == "topology":
+        Path(edge.MARKER).write_bytes(edge._marker_bytes(UID, HOST, None, not nat, version=1 if nat else 2))
+        Path(edge.CADDYFILE).write_bytes(edge._caddyfile(HOST, not nat, version=1 if nat else 2))
+    elif drift == "config":
+        Path(edge.CADDYFILE).write_bytes(b"# operator config\n")
+    elif drift == "unit":
+        Path(edge.UNIT_PATH).write_bytes(b"# operator unit\n")
+    elif drift == "mode":
+        Path(edge.CADDYFILE).chmod(0o666)
+    elif drift == "owner":
+        monkeypatch.setattr(edge, "_ROOT_UID", UID + 1)
+    elif drift == "symlink":
+        Path(edge.CADDYFILE).unlink()
+        Path(edge.CADDYFILE).symlink_to("/dev/null")
+    elif drift == "mask":
+        os.unlink(edge.STOCK_UNITS[0])
+    elif drift == "pending":
+        edge._write_marker(UID, HOST, edge._pending("enable", False, False), nat, version=2 if nat else 1)
+    elif drift == "enabled":
+        fake.enabled = True
+    elif drift == "active":
+        fake.active = True
+    elif drift == "stale":
+        fake.need_reload = "yes"
+    else:
+        run = fake.run
+
+        def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+            result = run(args, timeout)
+            if args[:2] == ["systemctl", "show"]:
+                before, after = {
+                    "pid": ("MainPID=0", "MainPID=4242"),
+                    "unloaded": ("LoadState=loaded", "LoadState=not-found"),
+                    "dropins": ("DropInPaths=\n", "DropInPaths=/operator.conf\n"),
+                }[drift]
+                result.stdout = result.stdout.replace(before, after)
+            return result
+
+        monkeypatch.setattr(edge, "_run", commands)
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    before = Path(edge.MARKER).read_bytes()
+    fake.calls.clear()
+    assert enable(nat=nat) == 1
+    assert Path(edge.MARKER).read_bytes() == before
+    assert all(c[0] in ("ip", "systemctl") and (c[0] != "systemctl" or c[1] == "show") for c in fake.calls)
+    assert not fake.sudo_calls
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("drift", ["enabled", "active", "pid"])
+def test_legacy_enable_rechecks_second_unit_read_before_journal(
+    fake: Fake, nat: bool, drift: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    paths = [Path(p) for p in (edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH)]
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+    run = fake.run
+    reads = 0
+
+    def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+        nonlocal reads
+        result = run(args, timeout)
+        if args[:2] == ["systemctl", "show"]:
+            reads += 1
+            if reads == 1:
+                fake.enabled = drift == "enabled"
+                fake.active = drift == "active"
+            elif drift == "pid":
+                result.stdout = result.stdout.replace("MainPID=0", "MainPID=4242")
+        return result
+
+    monkeypatch.setattr(edge, "_run", commands)
+    assert enable(nat=nat) == 1
+    assert reads == 2
+    assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
+    assert Path(edge.MARKER).read_bytes() == marker
+    assert Path(edge.CADDYFILE).read_bytes() == config
+    assert edge._inspect(UID)[0] == "owned"
+    assert fake.state() == (drift == "enabled", drift == "active")
+    assert all(
+        c[0] in ("ip", "ss", "systemctl") and (c[0] != "systemctl" or c[1] == "show") for c in fake.calls
+    )
+    assert not fake.sudo_calls
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("unprivileged", [False, True])
+@pytest.mark.parametrize("netid,port", [("tcp", 80), ("tcp", 443), ("udp", 443)])
+def test_legacy_enable_refuses_foreign_listener_before_mutation_or_sudo(
+    fake: Fake, nat: bool, unprivileged: bool, netid: str, port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inactive_legacy_edge(fake, nat)
+    fake.listeners = [(netid, port, 9000)]
+    paths = [Path(p) for p in (edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH)]
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    assert enable(nat=nat) == 1
+    assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
+    assert fake.state() == (False, False)
+    assert edge._inspect(UID)[0] == "owned"
+    assert fake.ran("ss")
+    assert all(
+        c[0] in ("ip", "ss", "systemctl") and (c[0] != "systemctl" or c[1] == "show") for c in fake.calls
+    )
+    assert not fake.sudo_calls
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize(
+    "failure",
+    ["validation", "publication", "published", "activation", "activation-failed", "state", "pid", "verify"],
+)
+def test_inactive_legacy_enable_failure_restores_exact_baseline(
+    fake: Fake, nat: bool, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    if failure == "validation":
+        fake.fail["runuser -u"] = True
+    elif failure in ("publication", "published"):
+        atomic = edge._atomic
+        failed = False
+
+        def publish(path: str, data: bytes, **kw: Any) -> None:
+            nonlocal failed
+            if path == edge.CADDYFILE and not failed:
+                failed = True
+                if failure == "published":
+                    atomic(path, data, **kw)
+                raise edge.EdgeError("publication failed")
+            atomic(path, data, **kw)
+
+        monkeypatch.setattr(edge, "_atomic", publish)
+    elif failure in ("activation", "activation-failed", "state", "pid"):
+        run = fake.run
+        failed_state = False
+
+        def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+            nonlocal failed_state
+            result = run(args, timeout)
+            if args[:2] == ["systemctl", "reset-failed"] and result.returncode == 0:
+                failed_state = False
+            if args[:2] == ["systemctl", "enable"]:
+                if failure in ("activation", "activation-failed"):
+                    result.returncode, result.stderr = 1, "activation failed after start"
+                    if failure == "activation-failed":
+                        failed_state, fake.active = True, False
+                elif failure == "state":
+                    fake.enabled = False
+            if failure == "pid" and fake.active and args[:2] == ["systemctl", "show"]:
+                result.stdout = result.stdout.replace("MainPID=4242", "MainPID=0")
+            if failed_state and args[:2] == ["systemctl", "show"]:
+                result.stdout = result.stdout.replace("ActiveState=inactive", "ActiveState=failed")
+            return result
+
+        monkeypatch.setattr(edge, "_run", commands)
+    else:
+        fake.https = lambda host, path: 502
+    assert enable(nat=nat) == 1
+    assert Path(edge.MARKER).read_bytes() == marker
+    assert Path(edge.CADDYFILE).read_bytes() == config
+    assert fake.state() == (False, False)
+    assert fake.marker()["pending"] is None
+    if failure == "activation-failed":
+        assert fake.ran("systemctl", "reset-failed") == [("systemctl", "reset-failed", edge.UNIT_NAME)]
+    assert not list(Path(edge.IMP_DIR).glob(".Caddyfile*.tmp"))
+    assert not fake.ran("systemctl", "start") and not fake.ran("systemctl", "restart")
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("failure", ["stop", "disable", "reset-failed", "state", "listener", "restore"])
+def test_inactive_legacy_rollback_failure_keeps_current_policy_and_journal(
+    fake: Fake, nat: bool, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    assert enable(nat=nat) == 0
+    journal = Path(edge.MARKER).read_bytes()
+    if failure in ("stop", "disable"):
+        fake.fail[f"systemctl {failure}"] = True
+    elif failure == "reset-failed":
+        fake.fail["systemctl reset-failed"] = True
+        fake.active = False
+        failed_state = True
+        run = fake.run
+
+        def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+            nonlocal failed_state
+            result = run(args, timeout)
+            if args[:2] == ["systemctl", "reset-failed"] and result.returncode == 0:
+                failed_state = False
+            if failed_state and args[:2] == ["systemctl", "show"]:
+                result.stdout = result.stdout.replace("ActiveState=inactive", "ActiveState=failed")
+            return result
+
+        monkeypatch.setattr(edge, "_run", commands)
+    elif failure == "state":
+        fake.need_reload = "yes"
+    elif failure == "listener":
+        fake.listeners = [("tcp", 443, 4242)]
+    else:
+        atomic = edge._atomic
+
+        def publish(path: str, data: bytes, **kw: Any) -> None:
+            if path == edge.CADDYFILE:
+                assert fake.state() == (False, False)
+                raise edge.EdgeError("restore failed")
+            atomic(path, data, **kw)
+
+        monkeypatch.setattr(edge, "_atomic", publish)
+    assert edge.main(["rollback", str(UID)]) == 1
+    assert Path(edge.MARKER).read_bytes() == journal
+    assert Path(edge.CADDYFILE).read_bytes() == edge._caddyfile(HOST, nat)
+    assert edge._inspect(UID)[0] == "owned"
+    fake.fail.clear()
+    fake.need_reload = "no"
+    fake.listeners.clear()
+    if failure == "restore":
+        monkeypatch.setattr(edge, "_atomic", atomic)
+    assert edge.main(["rollback", str(UID)]) == 0
+    assert Path(edge.MARKER).read_bytes() == marker
+    assert Path(edge.CADDYFILE).read_bytes() == config
+    assert fake.state() == (False, False)
+    assert fake.marker()["pending"] is None
+    if failure == "reset-failed":
+        assert fake.ran("systemctl", "reset-failed") == [
+            ("systemctl", "reset-failed", edge.UNIT_NAME),
+            ("systemctl", "reset-failed", edge.UNIT_NAME),
+        ]
+
+
+@pytest.mark.parametrize("nat", [False, True])
+def test_old_pending_legacy_enable_cannot_commit_or_restart(fake: Fake, nat: bool) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    edge._write_marker(UID, HOST, edge._pending("enable", False, False), nat, version=2 if nat else 1)
+    journal = Path(edge.MARKER).read_bytes()
+    assert edge.main(["commit", str(UID)]) == 1
+    assert enable(nat=nat) == 1
+    assert Path(edge.MARKER).read_bytes() == journal
+    assert Path(edge.CADDYFILE).read_bytes() == config
+    assert not fake.ran("systemctl", "enable")
+    assert edge.main(["rollback", str(UID)]) == 0
+    assert Path(edge.MARKER).read_bytes() == marker
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("drift", ["enabled", "active", "pid", "mask", "stale"])
+def test_legacy_enable_commit_rechecks_owned_running_service(
+    fake: Fake, nat: bool, drift: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inactive_legacy_edge(fake, nat)
+    assert enable(nat=nat) == 0
+    journal = Path(edge.MARKER).read_bytes()
+    if drift == "enabled":
+        fake.enabled = False
+    elif drift == "active":
+        fake.active = False
+    elif drift == "mask":
+        os.unlink(edge.STOCK_UNITS[0])
+    elif drift == "stale":
+        fake.need_reload = "yes"
+    else:
+        run = fake.run
+
+        def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+            result = run(args, timeout)
+            if args[:2] == ["systemctl", "show"]:
+                result.stdout = result.stdout.replace("MainPID=4242", "MainPID=0")
+            return result
+
+        monkeypatch.setattr(edge, "_run", commands)
+    assert edge.main(["commit", str(UID)]) == 1
+    assert Path(edge.MARKER).read_bytes() == journal
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("managed", ["CADDYFILE", "UNIT_PATH", "MARKER"])
+def test_legacy_enable_rechecks_ownership_after_validation(
+    fake: Fake, nat: bool, managed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, config = inactive_legacy_edge(fake, nat)
+    run = fake.run
+    path = Path(getattr(edge, managed))
+    operator_bytes = b"# operator edit during validation\n"
+
+    def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+        result = run(args, timeout)
+        if args[0] == "runuser":
+            path.write_bytes(operator_bytes)
+        return result
+
+    monkeypatch.setattr(edge, "_run", commands)
+    assert enable(nat=nat) == 1
+    assert path.read_bytes() == operator_bytes
+    assert not fake.ran("systemctl", "enable") and not fake.ran("systemctl", "stop")
+    assert fake.state() == (False, False)
+    assert not list(Path(edge.IMP_DIR).glob(".Caddyfile*.tmp"))
+    if managed != "CADDYFILE":
+        assert Path(edge.CADDYFILE).read_bytes() == config
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("signame", ["SIGINT", "SIGTERM", "SIGHUP"])
+@pytest.mark.parametrize("boundary", [1, 2])
+def test_legacy_enable_signal_after_journal_or_publication_restores_baseline(
+    fake: Fake, nat: bool, signame: str, boundary: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import signal
+
+    marker, config = inactive_legacy_edge(fake, nat)
+    atomic = edge._atomic
+    count = 0
+
+    def publish(path: str, data: bytes, **kw: Any) -> None:
+        nonlocal count
+        atomic(path, data, **kw)
+        count += 1
+        if count == boundary:
+            os.kill(os.getpid(), getattr(signal, signame))
+
+    monkeypatch.setattr(edge, "_atomic", publish)
+    assert enable(nat=nat) == 130
+    assert fake.state() == (False, False)
+    assert Path(edge.MARKER).read_bytes() == marker and Path(edge.CADDYFILE).read_bytes() == config
+    assert not list(Path(edge.IMP_DIR).glob(".Caddyfile*.tmp"))
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("target", ["config", "marker"])
+@pytest.mark.parametrize("published", [False, True])
+def test_legacy_rollback_publication_error_leaves_only_exact_templates_while_stopped(
+    fake: Fake, nat: bool, target: str, published: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    assert enable(nat=nat) == 0
+    journal = Path(edge.MARKER).read_bytes()
+    atomic = edge._atomic
+    failed = False
+    target_path = edge.CADDYFILE if target == "config" else edge.MARKER
+
+    def publish(path: str, data: bytes, **kw: Any) -> None:
+        nonlocal failed
+        if path == target_path and not failed:
+            failed = True
+            assert fake.state() == (False, False)
+            if published:
+                atomic(path, data, **kw)
+            raise edge.EdgeError("rollback publication failed")
+        atomic(path, data, **kw)
+
+    monkeypatch.setattr(edge, "_atomic", publish)
+    assert edge.main(["rollback", str(UID)]) == 1
+    expected_marker = marker if target == "marker" and published else journal
+    expected_config = edge._caddyfile(HOST, nat) if target == "config" and not published else config
+    assert Path(edge.MARKER).read_bytes() == expected_marker
+    assert Path(edge.CADDYFILE).read_bytes() == expected_config
+    assert fake.state() == (False, False)
+    assert edge._inspect(UID)[0] == "owned"
+    assert edge.main(["rollback", str(UID)]) == 0
+    assert Path(edge.MARKER).read_bytes() == marker
+    assert Path(edge.CADDYFILE).read_bytes() == config
+
+
+@pytest.mark.parametrize("nat", [False, True])
+def test_legacy_enable_failed_verification_and_stop_retains_current_policy(
+    fake: Fake, nat: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    fake.https = lambda host, path: 502
+    fake.fail["systemctl stop"] = True
+    assert enable(nat=nat) == 1
+    assert "rollback incomplete" in capsys.readouterr().err
+    assert fake.marker()["pending"] == edge._pending("enable", False, False)
+    assert fake.marker()["version"] == (2 if nat else 1)
+    assert Path(edge.CADDYFILE).read_bytes() == edge._caddyfile(HOST, nat)
+    assert fake.state() == (False, True)
+    fake.fail.clear()
+    assert edge.main(["rollback", str(UID)]) == 0
+    assert Path(edge.MARKER).read_bytes() == marker
+    assert Path(edge.CADDYFILE).read_bytes() == config
+
+
+@pytest.mark.parametrize("nat", [False, True])
+def test_current_disabled_edge_enable_keeps_current_journal_and_live_validation(
+    fake: Fake, nat: bool
+) -> None:
+    assert enable(nat=nat) == 0
+    assert edge.main(["commit", str(UID)]) == 0
+    assert edge.main(["disable", str(UID)]) == 0
+    assert edge.main(["commit", str(UID)]) == 0
+    fake.calls.clear()
+    assert enable(nat=nat) == 0
+    assert fake.marker()["version"] == 3
+    assert fake.marker()["pending"] == edge._pending("enable", False, False)
+    validators = fake.ran("runuser")
+    assert len(validators) == 1
+    assert validators[0][validators[0].index("--config") + 1] == edge.CADDYFILE
+    assert edge.main(["rollback", str(UID)]) == 0
+    assert fake.state() == (False, False) and fake.marker()["version"] == 3
+
+
+@pytest.mark.parametrize("nat", [False, True])
+def test_legacy_enable_repeats_admission_at_privileged_boundary(
+    fake: Fake, nat: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker, config = inactive_legacy_edge(fake, nat)
+    monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+
+    def sudo(args: list[str], *, interactive: bool) -> int:
+        fake.enabled = True
+        monkeypatch.setattr(edge, "_euid", lambda: 0)
+        return edge.main(args)
+
+    monkeypatch.setattr(edge, "_sudo", sudo)
+    assert enable(nat=nat) == 1
+    assert fake.state() == (True, False)
+    assert Path(edge.MARKER).read_bytes() == marker
+    assert Path(edge.CADDYFILE).read_bytes() == config
+    assert not fake.ran("systemctl", "enable")
+
+
+@pytest.mark.parametrize("op", ["enable", "disable", "migrate"])
+@pytest.mark.parametrize("transaction", [TRANSACTION, "", None, 1, TRANSACTION.upper(), "not-a-uuid"])
+def test_transaction_marker_field_is_only_valid_on_enable(op: str, transaction: Any) -> None:
+    pending = edge._pending(op, False, False)
+    if op == "migrate":
+        pending.update(
+            prior_marker=edge._marker_bytes(UID, HOST, None, version=1).decode("ascii"),
+            prior_caddyfile=edge._caddyfile(HOST, version=1).decode("ascii"),
+        )
+    pending["transaction"] = transaction
+    parsed = edge._parse_marker(edge._marker_bytes(UID, HOST, pending), UID)
+    assert (parsed is not None) == (op == "enable" and transaction == TRANSACTION)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["enable", HOST, str(UID), "--transaction"],
+        ["commit", str(UID), "--transaction", ""],
+        ["rollback", str(UID), "--transaction", TRANSACTION.upper()],
+        ["enable", HOST, str(UID), "--transaction", "not-a-uuid"],
+        ["enable", HOST, str(UID), "--transaction", TRANSACTION, "--transaction", TRANSACTION],
+        ["commit", str(UID), "--transaction", TRANSACTION, "extra"],
+        ["enable", HOST, str(UID), "--behind-nat", "--behind-nat"],
+        ["disable", str(UID), "--transaction", TRANSACTION],
+        ["migrate", str(UID), "--transaction", TRANSACTION],
+        ["dns", HOST, "--transaction", TRANSACTION],
+        ["owned-hostname", str(UID), "--transaction", TRANSACTION],
+        ["ssh-committed", HOST, str(UID), "--transaction", TRANSACTION],
+        ["migration-needed", str(UID), "--transaction", TRANSACTION],
+        ["hostname", HOST, "--transaction", TRANSACTION],
+        ["preflight", HOST, "--transaction", TRANSACTION],
+    ],
+)
+def test_transaction_cli_rejects_invalid_options_before_effects(fake: Fake, args: list[str]) -> None:
+    assert edge.main(args) == 1
+    assert not fake.calls and not fake.sudo_calls
+    assert not Path(edge.IMP_DIR).exists()
+
+
+@pytest.mark.parametrize("nat_first", [False, True])
+def test_transaction_and_nat_options_preserved_through_sudo(
+    fake: Fake, nat_first: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    options = ["--transaction", TRANSACTION]
+    options = ["--behind-nat", *options] if nat_first else [*options, "--behind-nat"]
+    args = ["enable", HOST, str(UID), *options]
+    assert edge.main(args) == 0
+    assert fake.sudo_calls == [(args, True)]
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+@pytest.mark.parametrize("owner", [None, OTHER_TRANSACTION])
+@pytest.mark.parametrize("unprivileged", [False, True])
+def test_guarded_recovery_refuses_unowned_journal_without_mutation_or_sudo(
+    fake: Fake, op: str, owner: str | None, unprivileged: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args = ["enable", HOST, str(UID)]
+    if owner is not None:
+        args.extend(["--transaction", owner])
+    assert edge.main(args) == 0
+    paths = [edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH, *edge.STOCK_UNITS]
+    before = [(Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths]
+    state = fake.state()
+    fake.calls.clear()
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == 1
+    assert [
+        (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+    ] == before
+    assert fake.state() == state
+    assert not fake.calls and not fake.sudo_calls
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+@pytest.mark.parametrize("owner", [None, OTHER_TRANSACTION])
+def test_guarded_recovery_rechecks_owner_under_root_lock(
+    fake: Fake, op: str, owner: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    expected = b""
+    lock = edge._lock
+    locked = False
+
+    @contextlib.contextmanager
+    def tracked_lock(*, create: bool) -> Any:
+        nonlocal locked
+        with lock(create=create):
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+
+    inspect = edge._inspect
+
+    def inspect_locked(uid: int) -> tuple[str, dict[str, Any] | None]:
+        assert locked
+        return inspect(uid)
+
+    def sudo(args: list[str], *, interactive: bool) -> int:
+        nonlocal expected
+        assert not locked and not interactive
+        edge._write_marker(UID, HOST, edge._pending("enable", False, False, transaction=owner))
+        expected = Path(edge.MARKER).read_bytes()
+        monkeypatch.setattr(edge, "_euid", lambda: 0)
+        return edge.main(args)
+
+    monkeypatch.setattr(edge, "_lock", tracked_lock)
+    monkeypatch.setattr(edge, "_inspect", inspect_locked)
+    monkeypatch.setattr(edge, "_sudo", sudo)
+    fake.calls.clear()
+    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == 1
+    assert Path(edge.MARKER).read_bytes() == expected
+    assert fake.state() == (True, True) and not fake.calls
+
+
+@pytest.mark.parametrize("nat", [False, True])
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+def test_transaction_retained_through_enable_publications_and_owned_recovery(
+    fake: Fake, nat: bool, legacy: bool, op: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = inactive_legacy_edge(fake, nat) if legacy else None
+    atomic = edge._atomic
+    journals = []
+    run = fake.run
+
+    def publish(path: str, data: bytes, **kw: Any) -> None:
+        atomic(path, data, **kw)
+        if path == edge.MARKER:
+            marker = edge._parse_marker(data, UID)
+            assert marker is not None and marker["pending"]["transaction"] == TRANSACTION
+            journals.append(marker)
+
+    def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+        if args[0] in ("apt-get", "runuser"):
+            assert fake.marker()["pending"]["transaction"] == TRANSACTION
+        return run(args, timeout)
+
+    monkeypatch.setattr(edge, "_atomic", publish)
+    monkeypatch.setattr(edge, "_run", commands)
+    args = ["enable", HOST, str(UID), "--transaction", TRANSACTION]
+    assert edge.main([*args, *(["--behind-nat"] if nat else [])]) == 0
+    assert len(journals) == (1 if legacy else 2)
+    if not legacy:
+        assert journals[0]["pending"]["prep"] == [os.path.basename(p) for p in edge.STOCK_UNITS]
+        assert journals[1]["pending"]["prep"] is None
+    assert fake.marker()["pending"]["transaction"] == TRANSACTION
+    assert edge._inspect(UID)[0] == "owned"
+    monkeypatch.setattr(edge, "_atomic", atomic)
+    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == 0
+    assert fake.marker()["pending"] is None
+    assert fake.state() == ((True, True) if op == "commit" else (False, False))
+    if baseline is not None and op == "rollback":
+        assert (Path(edge.MARKER).read_bytes(), Path(edge.CADDYFILE).read_bytes()) == baseline
+    fake.calls.clear()
+    assert edge.main([op, str(UID), "--transaction", TRANSACTION]) == (1 if op == "commit" else 0)
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("owner", [None, OTHER_TRANSACTION])
+def test_enable_failure_cleanup_does_not_undo_replaced_transaction(
+    fake: Fake, legacy: bool, owner: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if legacy:
+        inactive_legacy_edge(fake, False)
+    expected = b""
+    calls = []
+
+    def fail_probe(host: str, path: str) -> int:
+        nonlocal expected
+        marker = fake.marker()
+        marker["pending"] = edge._pending("enable", False, False, transaction=owner)
+        edge._write_marker(UID, HOST, marker["pending"], version=marker["version"])
+        expected = Path(edge.MARKER).read_bytes()
+        calls.extend(fake.calls)
+        return 200
+
+    fake.https = fail_probe
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 1
+    assert Path(edge.MARKER).read_bytes() == expected
+    assert fake.state() == (True, True)
+    assert fake.calls == calls
+    assert Path(edge.CADDYFILE).read_bytes() == edge._caddyfile(HOST)
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+@pytest.mark.parametrize("transaction", [None, TRANSACTION])
+@pytest.mark.parametrize("unprivileged", [False, True])
+def test_recovery_absent_state_requires_pending_only_for_guarded_commit(
+    fake: Fake,
+    op: str,
+    transaction: str | None,
+    unprivileged: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    args = [op, str(UID), *(["--transaction", transaction] if transaction is not None else [])]
+    refused = op == "commit" and transaction is not None
+    assert edge.main(args) == (1 if refused else 0)
+    if refused:
+        assert "no pending Direct edge transaction to commit" in capsys.readouterr().err
+    assert not fake.calls and not fake.sudo_calls
+    assert not Path(edge.IMP_DIR).exists()
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+@pytest.mark.parametrize("transaction", [None, TRANSACTION])
+@pytest.mark.parametrize("unprivileged", [False, True])
+def test_recovery_committed_state_requires_pending_only_for_guarded_commit(
+    fake: Fake,
+    op: str,
+    transaction: str | None,
+    unprivileged: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    assert edge.main(["commit", str(UID), "--transaction", TRANSACTION]) == 0
+    assert fake.marker()["pending"] is None
+    paths = [edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH, *edge.STOCK_UNITS]
+    before = [(Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths]
+    state = fake.state()
+    fake.calls.clear()
+    if unprivileged:
+        monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    args = [op, str(UID), *(["--transaction", transaction] if transaction is not None else [])]
+    refused = op == "commit" and transaction is not None
+    assert edge.main(args) == (1 if refused else 0)
+    if refused:
+        assert "no pending Direct edge transaction to commit" in capsys.readouterr().err
+    assert [
+        (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+    ] == before
+    assert fake.state() == state
+    assert not fake.calls and not fake.sudo_calls
+
+
+def test_guarded_commit_rechecks_pending_under_root_lock_after_manual_rollback(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    paths = [edge.MARKER, edge.CADDYFILE, edge.UNIT_PATH, *edge.STOCK_UNITS]
+    expected: list[tuple[int, int, bytes]] = []
+    lock = edge._lock
+    locked = False
+
+    @contextlib.contextmanager
+    def tracked_lock(*, create: bool) -> Any:
+        nonlocal locked
+        with lock(create=create):
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+
+    inspect = edge._inspect
+
+    def inspect_locked(uid: int) -> tuple[str, dict[str, Any] | None]:
+        assert locked
+        return inspect(uid)
+
+    requested = ["commit", str(UID), "--transaction", TRANSACTION]
+
+    def sudo(args: list[str], *, interactive: bool) -> int:
+        assert args == requested and not locked and not interactive
+        fake.sudo_calls.append((args, interactive))
+        monkeypatch.setattr(edge, "_euid", lambda: 0)
+        assert edge.main(["rollback", str(UID)]) == 0
+        assert fake.marker()["pending"] is None
+        assert fake.state() == (False, False)
+        expected.extend(
+            (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+        )
+        fake.calls.clear()
+        return edge.main(args)
+
+    monkeypatch.setattr(edge, "_lock", tracked_lock)
+    monkeypatch.setattr(edge, "_inspect", inspect_locked)
+    monkeypatch.setattr(edge, "_sudo", sudo)
+    assert edge.main(requested) == 1
+    assert "no pending Direct edge transaction to commit" in capsys.readouterr().err
+    assert fake.sudo_calls == [(requested, False)]
+    assert [
+        (Path(p).lstat().st_mtime_ns, Path(p).lstat().st_mode, Path(p).read_bytes()) for p in paths
+    ] == expected
+    assert fake.state() == (False, False) and not fake.calls
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+def test_manual_recovery_can_finish_transaction_identified_enable(fake: Fake, op: str) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    assert edge.main([op, str(UID)]) == 0
+    assert fake.marker()["pending"] is None
+    assert fake.state() == ((True, True) if op == "commit" else (False, False))
+
+
+def test_transaction_marker_rejects_duplicate_and_extra_keys() -> None:
+    data = edge._marker_bytes(UID, HOST, edge._pending("enable", False, False, transaction=TRANSACTION))
+    duplicate = data.replace(
+        f'"transaction":"{TRANSACTION}"'.encode(),
+        f'"transaction":"{TRANSACTION}","transaction":"{TRANSACTION}"'.encode(),
+    )
+    assert edge._parse_marker(duplicate, UID) is None
+    pending = edge._pending("enable", False, False, transaction=TRANSACTION)
+    pending["extra"] = TRANSACTION
+    assert edge._parse_marker(edge._marker_bytes(UID, HOST, pending), UID) is None
+
+
+@pytest.mark.parametrize("op", ["commit", "rollback"])
+def test_guarded_same_owner_recovery_preserves_arguments_through_sudo(
+    fake: Fake, op: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 0
+    monkeypatch.setattr(edge, "_euid", lambda: UID or 1000)
+    requested = [op, str(UID), "--transaction", TRANSACTION]
+
+    def sudo(args: list[str], *, interactive: bool) -> int:
+        assert args == requested and not interactive
+        fake.sudo_calls.append((args, interactive))
+        monkeypatch.setattr(edge, "_euid", lambda: 0)
+        return edge.main(args)
+
+    monkeypatch.setattr(edge, "_sudo", sudo)
+    assert edge.main(requested) == 0
+    assert fake.sudo_calls == [(requested, False)]
+    assert fake.marker()["pending"] is None
+    assert fake.state() == ((True, True) if op == "commit" else (False, False))
+
+
+def test_guarded_prepackage_failure_retains_identity_for_owned_recovery(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake.fail["systemctl mask"] = True
+    with monkeypatch.context() as m:
+        m.setattr(edge, "_failed", lambda *a, **kw: None)
+        assert edge.main(["enable", HOST, str(UID), "--transaction", TRANSACTION]) == 1
+    pending = fake.marker()["pending"]
+    assert pending["transaction"] == TRANSACTION and pending["prep"] is not None
+    fake.fail.clear()
+    assert edge.main(["rollback", str(UID), "--transaction", OTHER_TRANSACTION]) == 1
+    assert fake.marker()["pending"] == pending
+    assert edge.main(["rollback", str(UID), "--transaction", TRANSACTION]) == 0
+    assert edge._inspect(UID) == ("absent", None)

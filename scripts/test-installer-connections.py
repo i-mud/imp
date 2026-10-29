@@ -59,6 +59,19 @@ def check(condition, message, result=None):
         die(message)
 
 
+def installer_transaction(site, commands, result):
+    calls = site.edge().get("transaction_calls", [])
+    check([call[0] for call in calls] == commands, "wrong guarded transaction command order", result)
+    identities = [call[call.index("--transaction") + 1] for call in calls]
+    check(
+        len(set(identities)) == 1
+        and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", identities[0]) is not None,
+        "installer did not preserve one canonical kernel transaction identity",
+        result,
+    )
+    return identities[0]
+
+
 # ---------------------------------------------------------------- shims ----
 
 SYSTEMCTL = """#!/bin/sh
@@ -145,6 +158,8 @@ with open(os.environ["IMP_TEST_WSS_LOG"], "a") as log:
         "stdin_tty": os.ttyname(0) if os.isatty(0) else None,
         "stdout_tty": os.ttyname(1) if os.isatty(1) else None,
         "edge_pending": pending,
+        "edge_version": json.loads(marker.read_text())["version"] if marker.exists() else None,
+        "edge_caddyfile": (marker.parent / "Caddyfile").read_text() if marker.exists() else None,
     }}) + "\\n")
 with open(os.environ["IMP_TEST_EVENTS"], "a") as events:
     events.write("wss " + " ".join(sys.argv[1:]) + "\\n")
@@ -156,13 +171,18 @@ if marker.exists() and json.loads(marker.read_text()).get("behind_nat", False):
 if sys.argv[1:] != expected:
     print("public verification does not match the owned edge topology", file=sys.stderr)
     sys.exit(1)
-if config.exists() or (units / "active-imp-gateway.service").exists():
-    print("setup requires no credential and an inactive gateway", file=sys.stderr)
+if config.exists():
+    print("Direct WSS is already configured; no changes made.")
+    sys.exit(0)
+if (units / "active-imp-gateway.service").exists():
+    print("setup cannot replace credentials while the gateway is already active", file=sys.stderr)
     sys.exit(1)
 if os.environ.get("IMP_TEST_PROVISION") == "fail":
     print("provisioning failed", file=sys.stderr)
     sys.exit(1)
 token = secrets.token_urlsafe(32)
+with open(os.environ["IMP_TEST_EVENTS"], "a") as events:
+    events.write("token-generated\\n")
 config.write_text("IMP_GATEWAY_TOKEN_SHA256=" + hashlib.sha256(token.encode()).hexdigest() + "\\n")
 config.chmod(0o600)
 subprocess.run(["systemctl", "--user", "enable", "--now", "imp-gateway.service"], check=True)
@@ -307,6 +327,7 @@ def edge_driver(args):
                 "MainPID": "4242" if unit["active"] else "0",
                 "NeedDaemonReload": "no",
             }
+            props.update(state.get("unit_properties", {}))
             out = "".join(f"{k}={v}\n" for k, v in props.items())
         elif (
             tool == "systemctl"
@@ -375,8 +396,11 @@ def edge_driver(args):
             else:
                 Path(mod.CADDY_BIN).parent.mkdir(parents=True, exist_ok=True)
                 Path(mod.CADDY_BIN).touch(mode=0o755)
-        elif tool == "runuser" and "validate" in rest and args[:1] == ["migrate"] and state.get("migration_fail") == "validate":
-            rc, err = 1, "injected migration validation failure"
+        elif tool == "runuser" and "validate" in rest and (
+            args[:1] == ["migrate"] and state.get("migration_fail") == "validate"
+            or args[:1] == ["enable"] and state.get("enable_validation_fail")
+        ):
+            rc, err = 1, "injected Caddy validation failure"
         save(state)
         query = os.environ.get("IMP_TEST_RECONCILE_QUERY")
         if query and args[:1] == ["ssh-committed"] and argv[:2] == ["systemctl", "show"]:
@@ -452,6 +476,7 @@ def edge_driver(args):
     mod._run = run
     mod._resolve = resolve
     mod._https_status = https_status
+    mod._sudo = sudo
     if args[:1] == ["migrate"] and load().get("migration_fail") == "publication":
         original_atomic = mod._atomic
 
@@ -464,7 +489,34 @@ def edge_driver(args):
             original_atomic(path, data, **kwargs)
 
         mod._atomic = fail_publication
-    mod._sudo = sudo
+    if "--transaction" in args:
+        state = load()
+        state.setdefault("transaction_calls", []).append(args)
+        save(state)
+    if args[:1] == [os.environ.get("IMP_TEST_REPLACE_TRANSACTION")]:
+        marker = Path(mod.MARKER)
+        owned = json.loads(marker.read_text())
+        owned["pending"]["transaction"] = Path("/proc/sys/kernel/random/uuid").read_text().strip()
+        marker.write_text(json.dumps(owned, sort_keys=True, separators=(",", ":")) + "\n")
+        state = load()
+        state["replacement_marker"] = marker.read_text()
+        state["replacement_caddyfile"] = Path(mod.CADDYFILE).read_text()
+        state["replacement_sudo_calls"] = state.get("sudo_calls", 0)
+        state["replacement_call_count"] = len(state["calls"])
+        save(state)
+    if args[:1] == ["commit"] and os.environ.get("IMP_TEST_ROLLBACK_BEFORE_COMMIT"):
+        actor_rc = mod.main(["rollback", args[1]])
+        with open(os.environ["IMP_TEST_EVENTS"], "a") as events:
+            events.write(f"manual rollback rc={actor_rc}\n")
+        state = load()
+        state["rollback_actor_rc"] = actor_rc
+        state["rollback_actor_tree"] = {
+            path: data.hex() if isinstance(data, bytes) else data
+            for path, data in home_tree(root).items()
+        }
+        state["rollback_actor_sudo_calls"] = state.get("sudo_calls", 0)
+        state["rollback_actor_call_count"] = len(state["calls"])
+        save(state)
     publication = os.environ.get("IMP_TEST_PUBLICATION_SIGNAL")
     if publication and args[:1] == ["enable"]:
         original_atomic = mod._atomic
@@ -1961,6 +2013,238 @@ def run_all(work, shipping, next_shipping):
             result,
         )
 
+    print("=== retained legacy edge -> SSH -> remove only gateway.env -> matching Direct ===")
+
+    def retained_legacy(version):
+        # Reset only before the sequence: SSH must retain the actual owned root files.
+        site.reset(gateway=(True, True))
+        site.write_credential()
+        site.owned_edge(version, behind_nat=version == 2)
+        if version == 2:
+            site.set_edge(addrs=["192.168.1.12"])
+        edge_tree, credential = home_tree(site.edge_root), site.config().read_bytes()
+        result = site.install(bundle, ["--connection", "ssh"])
+        check(
+            result.rc == 0 and site.gateway_state() == site.unit_state() == (False, False)
+            and home_tree(site.edge_root) == edge_tree and site.config().read_bytes() == credential,
+            f"v{version}: SSH failed to retain the canonical legacy baseline",
+            result,
+        )
+        site.config().unlink()
+        site.events.write_text("")
+        site.wss_log.write_text("")
+        site.set_edge(calls=[])
+        return edge_tree
+
+    for version in (1, 2):
+        edge_tree = retained_legacy(version)
+        for args in ([], ["--connection", "none"]):
+            snap = site.snapshot()
+            result = site.install(bundle, args)
+            check(
+                result.rc == 0 and site.snapshot() == snap and home_tree(site.edge_root) == edge_tree
+                and site.gateway_state() == site.unit_state() == (False, False)
+                and not site.events_list() and not site.wss_calls() and "PAIRING-TOKEN:" not in result.out,
+                f"v{version}: missing credential {args} implicitly recovered Direct",
+                result,
+            )
+        result = direct(behind_nat=version == 2)
+        check(result.rc == 0, f"v{version}: explicit retained-edge recovery failed", result)
+        calls = site.wss_calls()
+        transaction = installer_transaction(site, ["enable", "commit"], result)
+        sys.path.insert(0, EDGE_SRC)
+        from imp_relay import direct_edge as edge_mod
+        check(
+            len(calls) == 1
+            and calls[0]["argv"] == ["setup", "--public-url", f"wss://{HOST}/state"]
+            + (["--verify-via-loopback"] if version == 2 else [])
+            and calls[0]["edge_version"] == version
+            and calls[0]["edge_pending"] == {
+                "op": "enable", "prior_enabled": False, "prior_active": False, "prep": None,
+                "transaction": transaction,
+            }
+            and calls[0]["edge_caddyfile"] == edge_mod._caddyfile(HOST, version == 2).decode()
+            and calls[0]["stdin_tty"] == calls[0]["stdout_tty"] == result.tty,
+            f"v{version}: setup did not observe the precise legacy-enable/current-policy journal",
+            result,
+        )
+        tokens = re.findall(r"PAIRING-TOKEN:(\S+)", result.out)
+        check(
+            len(tokens) == 1 and site.events_list().count("token-generated") == 1
+            and site.config().read_text() == f"IMP_GATEWAY_TOKEN_SHA256={hashlib.sha256(tokens[0].encode()).hexdigest()}\n"
+            and site.marker()["version"] == 3 and site.marker()["pending"] is None
+            and site.marker()["behind_nat"] == (version == 2)
+            and site.gateway_state() == site.unit_state() == (True, True),
+            f"v{version}: recovery did not hand off exactly one new identity and commit schema3",
+            result,
+        )
+        events = site.events_list()
+        check(
+            events.index("edge enable rc=0") < events.index("token-generated") < events.index("edge commit rc=0")
+            and sum(e.startswith("edge enable ") for e in events) == 1,
+            f"v{version}: recovery bypassed the existing enable/setup/commit sequence",
+            result,
+        )
+        after = home_tree(site.edge_root)
+        check(
+            {p for p in edge_tree.keys() | after.keys() if edge_tree.get(p) != after.get(p)}
+            == {"etc/imp/Caddyfile", "etc/imp/direct-edge.json"},
+            f"v{version}: recovery changed retained unit, masks, or certificate state",
+            result,
+        )
+
+    print("=== retained legacy recovery failures restore public edge, preserve handed-off identity ===")
+    for version, phase in itertools.product(
+        (1, 2), ("validate", "publication", "start", "fail", "fail_after_replacement", "active-gateway", "commit", "handoff")
+    ):
+        edge_tree = retained_legacy(version)
+        extra = {}
+        if phase == "validate":
+            site.set_edge(enable_validation_fail=True)
+        elif phase == "publication":
+            extra = {"IMP_TEST_PUBLICATION_SIGNAL": "Caddyfile"}
+        elif phase == "start":
+            site.set_edge(start_fail=True)
+        elif phase == "commit":
+            site.set_edge(commit_fail=True)
+        elif phase == "handoff":
+            extra = {"IMP_TEST_SIGNAL_PHASE": "handoff", "IMP_TEST_SIGNAL": "SIGTERM"}
+        elif phase == "active-gateway":
+            site.set_gateway(enabled=True, active=True)
+        else:
+            extra = {"IMP_TEST_PROVISION": phase}
+        snap, tree = site.snapshot(), home_tree(site.home)
+        result = direct(behind_nat=version == 2, extra=extra)
+        handed_off = phase in ("commit", "handoff")
+        check(
+            result.rc != 0 and "Imp Direct WSS is ready" not in result.out
+            and home_tree(site.edge_root) == edge_tree and site.marker()["version"] == version
+            and site.marker()["pending"] is None and site.unit_state() == (False, False),
+            f"v{version} {phase}: failure did not restore exact legacy files and close the edge",
+            result,
+        )
+        if handed_off:
+            check(
+                len(re.findall(r"PAIRING-TOKEN:(\S+)", result.out)) == 1
+                and site.events_list().count("token-generated") == 1
+                and site.config().is_file() and site.gateway_state() == (True, True)
+                and (site.home / ".local/share/imp/current").is_symlink()
+                and all((site.home / ".config/systemd/user" / name).is_file()
+                        for name in ("imp-relay.service", "imp-feed.service", "imp-gateway.service")),
+                f"v{version} {phase}: post-handoff failure lost credential/runtime",
+                result,
+            )
+        else:
+            check(
+                site.snapshot() == snap and home_tree(site.home) == tree and "PAIRING-TOKEN:" not in result.out,
+                f"v{version} {phase}: pre-handoff failure changed retained installer state",
+                result,
+            )
+        if phase == "active-gateway":
+            check(
+                len(site.wss_calls()) == 1 and "gateway is already active" in result.out
+                and "token-generated" not in site.events_list() and site.gateway_state() == (True, True),
+                f"v{version}: active gateway was stopped or generated a replacement identity",
+                result,
+            )
+
+    print("=== retained legacy recovery rejects ownership, journal, masks, and service drift ===")
+    for version, drift in itertools.product((1, 2), (
+        "hostname", "topology", "uid", "config", "unit", "mask", "pending", "other-pending",
+        "stale", "enabled", "active", "pid", "unloaded",
+    )):
+        retained_legacy(version)
+        marker_path = site.edge_root / "etc/imp/direct-edge.json"
+        if drift in ("uid", "pending", "other-pending"):
+            marker = site.marker()
+            if drift == "uid":
+                marker["owner_uid"] += 1
+            else:
+                marker["pending"] = {
+                    "op": "enable", "prior_enabled": False, "prior_active": False, "prep": None,
+                }
+                if drift == "other-pending":
+                    marker["pending"]["transaction"] = Path("/proc/sys/kernel/random/uuid").read_text().strip()
+            marker_path.write_text(json.dumps(marker, sort_keys=True, separators=(",", ":")) + "\n")
+        elif drift in ("config", "unit"):
+            path = site.edge_root / ("etc/imp/Caddyfile" if drift == "config" else "etc/systemd/system/imp-caddy.service")
+            path.write_bytes(path.read_bytes() + b"\n# operator edit\n")
+        elif drift == "mask":
+            (site.edge_root / "etc/systemd/system/caddy.service").unlink()
+        elif drift in ("enabled", "active"):
+            site.set_edge(unit={"enabled": drift == "enabled", "active": drift == "active"})
+        elif drift in ("stale", "pid", "unloaded"):
+            site.set_edge(unit_properties={
+                "stale": {"NeedDaemonReload": "yes"},
+                "pid": {"MainPID": "4242"},
+                "unloaded": {"LoadState": "not-found", "FragmentPath": ""},
+            }[drift])
+        if version == 2 and drift == "topology":
+            site.set_edge(addrs=[GLOBAL])
+        args = ["--connection", "direct", "--hostname", OTHER if drift == "hostname" else HOST]
+        if (version == 2) != (drift == "topology"):
+            args.append("--behind-nat")
+        snap, tree, edge_tree = site.snapshot(), home_tree(site.home), home_tree(site.edge_root)
+        unit, sudo_before = site.unit_state(), site.edge()["sudo_calls"]
+        result = direct(args=args)
+        check(
+            result.rc != 0 and site.snapshot() == snap and home_tree(site.home) == tree
+            and home_tree(site.edge_root) == edge_tree and site.unit_state() == unit
+            and not site.wss_calls() and "token-generated" not in site.events_list()
+            and "PAIRING-TOKEN:" not in result.out and site.edge()["sudo_calls"] == sudo_before
+            and not any(call.startswith(("systemctl enable", "systemctl start", "systemctl restart"))
+                        for call in site.edge()["calls"]),
+            f"v{version} {drift}: inadmissible recovery mutated/provisioned the public edge",
+            result,
+        )
+        if drift in ("pending", "other-pending"):
+            installer_transaction(site, ["enable", "rollback"], result)
+            check(
+                "edge enable rc=1" in site.events_list()
+                and "edge rollback rc=1" in site.events_list()
+                and "public-edge restoration failed" in result.out,
+                f"v{version} {drift}: existing journal did not survive actual guarded EXIT cleanup",
+                result,
+            )
+        if drift == "topology":
+            check(
+                "edge enable rc=1" in site.events_list() and "different NAT topology" in result.out,
+                f"v{version}: topology drift did not reach helper admission",
+                result,
+            )
+
+    print("=== canonical current pending journals survive failed fresh Direct and guarded EXIT cleanup ===")
+    for identified in (False, True):
+        site.reset()
+        options = ["--transaction", Path("/proc/sys/kernel/random/uuid").read_text().strip()] if identified else []
+        site.drive("enable", HOST, str(uid), *options)
+        site.events.write_text("")
+        site.set_edge(calls=[], transaction_calls=[])
+        snap, tree, edge_tree = site.snapshot(), home_tree(site.home), home_tree(site.edge_root)
+        unit, sudo_before = site.unit_state(), site.edge()["sudo_calls"]
+        result = direct()
+        transaction = installer_transaction(site, ["enable", "rollback"], result)
+        check(
+            result.rc != 0 and site.snapshot() == snap and home_tree(site.home) == tree
+            and home_tree(site.edge_root) == edge_tree and site.unit_state() == unit
+            and site.marker()["pending"].get("transaction") != transaction
+            and site.edge()["sudo_calls"] == sudo_before
+            and "edge enable rc=1" in site.events_list()
+            and "edge rollback rc=1" in site.events_list()
+            and "public-edge restoration failed" in result.out
+            and not site.wss_calls() and "token-generated" not in site.events_list()
+            and "PAIRING-TOKEN:" not in result.out,
+            f"current pending identified={identified}: failed installer adopted or mutated another journal",
+            result,
+        )
+        check(
+            all(call == "ip -j address show scope global"
+                or call.startswith(("systemctl is-enabled", "systemctl is-active", "systemctl show"))
+                for call in site.edge()["calls"]),
+            f"current pending identified={identified}: unexpected system calls {site.edge()['calls']!r}",
+            result,
+        )
+
     print("=== no-start migration uses incoming gateway state without user-service mutation ===")
     for version, gateway in itertools.product(
         (1, 2), ((True, True), (True, False), (False, True))
@@ -2209,6 +2493,8 @@ def run_all(work, shipping, next_shipping):
         result,
     )
     check(calls[0]["edge_pending"]["op"] == "enable", "edge was not pending during provisioning", result)
+    transaction = installer_transaction(site, ["enable", "commit"], result)
+    check(calls[0]["edge_pending"]["transaction"] == transaction, "setup observed another transaction", result)
     check(
         site.marker()["pending"] is None and site.unit_state() == (True, True),
         "edge not committed enabled/active",
@@ -2702,6 +2988,8 @@ def run_all(work, shipping, next_shipping):
         result,
     )
     check("edge rollback rc=0" in site.events_list(), "failure did not roll the edge back", result)
+    transaction = installer_transaction(site, ["enable", "rollback"], result)
+    check(site.wss_calls()[0]["edge_pending"]["transaction"] == transaction, "cleanup owner differs from setup", result)
     check(site.unit_state() == (False, False), "provision failure left public listener on", result)
     check(site.marker()["pending"] is None, "pending edge record not resolved", result)
     check(
@@ -2737,6 +3025,85 @@ def run_all(work, shipping, next_shipping):
     )
     check(site.config().exists(), "commit failure removed the already-handed-off credential", result)
     check((site.home / ".local/share/imp/current").is_symlink(), "commit failure removed the runtime", result)
+    installer_transaction(site, ["enable", "commit", "rollback"], result)
+
+    print("=== replaced pending owner refuses commit/cleanup and retains handed-off identity ===")
+    for boundary in ("commit", "rollback"):
+        edge_tree = retained_legacy(2)
+        if boundary == "rollback":
+            site.set_edge(commit_fail=True)
+        result = direct(behind_nat=True, extra={"IMP_TEST_REPLACE_TRANSACTION": boundary})
+        transaction = installer_transaction(site, ["enable", "commit", "rollback"], result)
+        state = site.edge()
+        expected_tree = dict(edge_tree)
+        expected_tree["etc/imp/direct-edge.json"] = state["replacement_marker"].encode()
+        expected_tree["etc/imp/Caddyfile"] = state["replacement_caddyfile"].encode()
+        check(
+            result.rc != 0 and "Imp Direct WSS is ready" not in result.out
+            and "edge commit rc=1" in site.events_list()
+            and "edge rollback rc=1" in site.events_list()
+            and "public-edge restoration failed" in result.out
+            and site.marker()["pending"]["transaction"] != transaction
+            and home_tree(site.edge_root) == expected_tree
+            and site.unit_state() == (True, True)
+            and state["sudo_calls"] == state["replacement_sudo_calls"]
+            and all(call.split()[0] in ("is-enabled", "is-active", "show")
+                    for call in (entry.removeprefix("systemctl ")
+                                 for entry in state["calls"][state["replacement_call_count"]:])),
+            f"{boundary}: installer adopted or mutated a replaced pending owner",
+            result,
+        )
+        tokens = re.findall(r"PAIRING-TOKEN:(\S+)", result.out)
+        check(
+            len(tokens) == 1
+            and site.config().read_text() == f"IMP_GATEWAY_TOKEN_SHA256={hashlib.sha256(tokens[0].encode()).hexdigest()}\n"
+            and (site.home / ".local/share/imp/current").is_symlink()
+            and site.gateway_state() == (True, True),
+            f"{boundary}: refused cleanup lost the handed-off credential/runtime",
+            result,
+        )
+
+    print("=== manual rollback after handoff refuses guarded commit without pending journal ===")
+    for version in (1, 2):
+        edge_tree = retained_legacy(version)
+        result = direct(behind_nat=version == 2, extra={"IMP_TEST_ROLLBACK_BEFORE_COMMIT": "1"})
+        transaction = installer_transaction(site, ["enable", "commit", "rollback"], result)
+        state, events, calls = site.edge(), site.events_list(), site.wss_calls()
+        check(
+            result.rc != 0 and "Imp Direct WSS is ready" not in result.out
+            and "edge commit rc=1" in events and "edge rollback rc=0" in events
+            and state["rollback_actor_rc"] == 0
+            and events.index("token-generated") < events.index("manual rollback rc=0")
+            < events.index("edge commit rc=1") < events.index("edge rollback rc=0")
+            and len(calls) == 1 and calls[0]["edge_version"] == version
+            and calls[0]["edge_pending"]["transaction"] == transaction,
+            f"v{version}: cleared journal let installer commit or bypassed post-handoff rollback race",
+            result,
+        )
+        after = home_tree(site.edge_root)
+        check(
+            site.unit_state() == (False, False) and site.marker()["pending"] is None
+            and after == edge_tree
+            and {path: data.hex() if isinstance(data, bytes) else data for path, data in after.items()}
+            == state["rollback_actor_tree"]
+            and state["sudo_calls"] == state["rollback_actor_sudo_calls"]
+            and all(call.split()[0] in ("is-enabled", "is-active", "show")
+                    for call in (entry.removeprefix("systemctl ")
+                                 for entry in state["calls"][state["rollback_actor_call_count"]:])),
+            f"v{version}: commit/absent-journal cleanup mutated root state after manual rollback",
+            result,
+        )
+        tokens = re.findall(r"PAIRING-TOKEN:(\S+)", result.out)
+        check(
+            len(tokens) == 1 and events.count("token-generated") == 1
+            and site.config().read_text() == f"IMP_GATEWAY_TOKEN_SHA256={hashlib.sha256(tokens[0].encode()).hexdigest()}\n"
+            and (site.home / ".local/share/imp/current").is_symlink()
+            and site.gateway_state() == (True, True)
+            and all((site.home / ".config/systemd/user" / name).is_file()
+                    for name in ("imp-relay.service", "imp-feed.service", "imp-gateway.service")),
+            f"v{version}: cleared-journal commit failure lost handed-off credential/runtime",
+            result,
+        )
     print("=== NAT pre-handoff failure rolls back; post-handoff failure retains identity ===")
     for phase in ("fail", "fail_after_replacement", "commit"):
         site.reset()

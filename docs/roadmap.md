@@ -784,14 +784,20 @@ In progress. Bounded scope:
    Python classifier distinguishes directly-addressed DNS from successfully
    inspected NAT-eligible mismatches. Failed interface inspection and invalid
    DNS do not offer NAT; accepted offers rerun authoritative NAT validation.
-4. Recovery of an exact-owned inactive legacy edge when `gateway.env` is missing.
+4. Recovery of an exact-owned inactive legacy edge when `gateway.env` is missing
+   (implemented in PR4): explicit matching Direct setup validates and enables
+   retained policy under one legacy-baseline journal, then uses the existing
+   new-token handoff and commit. Unsafe state is refused; rollback stops the
+   listener before restoring legacy policy.
 5. Installation documentation and completion-message corrections.
 
 PR2 does not change Direct provisioning, native credential persistence, or the
 protocol. PR3 changes only read-only preflight classification and its installer
 decision; public-edge ownership, provisioning, credentials, and rollback remain
-unchanged. Neither PR claims live infrastructure acceptance.
-Items 4–5 remain unimplemented.
+unchanged. PR4 narrowly extends legacy enable/rollback and gives new Direct
+installer journals per-invocation ownership; ordinary migrations and credential
+provisioning are unchanged.
+These PRs do not claim live infrastructure acceptance. Item 5 remains outstanding.
 
 ## Candidate work
 
