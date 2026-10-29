@@ -744,9 +744,12 @@ fi
 case "$CONNECTION" in
   ssh)
     if ((!START_SERVICES)); then
-      printf '\nServices were not started; existing gateway and public-edge state is preserved.\n'
+      printf '\nImp is installed and configured for SSH; services were not started.\n'
+      printf 'Existing gateway and public-edge state is preserved.\n'
+    else
+      printf '\nImp is ready for SSH connections.\n'
     fi
-    printf '\nImp is ready for SSH connections.\n\nIn Settings -> Connection choose:\n'
+    printf '\nIn Settings -> Connection choose:\n'
     printf '  Managed SSH  - Imp manages the SSH tunnel\n  External SSH - you manage the SSH tunnel\n'
     ;;
   direct)
@@ -764,7 +767,11 @@ case "$CONNECTION" in
     fi
     ;;
   *)
-    printf '\nConnection configuration preserved; Direct remains unconfigured on a fresh install.\n'
+    if ((EXISTING_INSTALL)); then
+      printf '\nExisting connection configuration preserved.\n'
+    else
+      printf '\nNo remote connection configured; Direct remains unconfigured.\n'
+    fi
     printf 'To configure later, rerun with --connection ssh or --connection direct --hostname HOST.\n'
     ;;
 esac
