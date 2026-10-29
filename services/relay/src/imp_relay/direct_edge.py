@@ -787,6 +787,7 @@ def _restore_pending(uid: int, marker: dict[str, Any]) -> None:
     if _legacy_enable(marker):
         _check_masks()
         _restore(pending, require_success=True)
+        _cmd("systemctl", "reset-failed", UNIT_NAME)
         if _unit_state() != (False, False, 0):
             raise EdgeError("legacy edge rollback did not stop and disable the exact owned unit")
         _check_listeners(0)

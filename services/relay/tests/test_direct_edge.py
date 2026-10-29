@@ -1912,7 +1912,8 @@ def test_legacy_enable_refuses_foreign_listener_before_mutation_or_sudo(
 
 @pytest.mark.parametrize("nat", [False, True])
 @pytest.mark.parametrize(
-    "failure", ["validation", "publication", "published", "activation", "state", "pid", "verify"]
+    "failure",
+    ["validation", "publication", "published", "activation", "activation-failed", "state", "pid", "verify"],
 )
 def test_inactive_legacy_enable_failure_restores_exact_baseline(
     fake: Fake, nat: bool, failure: str, monkeypatch: pytest.MonkeyPatch
@@ -1934,18 +1935,26 @@ def test_inactive_legacy_enable_failure_restores_exact_baseline(
             atomic(path, data, **kw)
 
         monkeypatch.setattr(edge, "_atomic", publish)
-    elif failure in ("activation", "state", "pid"):
+    elif failure in ("activation", "activation-failed", "state", "pid"):
         run = fake.run
+        failed_state = False
 
         def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+            nonlocal failed_state
             result = run(args, timeout)
+            if args[:2] == ["systemctl", "reset-failed"] and result.returncode == 0:
+                failed_state = False
             if args[:2] == ["systemctl", "enable"]:
-                if failure == "activation":
+                if failure in ("activation", "activation-failed"):
                     result.returncode, result.stderr = 1, "activation failed after start"
+                    if failure == "activation-failed":
+                        failed_state, fake.active = True, False
                 elif failure == "state":
                     fake.enabled = False
             if failure == "pid" and fake.active and args[:2] == ["systemctl", "show"]:
                 result.stdout = result.stdout.replace("MainPID=4242", "MainPID=0")
+            if failed_state and args[:2] == ["systemctl", "show"]:
+                result.stdout = result.stdout.replace("ActiveState=inactive", "ActiveState=failed")
             return result
 
         monkeypatch.setattr(edge, "_run", commands)
@@ -1955,12 +1964,15 @@ def test_inactive_legacy_enable_failure_restores_exact_baseline(
     assert Path(edge.MARKER).read_bytes() == marker
     assert Path(edge.CADDYFILE).read_bytes() == config
     assert fake.state() == (False, False)
+    assert fake.marker()["pending"] is None
+    if failure == "activation-failed":
+        assert fake.ran("systemctl", "reset-failed") == [("systemctl", "reset-failed", edge.UNIT_NAME)]
     assert not list(Path(edge.IMP_DIR).glob(".Caddyfile*.tmp"))
     assert not fake.ran("systemctl", "start") and not fake.ran("systemctl", "restart")
 
 
 @pytest.mark.parametrize("nat", [False, True])
-@pytest.mark.parametrize("failure", ["stop", "disable", "state", "listener", "restore"])
+@pytest.mark.parametrize("failure", ["stop", "disable", "reset-failed", "state", "listener", "restore"])
 def test_inactive_legacy_rollback_failure_keeps_current_policy_and_journal(
     fake: Fake, nat: bool, failure: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1969,6 +1981,22 @@ def test_inactive_legacy_rollback_failure_keeps_current_policy_and_journal(
     journal = Path(edge.MARKER).read_bytes()
     if failure in ("stop", "disable"):
         fake.fail[f"systemctl {failure}"] = True
+    elif failure == "reset-failed":
+        fake.fail["systemctl reset-failed"] = True
+        fake.active = False
+        failed_state = True
+        run = fake.run
+
+        def commands(args: list[str], timeout: float = 120) -> SimpleNamespace:
+            nonlocal failed_state
+            result = run(args, timeout)
+            if args[:2] == ["systemctl", "reset-failed"] and result.returncode == 0:
+                failed_state = False
+            if failed_state and args[:2] == ["systemctl", "show"]:
+                result.stdout = result.stdout.replace("ActiveState=inactive", "ActiveState=failed")
+            return result
+
+        monkeypatch.setattr(edge, "_run", commands)
     elif failure == "state":
         fake.need_reload = "yes"
     elif failure == "listener":
@@ -1996,6 +2024,12 @@ def test_inactive_legacy_rollback_failure_keeps_current_policy_and_journal(
     assert Path(edge.MARKER).read_bytes() == marker
     assert Path(edge.CADDYFILE).read_bytes() == config
     assert fake.state() == (False, False)
+    assert fake.marker()["pending"] is None
+    if failure == "reset-failed":
+        assert fake.ran("systemctl", "reset-failed") == [
+            ("systemctl", "reset-failed", edge.UNIT_NAME),
+            ("systemctl", "reset-failed", edge.UNIT_NAME),
+        ]
 
 
 @pytest.mark.parametrize("nat", [False, True])

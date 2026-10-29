@@ -92,8 +92,8 @@ journals include a per-invocation transaction ID, checked before sudo and again
 under the root lock by guarded commit/rollback. Guarded commit requires a
 matching pending journal; absence is a failure. Guarded rollback remains a no-op
 when the journal is absent. Automatic cleanup cannot act on an older or replaced
-transaction. Rollback proves strict quiescence before
-restoring legacy policy and marker bytes. Existing journals are not permission
+transaction. Rollback resets only the owned unit's failed state before proving
+strict quiescence and restoring legacy policy and marker bytes. Existing journals are not permission
 to resume setup, and no credential is reconstructed. Deliberate manual recovery
 without an ID and ordinary policy-only migration retain their existing behavior.
 An existing credential is preserved with an explicit not-verified continuation,
