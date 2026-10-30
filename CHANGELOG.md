@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.6] - 2026-10-30
+
+### Bug Fixes
+
+- clarify installation completion and preservation messages ([#52](https://github.com/i-mud/imp/issues/52)) ([a52fa9e](https://github.com/i-mud/imp/commit/a52fa9e6fe9c8ede0b8f1eb7c83c94e0169e14d9))
+
 ## [0.4.5] - 2026-10-29
 
 ### Bug Fixes
