@@ -57,7 +57,8 @@ warning; PR3 [#50](https://github.com/i-mud/imp/pull/50) landed NAT preflight
 classification; PR4 [#51](https://github.com/i-mud/imp/pull/51) landed exact-owned
 retained-edge recovery.
 
-Item 5 implements completion-message and installation-doc corrections: retained
+Item 5 ([#52](https://github.com/i-mud/imp/pull/52)) implements completion-message
+and installation-doc corrections: retained
 Direct already reports preservation, no public verification and no new token;
 SSH `--no-start` makes no readiness claim; fresh install-only is distinguished
 from an upgrade that preserves connection configuration.
@@ -72,6 +73,66 @@ These are implementation dispositions, not new live acceptance or publication
 claims. One-level literal include inspection does not cover arbitrary nested
 startup includes, and real Caddy/native TinyFugue runtime CI remains open. See the
 [Slice 26 scope and evidence limits](roadmap.md#slice-26---installation-reliability-and-onboarding).
+
+### 2026-10-30 — published v0.4.6 read-only acceptance: BLOCKED
+
+**Phase A artifact verification passed; Slice 26 live acceptance and closure
+remain BLOCKED.** The operator authorized no VPS or desktop changes, required
+the existing TinyFugue session to remain untouched, and had no isolated hosts
+available. This is bounded read-only evidence, not a complete environment audit
+or a replacement for the historical Slice 25 acceptance above.
+
+Published release: [v0.4.6](https://github.com/i-mud/imp/releases/tag/v0.4.6).
+Signed annotated tag `00f904d15ce0c9c913ab09f1171d5f2f6b687fbc` resolves to
+commit `f952f5f89e18681e36fff3b465742a63e5641d17`; GitHub reported its signature
+valid. [Release run 41007081793](https://github.com/i-mud/imp/actions/runs/41007081793)
+passed semantic-release, tag verification, Linux build/frozen acceptance,
+Windows NSIS build and publication.
+
+| Downloaded asset         | SHA256                                                             |
+| ------------------------ | ------------------------------------------------------------------ |
+| Linux server archive     | `c28502bf87ea74e8452d951c192df8a929950a0fb91c57f870b03307a912a313` |
+| Published checksum asset | `3c88872679b5b64f2c895bfe9ec5e629119840325fb6656b44463db5c5b38836` |
+| Windows NSIS installer   | `b20a74bdd26d489b394c6e955a3abac886e46e9f0cb5384a21a71fe6a840627b` |
+
+The Linux archive matched its published checksum; extracted internal checksums
+passed **50/50**, and `VERSION`/`BUILD_INFO` reported **0.4.6**. Under the existing
+`scripts/exec-guard.py` Landlock guard (ABI 7), with Python environment variables
+unset and `PATH=/nonexistent`, published `relay --help` and
+`runtime-check 0.4.6` exited 0. Both system and venv Python execution were denied
+with exit 126. Developer Python launched the guard, but the frozen child did not
+require host Python. This proves bounded frozen startup/version validation,
+not live service operation. Unsupported top-level `--help`/`--version` probes
+are not defects.
+
+**Observed inventory, not accepted targets:** the active VPS still ran 0.4.1
+with a schema-3 Direct edge and an existing TF session. A second VPS had occupied
+public ports and unrelated services and was excluded, not treated as disposable.
+Local Windows had installed Imp 0.4.0; a separately observed remote Windows host's
+Imp version remained unverified. No actual router/NAT target or disposable
+schema-1/schema-2 legacy targets were established.
+
+| Required live coverage              | Result / missing boundary                                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| PR #48 — TF startup onboarding      | BLOCKED: actual startup selection, hook-before-login and real operator invocation not exercised.                                           |
+| PR #49 — saved Direct credentials   | BLOCKED: no desktop UI run for cancel/pending edits, confirmed removal, blank-token preservation, replacement or restart persistence.      |
+| PR #50 — NAT classification         | BLOCKED: no authorized real Direct/NAT preflight and installer confirmation path.                                                          |
+| PR #51 — retained-edge recovery     | BLOCKED: no isolated exact-owned inactive legacy edge, guarded commit/refusal or rollback acceptance.                                      |
+| PR #52 — installation messages/docs | BLOCKED: no live fresh/retained Direct, SSH `--no-start`, install-only or upgrade flow; fixture results above are not live evidence.       |
+| Direct VPS                          | BLOCKED: no authorized v0.4.6 install/reinstall or retained-credential test; current inventory is not acceptance.                          |
+| Router/NAT                          | BLOCKED: no approved private host/router-forward environment or external reachability test.                                                |
+| Schema-1 Direct / schema-2 NAT      | BLOCKED: disposable exact-owned inactive fixtures with missing `gateway.env`, real systemd/Caddy/TLS, commit and rollback remain required. |
+| Windows published NSIS              | BLOCKED: no authorized isolated profile, installation or native UI/persistence run.                                                        |
+| Public security                     | BLOCKED: no external verifier, TLS/auth/raw-target probes or public acceptance run.                                                        |
+
+No installs, restarts, credential rotation/replacement, TF startup edits, login
+or action were attempted. A final read-only VPS recheck still observed 0.4.1,
+the same enabled/active relay/feed/gateway/Caddy PIDs, one TF process, unchanged
+hashes for the three observed public-edge files, and unchanged `gateway.env`
+mode/size metadata. Credential bytes and certificate storage were not compared;
+exact generated-edge/TLS ownership and complete service-state preservation were
+not proven. **No live changes were made, so no rollback/restoration was needed.**
+All five work-item live results remain BLOCKED; Slice 26 stays **In progress**.
 
 ## Working end to end
 
