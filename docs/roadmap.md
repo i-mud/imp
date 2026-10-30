@@ -797,7 +797,8 @@ infrastructure acceptance remains pending.
    retained policy under one legacy-baseline journal, then uses the existing
    new-token handoff and commit. Unsafe state is refused; rollback stops the
    listener before restoring legacy policy.
-5. Installation documentation and completion-message corrections (implemented):
+5. Installation documentation and completion-message corrections (landed in
+   [#52](https://github.com/i-mud/imp/pull/52)):
    preserve the already-truthful retained Direct output (configuration preserved,
    no public verification and no new token); avoid readiness claims for SSH
    `--no-start`; distinguish fresh install-only from upgrades preserving existing
@@ -809,13 +810,35 @@ decision; public-edge ownership, provisioning, credentials, and rollback remain
 unchanged. PR4 narrowly extends legacy enable/rollback and gives new Direct
 installer journals per-invocation ownership; ordinary migrations and credential
 provisioning are unchanged.
-These implementations do not claim live infrastructure acceptance or inclusion
-in a particular published artifact. Item 5 passed 12 actual-installer smoke
-scenarios, five installer fixture tests and `npm run check`; its smoke used
-fixture runtime/systemd/public-edge boundaries, not live infrastructure. The
+Implementation and fixture evidence alone do not establish live infrastructure
+acceptance. Item 5 passed 12 actual-installer smoke scenarios, five installer
+fixture tests and `npm run check`; its smoke used fixture
+runtime/systemd/public-edge boundaries, not live infrastructure. The
 earlier Slice 25 PASS evidence does not accept these later changes. One-level
 include inspection does not solve arbitrary nested includes, and real-runtime CI
 remains a separate open follow-up.
+
+**2026-10-30 — published v0.4.6 Phase A: artifact verification PASS; live
+acceptance/closure BLOCKED.** [Dated evidence and matrix](status.md#2026-10-30--published-v046-read-only-acceptance-blocked)
+record the release identity, checksums (50/50 internal), and guarded frozen
+runtime smoke with host Python denied. The operator authorized no VPS/desktop
+changes; no isolated hosts were available. The active 0.4.1 VPS and existing TF
+session were left untouched; an occupied unrelated VPS was excluded. Local
+Windows 0.4.0 is not the separately observed, version-unverified remote Windows
+environment. No live changes required restoration.
+
+Remaining live boundaries are actual TF startup selection/hook-before-login;
+published Windows NSIS and native credential cancel/removal/blank-token/
+replacement/restart persistence; Direct fresh/retained installation and
+credential preservation; real router/NAT preflight, confirmation and external
+reachability; disposable exact-owned inactive schema-1 Direct and schema-2 NAT
+missing-`gateway.env` recovery with real systemd/Caddy/TLS, guarded commit/refusal
+and rollback; live completion messages for Direct, SSH `--no-start`,
+install-only and upgrade; and external public verification including TLS,
+authentication and raw-target security probes. Current inventory and unchanged
+observed metadata do not prove TLS ownership or complete service-state
+preservation. **Slice 26 remains In progress**; nested includes and real-runtime
+CI remain open as above.
 
 ## Candidate work
 
