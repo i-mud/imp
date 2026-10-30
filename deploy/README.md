@@ -206,13 +206,21 @@ Configuration and state directories are kept private to the user.
   **Managed SSH** and **External SSH**. It creates no public edge. When services
   are being started, explicit SSH stops/disables the gateway but retains
   `gateway.env`; it disables only an unchanged Imp-owned Caddy listener.
-  Operator-owned web configuration is never disabled or modified.
-- **direct** requires live services, a public DNS hostname, and interactive
-  stdin/stdout for a new one-time token handoff. `--hostname` and `--behind-nat`
-  are valid only with Direct; `--connection direct --no-start` is rejected.
+  Operator-owned web configuration is never disabled or modified. With
+  `--no-start`, completion reports installed/configured for SSH, not ready;
+  existing gateway and public-edge state is preserved.
+- **direct** requires live services and a public DNS hostname. When no
+  `gateway.env` exists, it also requires interactive stdin/stdout for a new
+  verified one-time token handoff. With retained credentials, completion reports
+  preservation, not fresh public verification or a new token.
+  `--hostname` and `--behind-nat` are valid only with Direct;
+  `--connection direct --no-start` is rejected.
 - **none** installs normal components without configuring fresh Direct access.
   On an existing installation it preserves credentials, gateway state, and
-  public-edge identity; it does not mean delete or disable Direct.
+  public-edge identity; it does not mean delete or disable Direct. Fresh
+  install-only completion reports no remote connection configured and Direct
+  unconfigured; existing-install completion reports connection configuration
+  preserved.
 - **no option on an existing install** preserves connection state and
   operator-owned public edges. No implicit credential rotation occurs.
   Explicit Direct upgrades may migrate exact owned legacy edge policy even when
@@ -321,7 +329,8 @@ port forward available for renewal. This syntax is supported by Caddy 2.6.2
 and later; see [Caddy TLS issuer configuration](https://caddyserver.com/docs/caddyfile/directives/tls)
 and [TLS-ALPN reachability requirements](https://caddyserver.com/docs/automatic-https#tls-alpn-challenge).
 
-After activation, trusted HTTPS GETs to `/unknown`, `/ingest`, and
+When no `gateway.env` exists, the installer provisions Direct access. After
+activation, trusted HTTPS GETs to `/unknown`, `/ingest`, and
 `/action-consumer` must each return `404`. NAT readiness dials `127.0.0.1:443`
 while keeping the public hostname for TLS SNI, certificate hostname validation,
 and HTTP Host; the locally presented certificate must validate against normal

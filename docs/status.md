@@ -3,11 +3,12 @@
 Canonical status for Imp. Platform-independent checks run in WSL2; the
 native shell is also runtime-verified on Windows 11 x64.
 
-## Current release and acceptance
+## Last recorded published-artifact live acceptance
 
-[`v0.4.1`](https://github.com/i-mud/imp/releases/tag/v0.4.1) is the current
-release, published with a Windows x64 installer and a self-contained Linux x86_64
-server bundle. The server needs no host Python. It ships SSH, Direct, and
+The last recorded published-artifact live acceptance used the
+[`v0.4.1`](https://github.com/i-mud/imp/releases/tag/v0.4.1) Linux server bundle
+and the `v0.4.0` Windows x64 installer. The server needs no host Python. It ships
+SSH, Direct, and
 install-only installation, automatic Direct WSS for supported directly-addressed
 hosts, explicit router/NAT support, and an Imp-restricted Caddy edge with schema-3
 literal raw-target isolation. `v0.4.0` introduced that work; `v0.4.1` fixes the
@@ -43,10 +44,34 @@ ephemeral checkpoint and still requires a fresh identity-bearing MUD login.
 Existing TinyFugue sessions using the old hook need one
 `/load ~/.config/imp/capture.tf`; do not reboot without operator approval.
 The [Slice 25 evidence](#slice-25---connection-oriented-server-installation)
-preserves the initial failures and subsequent passing corrections. Priorities
-from acceptance are recorded once in the
-[roadmap follow-ups](roadmap.md#acceptance-follow-ups); they are not acceptance
-blockers or a Slice 26 assignment.
+preserves the initial failures and subsequent passing corrections. The
+[roadmap follow-ups](roadmap.md#acceptance-follow-ups) distinguish work implemented
+in Slice 26 from retained limitations; they do not invalidate Slice 25 acceptance.
+
+## Slice 26 implementation — live acceptance pending
+
+Slice 26 remains in progress for live infrastructure acceptance. PR1
+[#48](https://github.com/i-mud/imp/pull/48) landed startup-file onboarding; PR2
+[#49](https://github.com/i-mud/imp/pull/49) landed the saved Direct-credential
+warning; PR3 [#50](https://github.com/i-mud/imp/pull/50) landed NAT preflight
+classification; PR4 [#51](https://github.com/i-mud/imp/pull/51) landed exact-owned
+retained-edge recovery.
+
+Item 5 implements completion-message and installation-doc corrections: retained
+Direct already reports preservation, no public verification and no new token;
+SSH `--no-start` makes no readiness claim; fresh install-only is distinguished
+from an upgrade that preserves connection configuration.
+
+Item 5 verification passed: 12 actual-installer smoke scenarios covered SSH,
+install-only, omitted-mode upgrades and fresh/retained Direct, including
+credential and service-state preservation where promised. The five installer
+fixture tests and `npm run check` also passed. The smoke used isolated homes and
+fixture runtime/systemd/public-edge boundaries; it does not prove live connectivity.
+
+These are implementation dispositions, not new live acceptance or publication
+claims. One-level literal include inspection does not cover arbitrary nested
+startup includes, and real Caddy/native TinyFugue runtime CI remains open. See the
+[Slice 26 scope and evidence limits](roadmap.md#slice-26---installation-reliability-and-onboarding).
 
 ## Working end to end
 

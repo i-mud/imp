@@ -753,43 +753,55 @@ does not remove that requirement.
 
 #### Acceptance follow-ups
 
-These are retained priorities, not failed acceptance checks or a new slice:
+These priorities do not invalidate Slice 25 acceptance. Their dispositions are:
 
-- **Startup-file onboarding:** add the missing TinyFugue startup-file selection
-  UX for first-time operators.
-- **Nested includes:** detect duplicate hook loading through nested startup
-  includes.
-- **Upgrade messaging:** correct misleading Direct upgrade output when an
-  existing configuration is preserved rather than newly provisioned.
-- **Retained-edge recovery:** handle deleted `gateway.env` with a retained,
-  inactive legacy edge, without unsafe ownership adoption or credential recovery.
-- **Real-runtime CI:** run the real Caddy routing matrix and native TinyFugue
-  restart regression in CI rather than relying only on deterministic substitutes.
+- **Startup-file onboarding:** implemented in Slice 26 PR1 #48.
+- **Nested includes:** PR1 inspects one level of literal absolute/`~/` includes
+  and offers manual setup when inspection is unsafe. Arbitrary nested-include
+  duplicate detection remains open; the bounded implementation does not close it.
+- **Upgrade messaging:** implemented by Slice 26 item 5. Retained Direct already
+  truthfully reports preservation without public verification or a new token;
+  the remaining corrections cover SSH `--no-start` and fresh install-only versus
+  upgrade preservation.
+- **Retained-edge recovery:** implemented in Slice 26 PR4 #51 for an exact-owned,
+  inactive legacy edge with missing `gateway.env`; live acceptance remains pending.
+- **Real-runtime CI:** remains open. Run the real Caddy routing matrix and native
+  TinyFugue restart regression in CI rather than relying only on deterministic
+  substitutes.
 
 ## In progress
 
 ### Slice 26 - Installation reliability and onboarding
 
-In progress. Bounded scope:
+In progress: the five bounded implementation items are implemented; live
+infrastructure acceptance remains pending.
 
-1. TinyFugue onboarding/startup integration (PR1): explicit
+1. TinyFugue onboarding/startup integration (landed in PR1
+   [#48](https://github.com/i-mud/imp/pull/48)): explicit
    existing-file selection, early hook loading, one-level literal absolute/`~/`
    include duplicate detection, manual setup when inspection is unsafe, and
    honest operator confirmation of actual startup ordering.
-2. Warning before discarding saved Direct credentials (implemented in PR2):
+2. Warning before discarding saved Direct credentials (landed in PR2
+   [#49](https://github.com/i-mud/imp/pull/49)):
    inline confirmation before saving another mode removes the saved Direct URL
    and token; cancel preserves pending edits without saving. Explicit token
    replacement while staying Direct is unchanged.
-3. Correct NAT preflight error classification (implemented in PR3): a read-only
+3. Correct NAT preflight error classification (landed in PR3
+   [#50](https://github.com/i-mud/imp/pull/50)): a read-only
    Python classifier distinguishes directly-addressed DNS from successfully
    inspected NAT-eligible mismatches. Failed interface inspection and invalid
    DNS do not offer NAT; accepted offers rerun authoritative NAT validation.
 4. Recovery of an exact-owned inactive legacy edge when `gateway.env` is missing
-   (implemented in PR4): explicit matching Direct setup validates and enables
+   (landed in PR4 [#51](https://github.com/i-mud/imp/pull/51)): explicit matching
+   Direct setup validates and enables
    retained policy under one legacy-baseline journal, then uses the existing
    new-token handoff and commit. Unsafe state is refused; rollback stops the
    listener before restoring legacy policy.
-5. Installation documentation and completion-message corrections.
+5. Installation documentation and completion-message corrections (implemented):
+   preserve the already-truthful retained Direct output (configuration preserved,
+   no public verification and no new token); avoid readiness claims for SSH
+   `--no-start`; distinguish fresh install-only from upgrades preserving existing
+   connection configuration.
 
 PR2 does not change Direct provisioning, native credential persistence, or the
 protocol. PR3 changes only read-only preflight classification and its installer
@@ -797,7 +809,13 @@ decision; public-edge ownership, provisioning, credentials, and rollback remain
 unchanged. PR4 narrowly extends legacy enable/rollback and gives new Direct
 installer journals per-invocation ownership; ordinary migrations and credential
 provisioning are unchanged.
-These PRs do not claim live infrastructure acceptance. Item 5 remains outstanding.
+These implementations do not claim live infrastructure acceptance or inclusion
+in a particular published artifact. Item 5 passed 12 actual-installer smoke
+scenarios, five installer fixture tests and `npm run check`; its smoke used
+fixture runtime/systemd/public-edge boundaries, not live infrastructure. The
+earlier Slice 25 PASS evidence does not accept these later changes. One-level
+include inspection does not solve arbitrary nested includes, and real-runtime CI
+remains a separate open follow-up.
 
 ## Candidate work
 
