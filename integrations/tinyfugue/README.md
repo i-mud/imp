@@ -78,6 +78,22 @@ which remains `stale` until fresh authoritative GMCP is published.
 
 ## Running (normal production path)
 
+Use a GMCP-capable TF build with the quote-readiness correction: consuming or
+closing a shell quote must clear both its monitored-read and active-readiness
+bits. Unpatched TF can block its main thread reading an idle helper pipe after
+an action or a coincident Telnet prompt. This was observed with TF
+`5.2.2-3-g4f0ff34` and `5.2.3-6-ge164a1d`; the version string or GMCP capability
+alone does not establish that the correction is present.
+
+The correction is tracked in [TinyFugue #124](https://github.com/ingwarsw/tinyfugue/pull/124).
+A candidate TF build must contain that patch; an open PR is not a released build.
+
+Validate a candidate build with the [native restart regression](#native-restart-regression)
+before live acceptance. Updating Imp or reloading the hook does not patch an
+already-running TF executable. If TF freezes, action delivery is uncertain:
+do not retry the action, replace its button, or restart a live session without
+an agreed recovery procedure.
+
 Copy the unchanged hook to `~/.config/imp/capture.tf`, then put this line first
 in the macro-format startup file used by the operator's actual TinyFugue
 invocation, before any connection/login commands:
@@ -312,10 +328,12 @@ node port. It exercises real TF hook execution, feed/node restart without a MUD
 reconnect, same-context selection during a feed outage followed by readiness
 reselection, changed and null foreground recovery, and watcher reload ownership.
 It checks that only one action consumer remains alive, registrations stop churning,
-unrelated quotes survive replacement, and actions/text are not replayed. A later
-foreground change must still replace the consumer and deliver only to that world.
-It never loads the operator's startup or contacts a real MUD, and does not replace
-live NAT/desktop acceptance.
+unrelated quotes survive replacement, and actions/text are not replayed. Before
+restarting services it sends two consecutive same-context actions, requires a TF
+input heartbeat after each, and exercises a Telnet GA prompt. A later foreground
+change must still replace the consumer and deliver only to that world. It never
+loads the operator's startup or contacts a real MUD, and does not replace live
+NAT/desktop acceptance.
 
 The normal pytest suite runs the same behavioral regression when `IMP_TF_BINARY`
 explicitly names a GMCP-capable native Linux TF binary; otherwise that test is
