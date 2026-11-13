@@ -797,7 +797,8 @@ infrastructure acceptance remains pending.
    retained policy under one legacy-baseline journal, then uses the existing
    new-token handoff and commit. Unsafe state is refused; rollback stops the
    listener before restoring legacy policy.
-5. Installation documentation and completion-message corrections (implemented):
+5. Installation documentation and completion-message corrections (landed in
+   [#52](https://github.com/i-mud/imp/pull/52)):
    preserve the already-truthful retained Direct output (configuration preserved,
    no public verification and no new token); avoid readiness claims for SSH
    `--no-start`; distinguish fresh install-only from upgrades preserving existing
@@ -809,13 +810,137 @@ decision; public-edge ownership, provisioning, credentials, and rollback remain
 unchanged. PR4 narrowly extends legacy enable/rollback and gives new Direct
 installer journals per-invocation ownership; ordinary migrations and credential
 provisioning are unchanged.
-These implementations do not claim live infrastructure acceptance or inclusion
-in a particular published artifact. Item 5 passed 12 actual-installer smoke
-scenarios, five installer fixture tests and `npm run check`; its smoke used
-fixture runtime/systemd/public-edge boundaries, not live infrastructure. The
+Implementation and fixture evidence alone do not establish live infrastructure
+acceptance. Item 5 passed 12 actual-installer smoke scenarios, five installer
+fixture tests and `npm run check`; its smoke used fixture
+runtime/systemd/public-edge boundaries, not live infrastructure. The
 earlier Slice 25 PASS evidence does not accept these later changes. One-level
 include inspection does not solve arbitrary nested includes, and real-runtime CI
 remains a separate open follow-up.
+
+**2026-10-30 — published v0.4.6 Phase A: artifact verification PASS; live
+acceptance/closure BLOCKED.** [Dated evidence and matrix](status.md#2026-10-30--published-v046-read-only-acceptance-blocked)
+record the release identity, checksums (50/50 internal), and guarded frozen
+runtime smoke with host Python denied. The operator authorized no VPS/desktop
+changes; no isolated hosts were available. The active 0.4.1 VPS and existing TF
+session were left untouched; an occupied unrelated VPS was excluded. Local
+Windows 0.4.0 is not the separately observed, version-unverified remote Windows
+environment. No live changes required restoration.
+
+**2026-10-31 — segment 1 completed; live acceptance remains partial.**
+[Dated evidence and partial matrix](status.md#2026-10-31--published-v046-segment-1-partial-live-acceptance)
+record published 0.4.6 retained-Direct and omitted-mode installs on both the
+directly-addressed VPS and a now-established router/NAT host. Existing
+credentials/startup hooks were preserved; NAT-eligible classification and the
+explicit `--behind-nat` retained-edge path passed, not interactive confirmation
+or fresh provisioning. External trusted-TLS HTTP/raw-route checks passed; these
+are not authenticated WSS, bundled public-verifier or authoritative TF identity
+evidence. PR #48, #50 and #52 have bounded partial results; #49 and #51 were not
+run. All five remain incomplete for overall live acceptance.
+
+The Direct host was restored to **0.4.1**, NAT to **0.4.0**, with exact scoped
+object/credential/startup comparisons; user services are enabled/active and
+healthy. Existing Caddy and the Direct TF session were not restarted. Private
+recovery backups remain on both hosts; NAT also retains an inactive 0.4.6
+release. TLS storage was compared only at directory-metadata level, not
+certificate/private-key contents. Windows read-only inspection confirmed the
+actual desktop executable is **0.4.0**; profile changes/NSIS/UI acceptance remain
+pending. Supporting acceptance tooling is uncommitted, not newly published.
+
+Remaining live boundaries include actual TF startup ordering and fresh
+identity; Windows native credential confirmation/persistence and published
+NSIS; fresh Direct/NAT provisioning and interactive NAT decisions; disposable
+inactive schema-1/schema-2 recovery with guarded commit/refusal/rollback; SSH
+`--no-start` and fresh install-only completion; and authenticated external WSS/
+public verification. **Slice 26 remains In progress**; arbitrary nested includes
+and real-runtime CI remain separate open follow-ups.
+
+**2026-10-31 continuation:** an actual schema-2 NAT fixture reached schema 3 with
+the published 0.4.6 installer, with operator-confirmed token receipt and
+completion, and the operator reports loopback and external public-verifier
+passes (distinct checks). A privileged audit proves enable/commit invocations
+under one transaction ID, not exit codes; token-handoff timing was unobserved.
+The Windows seven-case saved-credential checklist passed only as stated, with
+published 0.4.6 NSIS installed and Windows restored to 0.4.0 except 13 accepted
+cache ACL differences. NAT root restore remains pending; the active credential
+is a test credential. Overall acceptance, other modes, token replacement and
+MUD state are unclaimed; see [status](status.md#2026-10-31--continuation-schema-2-nat-and-windows-evidence).
+
+**2026-10-31 revised final state:** by explicit operator decision, published
+0.4.6 is now retained on the local Windows desktop, the directly-addressed host
+and the NAT host, with original credentials/configuration preserved or restored;
+the earlier old-version restorations were intermediate and remain recorded.
+Evidence is dated in [status](status.md#2026-10-31--revised-final-state-published-046-retained-on-all-three).
+It is not closure: schema-1, fresh/interactive NAT, real TF startup identity,
+remaining Windows cases and new-scope work remain.
+
+**2026-10-31 schema-1 continuation:** the canonical pinned schema-1 Direct
+fixture subsequently ran with published 0.4.6 (observed installer exit 0 and one
+transaction through credential creation to schema-3 commit). The operator
+reports the published external verifier passed; independent external HTTP and
+bad-target WebSocket-upgrade checks passed. These are bounded fixture/security
+results, not closure or real TF identity acceptance. All installations remain
+0.4.6, but the Direct fixture identity is currently active: original credential
+and TLS/configuration baseline remain parked pending operator root restoration.
+See the [dated checkpoint](status.md#2026-10-31--schema-1-direct-continuation-recovery-and-external-checks).
+
+**Native UI continuation:** remaining Direct replacement, URL-only blank-token,
+External and Managed warning/cancel/removal/restart cases are operator-observed
+PASS, including real WSS identity/vitals after restart. The original three
+Windows native configuration files were restored with matching hashes/ACLs,
+published 0.4.6 retained and app closed; ordinary caches were left untouched.
+The compiled published guarded commit also refused the cleared transaction
+without changing marker/Caddy. Interactive NAT is staged only; TF acceptance
+and server restoration remain pending. **Slice 26 remains In progress.**
+See [bounded evidence](status.md#2026-10-31--native-ui-checkpoint-and-cleared-transaction-guard).
+
+**Interactive NAT continuation:** Direct-host original credential/configuration/
+root restoration is verified with 0.4.6 retained and original TF unchanged.
+The published 0.4.6 NAT installer then exercised default refusal (exit 1,
+baseline unchanged) and explicit confirmation (exit 0, one observed transaction
+through schema-2 credential creation to schema-3 commit), with actual existing
+startup-file selection. The operator reports published loopback and genuinely
+external public verifiers passed, using their distinct flag boundaries; no
+actions were sent. Independent external NAT raw-target GET/WebSocket-upgrade
+checks passed **16/16** with trusted TLS/no redirects; two public-port TCP
+connects timed out (scoped evidence, not a scan). All installations remain
+0.4.6, but the NAT test identity is active and original restoration awaits
+real TF-session acceptance. The operator now reports the isolated NAT test
+character's correct identity/vitals on Windows Direct WSS. Read-only health
+initially had a stale snapshot; a later monitor saw live feed, without proving
+action delivery. One authorized UI `look` froze TF input/output. The operator
+independently relaunched TF, reconnected and tried once more, reporting the same
+freeze. These are two operator-reported reproductions; the second was not
+requested by the assistant. Changed TF fingerprint reflects that relaunch, not
+product recovery; duplicate delivery/replay is unproven. Delivery and cause remain
+uncertain, further actions are disallowed, and restart acceptance is stopped
+for read-only diagnosis.
+Final NAT credential/Windows native-file restoration, source checks and
+publishing remain pending.
+**Slice 26 remains In progress**; see the
+[bounded checkpoint](status.md#interactive-nat-continuation--refusal-confirmation-and-public-verification).
+
+**Final segment decision: FAILED, not closure.** Published 0.4.6 onboarding,
+credential UI, Direct/NAT classification, canonical legacy recovery and bounded
+completion/security checks have positive evidence, but the two TF action
+freezes block acceptance. Real identity/vitals and fresh feed were observed;
+relay/feed restart acceptance was stopped, not passed. Read-only pipe-wait
+diagnosis does not establish the trigger; persistent-quote/reentrancy behavior
+needs an offline reproduction and regression-backed fix in a **separate PR**,
+not patches to installed artifacts.
+
+Authorized bounded TERM cleanup and scoped restoration are complete: Windows
+original native files match hashes/ACLs (ordinary caches untouched, accepted
+13 ACL exception retained), NAT original credential matches both parked
+baselines, and Direct original identity/root configuration remains restored.
+All installations retain **0.4.6**; NAT has no test TF tree and Direct's original
+TF is unchanged. Independent unprivileged checks do not cover root TLS archive
+contents; those rely on operator success and reviewed restore assertions.
+Earlier pending checkpoints are historical. Documentation validation and
+publication are tracked separately in the evidence PR, not acceptance claims.
+**Slice 26 remains In progress**;
+see [final decision and matrix](status.md#final-segment-decision--failed-original-identities-restored-on-046).
+Slice 25 acceptance and nested-include/real-runtime CI follow-ups are unchanged.
 
 ## Candidate work
 

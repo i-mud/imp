@@ -57,7 +57,8 @@ warning; PR3 [#50](https://github.com/i-mud/imp/pull/50) landed NAT preflight
 classification; PR4 [#51](https://github.com/i-mud/imp/pull/51) landed exact-owned
 retained-edge recovery.
 
-Item 5 implements completion-message and installation-doc corrections: retained
+Item 5 ([#52](https://github.com/i-mud/imp/pull/52)) implements completion-message
+and installation-doc corrections: retained
 Direct already reports preservation, no public verification and no new token;
 SSH `--no-start` makes no readiness claim; fresh install-only is distinguished
 from an upgrade that preserves connection configuration.
@@ -72,6 +73,455 @@ These are implementation dispositions, not new live acceptance or publication
 claims. One-level literal include inspection does not cover arbitrary nested
 startup includes, and real Caddy/native TinyFugue runtime CI remains open. See the
 [Slice 26 scope and evidence limits](roadmap.md#slice-26---installation-reliability-and-onboarding).
+
+### 2026-10-30 — published v0.4.6 read-only acceptance: BLOCKED
+
+**Phase A artifact verification passed; Slice 26 live acceptance and closure
+remain BLOCKED.** The operator authorized no VPS or desktop changes, required
+the existing TinyFugue session to remain untouched, and had no isolated hosts
+available. This is bounded read-only evidence, not a complete environment audit
+or a replacement for the historical Slice 25 acceptance above.
+
+Published release: [v0.4.6](https://github.com/i-mud/imp/releases/tag/v0.4.6).
+Signed annotated tag `00f904d15ce0c9c913ab09f1171d5f2f6b687fbc` resolves to
+commit `f952f5f89e18681e36fff3b465742a63e5641d17`; GitHub reported its signature
+valid. [Release run 41007081793](https://github.com/i-mud/imp/actions/runs/41007081793)
+passed semantic-release, tag verification, Linux build/frozen acceptance,
+Windows NSIS build and publication.
+
+| Downloaded asset         | SHA256                                                             |
+| ------------------------ | ------------------------------------------------------------------ |
+| Linux server archive     | `c28502bf87ea74e8452d951c192df8a929950a0fb91c57f870b03307a912a313` |
+| Published checksum asset | `3c88872679b5b64f2c895bfe9ec5e629119840325fb6656b44463db5c5b38836` |
+| Windows NSIS installer   | `b20a74bdd26d489b394c6e955a3abac886e46e9f0cb5384a21a71fe6a840627b` |
+
+The Linux archive matched its published checksum; extracted internal checksums
+passed **50/50**, and `VERSION`/`BUILD_INFO` reported **0.4.6**. Under the existing
+`scripts/exec-guard.py` Landlock guard (ABI 7), with Python environment variables
+unset and `PATH=/nonexistent`, published `relay --help` and
+`runtime-check 0.4.6` exited 0. Both system and venv Python execution were denied
+with exit 126. Developer Python launched the guard, but the frozen child did not
+require host Python. This proves bounded frozen startup/version validation,
+not live service operation. Unsupported top-level `--help`/`--version` probes
+are not defects.
+
+**Observed inventory, not accepted targets:** the active VPS still ran 0.4.1
+with a schema-3 Direct edge and an existing TF session. A second VPS had occupied
+public ports and unrelated services and was excluded, not treated as disposable.
+Local Windows had installed Imp 0.4.0; a separately observed remote Windows host's
+Imp version remained unverified. No actual router/NAT target or disposable
+schema-1/schema-2 legacy targets were established.
+
+| Required live coverage              | Result / missing boundary                                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| PR #48 — TF startup onboarding      | BLOCKED: actual startup selection, hook-before-login and real operator invocation not exercised.                                           |
+| PR #49 — saved Direct credentials   | BLOCKED: no desktop UI run for cancel/pending edits, confirmed removal, blank-token preservation, replacement or restart persistence.      |
+| PR #50 — NAT classification         | BLOCKED: no authorized real Direct/NAT preflight and installer confirmation path.                                                          |
+| PR #51 — retained-edge recovery     | BLOCKED: no isolated exact-owned inactive legacy edge, guarded commit/refusal or rollback acceptance.                                      |
+| PR #52 — installation messages/docs | BLOCKED: no live fresh/retained Direct, SSH `--no-start`, install-only or upgrade flow; fixture results above are not live evidence.       |
+| Direct VPS                          | BLOCKED: no authorized v0.4.6 install/reinstall or retained-credential test; current inventory is not acceptance.                          |
+| Router/NAT                          | BLOCKED: no approved private host/router-forward environment or external reachability test.                                                |
+| Schema-1 Direct / schema-2 NAT      | BLOCKED: disposable exact-owned inactive fixtures with missing `gateway.env`, real systemd/Caddy/TLS, commit and rollback remain required. |
+| Windows published NSIS              | BLOCKED: no authorized isolated profile, installation or native UI/persistence run.                                                        |
+| Public security                     | BLOCKED: no external verifier, TLS/auth/raw-target probes or public acceptance run.                                                        |
+
+No installs, restarts, credential rotation/replacement, TF startup edits, login
+or action were attempted. A final read-only VPS recheck still observed 0.4.1,
+the same enabled/active relay/feed/gateway/Caddy PIDs, one TF process, unchanged
+hashes for the three observed public-edge files, and unchanged `gateway.env`
+mode/size metadata. Credential bytes and certificate storage were not compared;
+exact generated-edge/TLS ownership and complete service-state preservation were
+not proven. **No live changes were made, so no rollback/restoration was needed.**
+All five work-item live results remain BLOCKED; Slice 26 stays **In progress**.
+
+### 2026-10-31 — published v0.4.6 segment 1: partial live acceptance
+
+**Segment 1 completed; Slice 26 remains In progress, not accepted or closed.**
+The dated BLOCKED attempt above remains historical. An actual router/NAT target
+is now established (Ubuntu 26.04.1), alongside the directly-addressed VPS.
+Both used the unchanged published Linux archive with SHA256
+`c28502bf87ea74e8452d951c192df8a929950a0fb91c57f870b03307a912a313`;
+internal checksums passed **50/50** on each target.
+
+On each host, explicit retained-Direct installation and omitted-mode reinstall
+exited 0, and the installed runtime passed `runtime-check 0.4.6`. The existing
+credential and selected TF startup file remained byte-identical. Completion
+output accurately reported retained configuration, no generated/rotated token,
+and no public authentication verification. The exact existing startup hook was
+retained, with the honest warning that TF load order was not established.
+Neither the printed rotation command nor TF reload instructions were executed.
+
+NAT preflight returned `nat-no-public`; explicit `--behind-nat` DNS validation
+accepted one public A record and no AAAA record. This exercises NAT-eligible
+classification and the explicit retained-edge path, **not** interactive NAT
+confirmation, fresh provisioning or router configuration.
+
+While each host ran 0.4.6, the other host supplied genuinely external, bounded
+HTTP probes with normal trusted TLS, no redirects and literal raw targets.
+`/healthz` returned **200**, `/state` **426**, and `/ingest`, `/action-consumer`,
+`/unknown`, `/st%61te`, "/foo/../state", `/%2e/state`, `/state/` and "//state"
+returned **404**; TLS verification returned 0 throughout. These are external
+**HTTP/TLS/routing** results, not bundled public-verifier or authenticated WSS
+evidence, authoritative feed identity, or an external port-8787 scan.
+
+| Work item / boundary                | Segment 1 result and remaining acceptance                                                                                                                                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR #48 — TF startup onboarding      | PARTIAL PASS: exact existing hook retained and load-order warning accurate; actual startup selection/order, hook-before-login and fresh TF identity remain untested.                                                                   |
+| PR #49 — saved Direct credentials   | NOT RUN: Windows cancel/pending edits, confirmed removal, blank-token preservation, replacement and restart persistence remain.                                                                                                        |
+| PR #50 — NAT classification         | PARTIAL PASS: one live NAT-eligible classification and explicit `--behind-nat` retained-edge path; interactive confirmation/refusal and fresh NAT provisioning remain.                                                                 |
+| PR #51 — retained-edge recovery     | NOT RUN: disposable exact-owned inactive schema-1 Direct/schema-2 NAT with missing `gateway.env`, real systemd/Caddy/TLS, guarded commit/refusal and rollback remain.                                                                  |
+| PR #52 — installation messages/docs | PARTIAL PASS: retained Direct and omitted-mode upgrades truthfully preserve configuration without a token/public-verification claim; fresh Direct, SSH `--no-start` and fresh install-only remain.                                     |
+| Public security / identity          | PARTIAL PASS: external trusted TLS and bounded HTTP raw-route isolation; authenticated WSS/public verifier and authoritative identity remain untested.                                                                                 |
+| Windows published NSIS              | NOT RUN: read-only inspection found actual `imp-desktop.exe` ProductVersion 0.4.0 and no running Imp desktop/node processes; selected existing profile changes, installation and native UI/persistence are not yet approved/exercised. |
+
+**Final infrastructure and scoped restoration:** the NAT host is back on
+**0.4.0**, with all 14 inventoried objects matching original bytes/link targets,
+modes, ownership and nanosecond mtime; the directly-addressed host is back on
+**0.4.1**, with eight inventoried objects matching those properties and directory
+modes restored. Private credential/startup byte comparisons passed on both.
+Relay/feed/gateway are enabled and active, relay health is **200**, and relay/
+gateway ports remain loopback-only on both. Existing Caddy stayed enabled/active
+without restart (NAT PID **1163**, Direct PID **770**); protected edge files and
+service masks were unchanged. NAT had zero TF processes before/after; Direct
+retained TF PID **3033** with the same start time. No root mutations, credential
+rotation/replacement, or MUD actions occurred.
+
+Private scoped recovery backups/logs remain on both hosts; their contents are
+not published. NAT retains an **inactive 0.4.6 release directory** and private
+acceptance artifacts; Direct's acceptance-created 0.4.6 release was removed,
+with private backups and uploaded/extracted acceptance artifacts retained.
+Restoration is scoped, not a whole-host rollback: TLS-store comparison covered
+directory metadata only, **not certificate/private-key preservation**.
+
+Supporting snapshot/self-check tooling and its deployment README are uncommitted
+on branch test/reusable-live-acceptance, not a new published PR or release. Syntax,
+self-check and read-only actual-host snapshot checks passed; documentation
+reference checks passed **438**, and formatting was applied. Targeted source
+transaction-ownership/quiescence tests passed **41** (**468 deselected**), using
+fake boundaries, not the published live runtime. A separate installer-fixture
+test invocation timed out at the MCP boundary, so its outcome is unknown; no
+full-suite PASS is claimed. All five work items remain incomplete for overall
+live acceptance; legacy recovery, Windows, fresh installs and real TF identity
+remain required.
+
+### 2026-10-31 — continuation: schema-2 NAT and Windows evidence
+
+**Slice 26 remains In progress; this is partial live evidence, not closure.**
+An actual schema-2 canonical NAT fixture was recovered with the published 0.4.6
+installer. The operator confirmed token receipt in their own terminal and
+installer completion; read-only final state was schema 3, pending null,
+gateway and Caddy active, runtime 0.4.6. A narrow privileged audit shows enable
+and commit invocations under the same transaction UUID
+b15a71e9-625c-48eb-836b-670c1267941f, with actual timestamps. It proves
+invocations, not child exit codes; direct pending-journal polling missed the
+precise token-handoff timing, so that moment is unobserved. Final state and
+operator completion are separate evidence.
+
+The operator reports the published public verifier passed via both loopback and
+external routes; the external source was the existing avatar host with the
+exact 0.4.6 bundle, and the loopback/external distinction is retained. This
+does not establish authoritative MUD state or any real MUD action.
+
+A red installer diagnostic, "Unit imp-gateway.service not loaded" from
+reset-failed, is tolerated by the installer (`|| true`); the gateway was loaded
+and active afterward. Only that diagnostic is not evidence of a product defect.
+
+Windows: the operator's "everything passed" is interpreted only as the seven-case
+checklist: saved Direct on restart; switching to Local showing the save warning;
+Cancel preserving pending Local while Direct URL stays retained; blank-token
+Direct save; confirmed Local persisting across restart; and URL/token indicator
+removal. It does not cover other modes, explicit token replacement or MUD state.
+The verified published 0.4.6 NSIS was installed, then Windows was restored to
+0.4.0 (874 original files, registry, shortcut, profile). Thirteen cache ACL
+differences remain by explicit user decision, keeping narrower inheritance
+rather than changing parent ACLs; exact ACL restoration is not claimed. Private
+backup access was verified as user and SYSTEM only, with no further ACL changes.
+
+The NAT host's root restore is **pending** an operator command: the latest 0.4.6
+test credential is active and does not match the original. The original is
+parked in a private backup and TLS storage was safe; final restoration is not
+claimed, and further tests stay paused until recovery is verified. The
+directly-addressed host remains original 0.4.1 with no added legacy
+authorization. Root fixture scripts passed review but are not product code; the
+41 source-guard fixture tests remain separate.
+
+Nested includes, real-runtime CI, Slice 25 acceptance and prior history are
+unchanged.
+
+### 2026-10-31 — revised final state: published 0.4.6 retained on all three
+
+**Slice 26 remains In progress; this is final infrastructure state, not
+closure.** The operator explicitly revised the final policy from restoring old
+versions to retaining published 0.4.6 with original credentials and
+configuration. The earlier 0.4.0/0.4.1 restorations above were therefore
+intermediate, not an intent to downgrade finally; that dated evidence is
+preserved. Allowed actions were installer/user-service restarts and the reviewed
+gameserver root recovery; no rotation, new test credential, DNS/router/firewall
+change, TF termination or MUD action occurred.
+
+- **NAT host:** the operator completed the reviewed root recovery. The parent
+  verified original 0.4.0, original credential byte-equal, schema 3, pending
+  null and all services enabled/active. One published no-mode upgrade then
+  exited 0: runtime 0.4.6, original credential equal to the parked copy, root
+  edge/startup bytes and metadata exact, Caddy unchanged (PID 350706), loopback
+  relay/gateway, user units on 0.4.6, relay health 200. TLS-store restoration
+  rests on the operator-confirmed reviewed script, not an independent full root
+  TLS read. The disposable test identity is retired by the original-credential
+  restore and comparison; no further rotation or generation occurred.
+- **Directly-addressed host:** a single published no-mode install with the
+  existing exact startup hook exited 0 with runtime-check 0.4.6, enabled/active
+  user units and loopback health 200. Credential/startup, edge files and
+  marker schema 3/pending null were preserved; TF PID 3033 kept its start time,
+  and the imp-caddy unit stayed enabled/active on unchanged PID 770. The running TF has not loaded the new capture
+  hook, so no TF startup acceptance is claimed.
+- **Windows:** the verified published 0.4.6 NSIS installed per-user with exit 0;
+  registry and executable report 0.4.6. Before/after snapshots of the entire
+  native profile (file sizes, hashes, ACLs) were identical, the accepted 13
+  cache ACL exception remained, and the app was not launched. The installer was
+  reported Authenticode NotSigned; its published SHA256 matched. UI/runtime was
+  not retested after this install.
+
+Older-version backups and residue remain private, not the final runtime.
+Remaining acceptance is blocked: new-scope work, schema-1, fresh/interactive NAT,
+real TF startup identity and the remaining Windows cases.
+
+Additional fixture evidence: an unmodified published 0.4.6 bundle passed a
+**five-case completion-only smoke** in **3.05 s**: fresh SSH with mock services
+active, SSH `--no-start` configured but not ready, fresh install-only with no
+remote connection configured, and existing install-only/omitted-mode upgrades
+preserving configuration. Only private HOME and fake user-systemctl boundaries
+were substituted; frozen runtime checks were actual, with no source/binary
+bundle modification. This supports PR #52 completion distinctions alongside the
+live retained-Direct and operator-confirmed legacy-Direct/public-auth evidence;
+it is not native connectivity acceptance.
+
+The shipping-bundle startup fixture cases also passed isolated file
+preservation/include/manual-selection checks, not real TF login. The full new
+frozen matrix did **not** complete: one attempt exhausted temporary storage and
+a different-TMPDIR rerun timed out after startup cases passed. No full-matrix
+PASS is claimed; the 41 source-guard tests remain separate. A schema-1 fixture
+and reviewed root/observer scripts are staged and hash-verified only, awaiting
+the operator's preparation command; no new root fixture run or PASS is claimed.
+
+### 2026-10-31 — schema-1 Direct continuation: recovery and external checks
+
+**Slice 26 remains In progress.** The staged canonical schema-1 fixture was
+subsequently executed on the directly-addressed VPS with the pinned, unchanged
+published 0.4.6 installer and inherited-terminal observer wrapper. This is a
+constructed fixture, not proof of historical upgrade provenance. Actual child
+exit was **0**. Metadata observed one transaction UUID,
+845eda6c-8bd5-40e6-b118-1acca8157672, across schema-1 enable with absent then
+present credential file, followed by schema 3/pending null at commit.
+The operator received the test token privately. Runtime is 0.4.6, services and
+Caddy are enabled/active, ports 8787/8788 are loopback-only, and TF PID 3033
+retained its start time. Actual published preflight on this VPS returned
+`direct`.
+
+The operator reports the exact published 0.4.6 public verifier **passed** from
+the genuinely external NAT host: trusted TLS, authenticated state hello,
+wrong/absent-credential rejection, privileged/unknown HTTP and WebSocket route
+isolation, and minimal health, per the verifier contract. No action frames were
+sent. Independent external HTTP probes also returned health **200**, state GET
+**426** and the eight previously listed bad raw targets **404**; valid
+WebSocket-upgrade requests to those bad targets also returned **404**.
+All used normal TLS (verification 0), literal raw targets and no redirects.
+Connections to this public hostname's ports 8787/8788 were unreachable/refused;
+this is scoped reachability evidence, not an all-address port scan.
+
+**Current identity/restoration boundary:** all three installations remain
+0.4.6, but the Direct host now has the disposable fixture identity active.
+Its original credential and 0.4.6 TLS/configuration baseline remain privately
+parked pending operator root restoration; the earlier original-identity
+final-state note is historical, not this segment's final restoration claim.
+Fresh interactive NAT and real TF-session acceptance remain pending. The
+accepted Windows cache ACL exception is unchanged.
+
+### 2026-10-31 — native UI checkpoint and cleared-transaction guard
+
+Remaining native UI cases are now **operator-observed PASS**:
+
+- Direct-to-Direct explicit token replacement saved without a removal warning;
+  full restart connected over WSS with real identity/vitals visible.
+- A URL-only hostname case change with blank token saved and survived restart
+  with connected state, exercising token retention.
+- External removal persisted across restart with Direct fields absent. An
+  initial reported failure was instruction ambiguity (Remove before Cancel),
+  not a demonstrated product defect. After returning to Direct, External Save
+  warning/Cancel retained pending External edits while saved Direct URL/token
+  remained present, independently checked without exposing contents.
+- Managed warning/Cancel retained pending mode/alias; approved removal and
+  restart preserved Managed/alias with former Direct fields absent.
+
+The closed Windows app was restored to its original three native configuration
+files: byte hashes and ACLs match the original fresh manifest. The executable
+remains exact published 0.4.6, with no Imp process, listener or owned SSH forward;
+no unrelated SSH session was stopped. No ACL changes were needed. Ordinary
+WebView caches were left untouched under revised permission; the accepted 13
+cache ACL differences remain historical.
+
+The actual published compiled helper was also invoked with the cleared
+schema-1 transaction UUID: guarded commit returned **1**, reporting
+"no pending Direct edge transaction to commit; nothing changed". Marker hash
+and active Caddy PID 234886 were unchanged; no sudo or journal destruction was
+involved. This is actual-artifact guard evidence, separate from the 41 isolated
+source cases, not another successful recovery transaction.
+
+The NAT interactive fixture is staged only, awaiting review and Direct-host
+restoration; it has caused no outage. The Direct test identity remains active
+pending the operator's reviewed 0.4.6 original-baseline root restore; marker has
+no pending transaction and TF PID 3033 is unchanged. **Slice 26 remains In
+progress** until interactive NAT, TF acceptance and restorations are complete.
+
+### Interactive NAT continuation — refusal, confirmation and public verification
+
+The Direct/schema-1 host has now been restored to its original credential,
+configuration and root state while retaining **0.4.6**. Parent checks confirmed
+original credential byte equality, schema 3/behind-NAT false/pending null,
+enabled/active services and unchanged original TF PID 3033. This supersedes the
+pending Direct restoration checkpoint above, not the historical evidence.
+
+A fresh canonical schema-2 NAT stage then exercised the **actual published
+0.4.6 interactive installer**, not mocked confirmation:
+
+- With the default home startup file absent, the operator explicitly selected
+  the existing project startup file. Accepting default Choice **[2]** stopped
+  with child exit **1**; schema 2/pending null, absent gateway credential,
+  Caddyfile, marker and selected startup remained unchanged by comparisons.
+- A separate run selected **1** and exited **0**. Metadata observed the same
+  transaction UUID b3942fde-32cf-49fd-a8fd-af3dd1f7c2ed from schema-2
+  credential-absent state through pending enable with absent then present
+  credential, to schema 3/pending null and successful child exit. The operator
+  received the disposable token privately.
+
+Parent checks found Caddy (PID 29464), relay (29315), feed (29320) and gateway
+(29484) enabled/active; 8787/8788 were loopback-only, public listeners were
+80/443, and startup bytes remained unchanged. The tolerated reset-failed
+"gateway unit not loaded" diagnostic recurred; the installer explicitly permits
+that failure and the final gateway was active.
+
+The operator reports both published NAT public-verifier runs **PASS**:
+local with `--verify-via-loopback`, and genuinely external from the restored
+Direct host **without** that flag. No MUD action frames were sent. These are
+operator-observed published-artifact checks, separate from the frozen fixture,
+source-test and injected-boundary evidence above.
+
+Independent read-only external NAT checks from the Direct host also passed:
+all **16/16** GET/WebSocket-upgrade probes of the eight bad raw targets above
+returned **404**, curl exit 0, TLS verification 0 and zero redirects. System CA,
+literal paths, no proxy/curl configuration, bounded timeouts and no credentials
+were used. Health returned **200** with exactly `{"status":"ok"}` plus newline;
+ordinary state GET returned **426**. Two TCP-only connects to the public IPv4
+ports 8787/8788 timed out without sending payload; this is scoped evidence,
+not a port scan. Authenticated WSS remains the separate operator verifier PASS.
+Windows read-only preflight again matched the original three native files'
+hashes/ACLs, restricted backup access and unchanged 0.4.6 executable, with no
+Imp/Node process, listener or owned forward.
+
+All installations remain 0.4.6; native UI checks/configuration restoration are
+complete as previously bounded, including the accepted cache ACL exception.
+The NAT original credential remains privately parked and final NAT restoration
+is pending after real TF-session acceptance. Final source checks and publishing
+remain pending. **Slice 26 remains In progress; this is not closure.**
+
+### Isolated TF session checkpoint — identity observed, freshness pending
+
+The operator withdrew the proposed Direct-host switch and confirmed a distinct,
+isolated test character loaded on the NAT host. Using the published Windows
+0.4.6 desktop paired over Direct WSS with the disposable NAT credential, they
+report the **correct isolated character identity and vitals visible**, not the
+Direct-host character or cached identity.
+
+A read-only process observation found one TF, one TF-owned feed watcher and one
+TF-owned action consumer. Counts were non-atomic with seven process-read races;
+an opaque same-process fingerprint was retained privately. Health reported one
+producer, snapshot present, sequence 5, but **feed stale**. This does not prove
+a fresh/live snapshot. A bounded 120-second natural-GMCP observation is pending
+before the authorized restart test; no actions were sent. NAT original
+credential restoration and final restoration of the three Windows native
+configuration files remain pending.
+
+### TF action checkpoint — observed failure; affected acceptance stopped
+
+The operator explicitly authorized **one** harmless `look` through the actual
+Windows UI for the isolated NAT test character. After clicking, they reported
+"clicking the actions caused tf to freeze": terminal input and output stopped.
+The operator then independently closed the tab, relaunched TF with the same
+PowerShell command, reconnected the test character and tried one click again;
+the second attempt also froze, and that state was left untouched. These are
+**two operator-reported reproductions**, not PASS results. The second attempt
+was operator-initiated, not requested by the assistant. Delivery is uncertain;
+no further actions are allowed. Affected acceptance and the restart test are
+stopped for read-only diagnosis; no agent reproduction, restart or product patch was made.
+
+The bounded monitor saw live feed at least once (seven stale samples, one live
+over 14 seconds), ending live with one producer, snapshot present and sequence 5. It counted one TF, one watcher and zero action consumers; the opaque TF
+fingerprint differed from the earlier baseline, explained by the operator's
+relaunch, not automatic product restart/recovery. Each reported attempt was one
+click; duplicate delivery or replay is not established. These observations
+prove neither action delivery nor recovery; the freeze cause remains
+undetermined. Earlier identity/verifier positives do not turn this failure into
+a pass. NAT original-credential and Windows three-file restoration remain
+pending controlled diagnosis. **Slice 26 remains In progress.**
+
+### Final segment decision — FAILED; original identities restored on 0.4.6
+
+**Acceptance FAILED; Slice 26 remains In progress, not closed.** The two
+operator-reported TF input/output freezes after one UI Look per attempt remain
+the blocking result; the second followed an independent operator relaunch/retry.
+No duplicate-delivery/replay or automatic recovery is established. Correct
+isolated-character identity/vitals over WSS and a fresh/live feed observation
+passed, but relay/feed restart acceptance was **not tested**, stopped by failure.
+
+Minimal observed reproduction used the unchanged published 0.4.6 bundle,
+supported TF **5.2.3-6-ge164a1d**, early capture with the selected private startup
+file, isolated-character login and the actual Windows 0.4.6 Direct-WSS Look UI.
+TF binary SHA256 was
+`705302c72060db7b408bb83cf61a7e529b32a710905e5b6407434116cd1b4728`.
+Read-only diagnosis found TF alive/sleeping in `anon_pipe_read`, with persistent
+helper stdout descriptors (watcher 4, consumer 9). Helpers were observed alive;
+earlier non-atomic counts are not proof of helper failure. Exact triggering
+mechanism remains unconfirmed: `lpquote` is only a hypothesis, without its actual
+runtime value or permitted syscall tracing. Changed fingerprint reflects the
+operator relaunch, not same-TF continuity.
+
+| Work item                         | Final bounded disposition                                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR #48 — TF onboarding            | Onboarding fixtures, real explicit startup selection/preservation/early hook and identity PASS; action integration FAIL blocks closure.                 |
+| PR #49 — saved Direct credentials | Operator native UI cases PASS, including replacement, URL-only blank-token retention and mode-change warning/cancel/removal/persistence.                |
+| PR #50 — NAT classification       | Actual published Direct preflight and interactive NAT refusal/confirmation PASS.                                                                        |
+| PR #51 — retained-edge recovery   | Actual canonical schema-1/schema-2 fixtures PASS; constructed provenance and isolated negative-guard limits remain as recorded.                         |
+| PR #52 — installation messages    | PASS within live Direct and isolated SSH/install-only completion boundaries; not live native SSH connectivity acceptance.                               |
+| External security                 | Direct and NAT trusted-TLS checks PASS; NAT 16/16 bad-target HTTP/upgrade rejections and operator public-verifier results remain separately attributed. |
+
+**Cleanup/restoration is now complete within the recorded scopes**, superseding
+the earlier pending checkpoints. Authorized TERM cleanup removed only the
+recorded frozen test process tree, with bounded exits, no KILL and no unrelated
+process termination. Windows Imp was closed; only the original three native
+configuration files were restored, exact hashes/ACLs matched, with zero ACL
+changes. Published 0.4.6 remains unchanged, no Imp/node/native listener/owned
+forward remains, and ordinary caches were untouched; the previously accepted
+13 cache ACL exception still stands.
+
+The operator executed the reviewed fresh NAT root restore successfully.
+Independent read-only checks confirmed runtime **0.4.6**, current credential
+byte-equal to both fresh and earlier original parked copies, schema 3/NAT true/
+intended hostname/pending null, original root Caddyfile/unit bytes and ownership/
+modes/link count, preserved masks, and enabled/active Caddy (PID 34317) without
+drop-ins or pending reload. Relay/feed/gateway are enabled/active, 8787/8788
+loopback-only; public listeners are TCP 80/443 and UDP 443. TF/test tree count is
+zero; original startup bytes/mode and a single canonical hook were verified.
+Fresh private original/disposable/admission records remain, with root backup
+mode 0700. TLS archive contents were not independently readable unprivileged:
+preservation there rests on operator success and reviewed helper assertions,
+not an independent full TLS comparison. Direct-host original credential/config/
+root state on 0.4.6 and original TF PID 3033 remain restored, with no added work.
+
+Proposed follow-up is a **separate fix PR**: reproduce persistent-quote/
+reentrancy behavior offline, then fix with regression coverage. No product code
+or installed artifact was patched during acceptance. Documentation validation
+and publication are tracked separately in the evidence PR; they do not imply
+acceptance. Slice 25 acceptance, arbitrary nested-include limits and real-runtime
+CI follow-ups are unchanged.
 
 ## Working end to end
 
