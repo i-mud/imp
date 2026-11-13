@@ -508,6 +508,9 @@ async def scenario(runtime: Runtime) -> None:
         await runtime.assert_single_consumer(tf)
         assert beta.received.count(b"RUNTIME_BETA_ECHO") == 1
         assert b"RUNTIME_BETA_ECHO" not in alpha.received
+        assert len(runtime.quote_helpers(tf, "/bin/sleep")) == 1, (
+            "unrelated quote was killed"
+        )
         for action in actions:
             assert alpha.received.count(action.encode()) == 1
             assert action.encode() not in beta.received
