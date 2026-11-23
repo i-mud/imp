@@ -322,8 +322,6 @@ async def scenario(runtime: Runtime) -> None:
             tf.stdin.write((line + "\n").encode())
             tf.stdin.flush()
 
-        command("/quote -0 -dexec !/bin/sleep 120")
-        await wait_for(lambda: runtime.quote_helpers(tf, "/bin/sleep"))
         ready_token = ready.read_bytes()
 
         async def restart() -> None:
@@ -363,20 +361,47 @@ async def scenario(runtime: Runtime) -> None:
         await wait_for(
             lambda: any(frame["text"] == "RUNTIME_LOCAL_TEXT" for frame in text)
         )
-        async with connect(runtime.url + "/action", proxy=None) as websocket:
-            await websocket.send(
-                json.dumps(
-                    {
-                        "type": "action",
-                        "protocol": 2,
-                        "context": context,
-                        "command": "RUNTIME_LOCAL_ECHO",
-                    }
+        tf_log = Path(runtime.logs[-1].name)
+        actions = ("RUNTIME_LOCAL_ECHO", "RUNTIME_SECOND_ECHO")
+        for index, action in enumerate(actions, start=1):
+            async with connect(runtime.url + "/action", proxy=None) as websocket:
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "type": "action",
+                            "protocol": 2,
+                            "context": context,
+                            "command": action,
+                        }
+                    )
                 )
-            )
-            result = json.loads(await asyncio.wait_for(websocket.recv(), 3))
-            assert result["status"] == "forwarded"
-        await wait_for(lambda: b"RUNTIME_LOCAL_ECHO" in alpha.received)
+                result = json.loads(await asyncio.wait_for(websocket.recv(), 3))
+                assert result["status"] == "forwarded"
+            await wait_for(lambda action=action: action.encode() in alpha.received)
+            if index == 2:
+                alpha.writer.write(b"RUNTIME_ACTION_PROMPT\n> " + bytes((255, 249)))
+                await alpha.writer.drain()
+                await wait_for(
+                    lambda: any(
+                        frame["text"] == "RUNTIME_ACTION_PROMPT" for frame in text
+                    )
+                )
+            # The first replacement must not need a MUD prompt to unblock TF.
+            command(f'/test echo(strcat("RUNTIME_HEARTBEAT_", "{index}"))')
+            async with asyncio.timeout(2):
+                await wait_for(
+                    lambda index=index: (
+                        f"RUNTIME_HEARTBEAT_{index}".encode() in tf_log.read_bytes()
+                    )
+                )
+            assert alpha.received.count(action.encode()) == 1
+            assert action.encode() not in beta.received
+            assert (await snapshot(runtime.url))["snapshot"]["context"] == context
+            if index == 1:
+                await runtime.assert_single_consumer(tf)
+        await runtime.assert_single_consumer(tf)
+        command("/quote -0 -dexec !/bin/sleep 120")
+        await wait_for(lambda: runtime.quote_helpers(tf, "/bin/sleep"))
         await wait_for(lambda: runtime.helper_calls() >= 2)
         calls = runtime.helper_calls()
         await restart()
@@ -391,7 +416,9 @@ async def scenario(runtime: Runtime) -> None:
             "max": 23,
         }
         assert restored["status"]["feed"] == "stale"
-        assert alpha.received.count(b"RUNTIME_LOCAL_ECHO") == 1
+        for action in actions:
+            assert alpha.received.count(action.encode()) == 1
+            assert action.encode() not in beta.received
         assert sum(frame["text"] == "RUNTIME_LOCAL_TEXT" for frame in text) == 1
         assert runtime.helper_calls() == calls + 1
         await alpha.gmcp({"health": "16"})
@@ -419,7 +446,9 @@ async def scenario(runtime: Runtime) -> None:
         await runtime.assert_single_consumer(tf)
         assert runtime.helper_calls() == calls + 2
         assert (await snapshot(runtime.url))["snapshot"]["context"] == context
-        assert alpha.received.count(b"RUNTIME_LOCAL_ECHO") == 1
+        for action in actions:
+            assert alpha.received.count(action.encode()) == 1
+            assert action.encode() not in beta.received
         assert sum(frame["text"] == "RUNTIME_LOCAL_TEXT" for frame in text) == 1
         assert len(runtime.quote_helpers(tf, "/bin/sleep")) == 1, (
             "unrelated quote was killed"
@@ -479,7 +508,12 @@ async def scenario(runtime: Runtime) -> None:
         await runtime.assert_single_consumer(tf)
         assert beta.received.count(b"RUNTIME_BETA_ECHO") == 1
         assert b"RUNTIME_BETA_ECHO" not in alpha.received
-        assert alpha.received.count(b"RUNTIME_LOCAL_ECHO") == 1
+        assert len(runtime.quote_helpers(tf, "/bin/sleep")) == 1, (
+            "unrelated quote was killed"
+        )
+        for action in actions:
+            assert alpha.received.count(action.encode()) == 1
+            assert action.encode() not in beta.received
         assert sum(frame["text"] == "RUNTIME_LOCAL_TEXT" for frame in text) == 1
         runtime.stop(feed)
         runtime.stop(relay)

@@ -78,6 +78,26 @@ which remains `stale` until fresh authoritative GMCP is published.
 
 ## Running (normal production path)
 
+The supported baseline for Imp's TinyFugue integration is GMCP-capable
+TinyFugue **5.2.4 or later**, which contains the quote-readiness correction.
+Upstream [TinyFugue #124](https://github.com/ingwarsw/tinyfugue/pull/124) is
+merged, and the correction is included in the
+[5.2.4 release](https://github.com/ingwarsw/tinyfugue/releases/tag/5.2.4). When a
+shell quote is consumed or closed, the correction clears both its monitored-read
+and active-readiness state. Without it, TF can block its main thread reading an
+idle helper pipe after an action or a coincident Telnet prompt. This was
+observed with TF `5.2.2-3-g4f0ff34` and `5.2.3-6-ge164a1d`.
+
+A version string alone does not prove that a custom or downstream-patched build
+contains the correction, and GMCP capability does not imply it; confirm that the
+build's source includes the upstream change. Run the
+[native restart regression](#native-restart-regression) against the exact
+binary, released or custom, before live acceptance. Updating Imp or reloading
+its capture hook does not repair an already-running unpatched TF executable;
+only a TF process started from a corrected binary has the fix. If an action
+makes TF freeze, action delivery is uncertain: do not retry the action, replace
+its button, or restart a live session without an agreed recovery procedure.
+
 Copy the unchanged hook to `~/.config/imp/capture.tf`, then put this line first
 in the macro-format startup file used by the operator's actual TinyFugue
 invocation, before any connection/login commands:
@@ -312,10 +332,12 @@ node port. It exercises real TF hook execution, feed/node restart without a MUD
 reconnect, same-context selection during a feed outage followed by readiness
 reselection, changed and null foreground recovery, and watcher reload ownership.
 It checks that only one action consumer remains alive, registrations stop churning,
-unrelated quotes survive replacement, and actions/text are not replayed. A later
-foreground change must still replace the consumer and deliver only to that world.
-It never loads the operator's startup or contacts a real MUD, and does not replace
-live NAT/desktop acceptance.
+unrelated quotes survive replacement, and actions/text are not replayed. Before
+restarting services it sends two consecutive same-context actions, requires a TF
+input heartbeat after each, and exercises a Telnet GA prompt. A later foreground
+change must still replace the consumer and deliver only to that world. It never
+loads the operator's startup or contacts a real MUD, and does not replace live
+NAT/desktop acceptance.
 
 The normal pytest suite runs the same behavioral regression when `IMP_TF_BINARY`
 explicitly names a GMCP-capable native Linux TF binary; otherwise that test is
@@ -597,8 +619,8 @@ that presentation; no live `unknown` outcome was deliberately manufactured.
 ## Verified TinyFugue boundary
 
 The base hook contract was established against TinyFugue
-5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The current VPS build
-5.2.2-3-g4f0ff34 additionally provides the `GMCP_LOGIN` hook the operator's
+5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The earlier VPS build
+5.2.2-3-g4f0ff34 additionally provided the `GMCP_LOGIN` hook the operator's
 login scripts need (see
 [identity bootstrap prerequisite](#identity-bootstrap-prerequisite)).
 `GMCP`, `CONNECT`, and `WORLD` supply the package/world events used by the
