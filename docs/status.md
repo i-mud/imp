@@ -47,10 +47,13 @@ The [Slice 25 evidence](#slice-25---connection-oriented-server-installation)
 preserves the initial failures and subsequent passing corrections. The
 [roadmap follow-ups](roadmap.md#acceptance-follow-ups) distinguish work implemented
 in Slice 26 from retained limitations; they do not invalidate Slice 25 acceptance.
+Slice 26 later accepted the published `v0.4.6` artifacts; see
+[its re-acceptance](#re-acceptance-with-tinyfugue-524--pass-slice-26-complete).
 
-## Slice 26 implementation — live acceptance pending
+## Slice 26 implementation — complete
 
-Slice 26 remains in progress for live infrastructure acceptance. PR1
+Slice 26 is complete after published `v0.4.6` live acceptance with TinyFugue
+5.2.4 or later. PR1
 [#48](https://github.com/i-mud/imp/pull/48) landed startup-file onboarding; PR2
 [#49](https://github.com/i-mud/imp/pull/49) landed the saved Direct-credential
 warning; PR3 [#50](https://github.com/i-mud/imp/pull/50) landed NAT preflight
@@ -522,6 +525,65 @@ or installed artifact was patched during acceptance. Documentation validation
 and publication are tracked separately in the evidence PR; they do not imply
 acceptance. Slice 25 acceptance, arbitrary nested-include limits and real-runtime
 CI follow-ups are unchanged.
+
+### Re-acceptance with TinyFugue 5.2.4 — PASS; Slice 26 complete
+
+**The blocking action freeze is fixed, and Slice 26 is complete.** The freeze
+was a TinyFugue defect, not an Imp defect: Imp's action path was unchanged across
+0.4.0, 0.4.1 and 0.4.6. When a quoted command closed its pipe, TinyFugue cleared
+its reader slot but left the descriptor in its `active` readiness set. A later
+stale readiness bit then made it block in a pipe read. TinyFugue
+[PR #124](https://github.com/twilightsaurus/tinyfugue/pull/124) also clears the
+`active` bit in `readers_clear()` and adds a native persistent-quote/GA
+regression test. It was released as tag
+[`5.2.4`](https://github.com/twilightsaurus/tinyfugue/releases/tag/5.2.4)
+(commit `9e8894501366012106f577fef1471e84ed429e39`). Imp
+[PR #54](https://github.com/i-mud/imp/pull/54) strengthens the TF restart test
+and documents the required build; acceptance used no Imp code change.
+
+Both hosts kept the published 0.4.6 runtime unchanged (installed `imp-server`
+SHA256 `3e2c8131df93ca17a9df0774dcb2faf09b5d6c8c40d83c129658c78a6647b064`
+matches the release payload). TinyFugue 5.2.4 was built side by side with the
+previous feature set, passed its native test, and became the normal `tf`
+command. The previous binary is kept for rollback. Windows used the published
+0.4.6 desktop.
+
+| Check (one UI Look per host)                                           | NAT host | Direct host |
+| ---------------------------------------------------------------------- | -------- | ----------- |
+| Isolated test character identity/vitals in Windows Imp over Direct WSS | PASS     | PASS        |
+| One Look: one TF response; local echo shows TF responsive              | PASS     | PASS        |
+| `imp-relay` restart only: same TF process, UI recovers, no replay      | PASS     | PASS        |
+| `imp-feed` restart only: same TF process, UI recovers, no replay       | PASS     | PASS        |
+| Exactly one owned feed watcher and action consumer after each restart  | PASS     | PASS        |
+| Gateway and Caddy untouched during the run; marker `pending=null`      | PASS     | PASS        |
+| Test TF quit normally; no TF or Imp helper process remains             | PASS     | PASS        |
+
+Same-process continuity used TF PID, start time, boot ID and executable hash.
+On the NAT host the observer lost its stored fingerprint, so continuity there
+rests on the TF start time predating the restarts, unchanged units and the
+operator's same-terminal observation. After the feed restart `/healthz` may read
+`stale` while the character is idle: the relay marks the feed stale after 10 s
+without GMCP. The feed-recovery criterion was therefore one producer plus a
+retained snapshot. A relay restart starts a new sequence.
+
+The NAT host's original pairing token was no longer available to the operator.
+With authorization it was rotated through the published `imp-direct-wss rotate`
+helper and verified with loopback and external public verifiers. **This
+supersedes the earlier restored-original NAT credential.** Rejection of the
+previous token was not tested. The Direct host kept its credential, gateway and
+Caddy unchanged. Windows was restored to its original Direct profile, with
+exact file hashes and ACLs. The accepted 13 cache-ACL exception is unchanged.
+
+Retained limitations, none blocking:
+
+- TinyFugue 5.2.3 and earlier can still freeze after an action; use 5.2.4 or
+  later. Imp PR #54 records this guidance and was open at acceptance time.
+- Legacy recovery was accepted on constructed canonical fixtures, not on
+  naturally aged installations.
+- Root TLS archive preservation rests on operator success and reviewed restore
+  assertions, not an independent full TLS comparison.
+- Arbitrary nested-include detection, real-runtime CI and live native SSH
+  connectivity remain open follow-ups.
 
 ## Working end to end
 

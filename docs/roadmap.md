@@ -44,7 +44,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
 | Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
 | Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1` |
-| Slice 26 - Installation reliability and onboarding    | In progress | No slice marker                       |
+| Slice 26 - Installation reliability and onboarding    | Complete    | No slice marker; accepted in `v0.4.6` |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -55,8 +55,8 @@ The Slices 17–23 remediation program is complete; see the separate
 PR identities, verification, and retained limitations. Slice 24 is complete
 with non-blocking follow-ups. Slice 25 is complete: its implementation shipped
 in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
-`v0.4.1`, plus retained follow-ups. Slice 26 is in progress with the bounded
-scope below. Other candidates remain provisional.
+`v0.4.1`, plus retained follow-ups. Slice 26 is complete: published `v0.4.6`
+was accepted with TinyFugue 5.2.4. Other candidates remain provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -764,17 +764,17 @@ These priorities do not invalidate Slice 25 acceptance. Their dispositions are:
   the remaining corrections cover SSH `--no-start` and fresh install-only versus
   upgrade preservation.
 - **Retained-edge recovery:** implemented in Slice 26 PR4 #51 for an exact-owned,
-  inactive legacy edge with missing `gateway.env`; live acceptance remains pending.
+  inactive legacy edge with missing `gateway.env`; accepted live on canonical
+  fixtures in published `v0.4.6`.
 - **Real-runtime CI:** remains open. Run the real Caddy routing matrix and native
   TinyFugue restart regression in CI rather than relying only on deterministic
   substitutes.
 
-## In progress
-
 ### Slice 26 - Installation reliability and onboarding
 
-In progress: the five bounded implementation items are implemented; live
-infrastructure acceptance remains pending.
+Complete: the five bounded implementation items were implemented and accepted
+live in published `v0.4.6` with TinyFugue 5.2.4. The dated history below records
+the earlier blocked, partial and failed segments.
 
 1. TinyFugue onboarding/startup integration (landed in PR1
    [#48](https://github.com/i-mud/imp/pull/48)): explicit
@@ -941,6 +941,21 @@ publication are tracked separately in the evidence PR, not acceptance claims.
 **Slice 26 remains In progress**;
 see [final decision and matrix](status.md#final-segment-decision--failed-original-identities-restored-on-046).
 Slice 25 acceptance and nested-include/real-runtime CI follow-ups are unchanged.
+
+**Re-acceptance with TinyFugue 5.2.4: PASS; Slice 26 complete.** The action
+freeze was a TinyFugue readiness defect, fixed in TinyFugue
+[PR #124](https://github.com/twilightsaurus/tinyfugue/pull/124) and released as
+`5.2.4`; Imp's action path was unchanged. With the unchanged published 0.4.6
+runtime and desktop, the NAT and Direct hosts each passed one UI Look, a
+relay-only restart and a feed-only restart. The same TF process survived, the UI
+recovered and no action replayed. The NAT pairing token was rotated through the
+published helper because the original was unavailable; rejection of the
+previous token was not tested. Imp
+[PR #54](https://github.com/i-mud/imp/pull/54) documents the TinyFugue 5.2.4
+requirement and strengthens the restart test. See the
+[re-acceptance matrix](status.md#re-acceptance-with-tinyfugue-524--pass-slice-26-complete).
+Constructed-fixture legacy recovery, root TLS archive evidence, nested includes
+and real-runtime CI remain retained limitations or follow-ups.
 
 ## Candidate work
 
