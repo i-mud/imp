@@ -78,21 +78,25 @@ which remains `stale` until fresh authoritative GMCP is published.
 
 ## Running (normal production path)
 
-Use a GMCP-capable TF build with the quote-readiness correction: consuming or
-closing a shell quote must clear both its monitored-read and active-readiness
-bits. Unpatched TF can block its main thread reading an idle helper pipe after
-an action or a coincident Telnet prompt. This was observed with TF
-`5.2.2-3-g4f0ff34` and `5.2.3-6-ge164a1d`; the version string or GMCP capability
-alone does not establish that the correction is present.
+The supported baseline for Imp's TinyFugue integration is GMCP-capable
+TinyFugue **5.2.4 or later**, which contains the quote-readiness correction.
+Upstream [TinyFugue #124](https://github.com/ingwarsw/tinyfugue/pull/124) is
+merged, and the correction is included in the
+[5.2.4 release](https://github.com/ingwarsw/tinyfugue/releases/tag/5.2.4). When a
+shell quote is consumed or closed, the correction clears both its monitored-read
+and active-readiness state. Without it, TF can block its main thread reading an
+idle helper pipe after an action or a coincident Telnet prompt. This was
+observed with TF `5.2.2-3-g4f0ff34` and `5.2.3-6-ge164a1d`.
 
-The correction is tracked in [TinyFugue #124](https://github.com/ingwarsw/tinyfugue/pull/124).
-A candidate TF build must contain that patch; an open PR is not a released build.
-
-Validate a candidate build with the [native restart regression](#native-restart-regression)
-before live acceptance. Updating Imp or reloading the hook does not patch an
-already-running TF executable. If TF freezes, action delivery is uncertain:
-do not retry the action, replace its button, or restart a live session without
-an agreed recovery procedure.
+A version string alone does not prove that a custom or downstream-patched build
+contains the correction, and GMCP capability does not imply it; confirm that the
+build's source includes the upstream change. Run the
+[native restart regression](#native-restart-regression) against the exact
+binary, released or custom, before live acceptance. Updating Imp or reloading
+its capture hook does not repair an already-running unpatched TF executable;
+only a TF process started from a corrected binary has the fix. If an action
+makes TF freeze, action delivery is uncertain: do not retry the action, replace
+its button, or restart a live session without an agreed recovery procedure.
 
 Copy the unchanged hook to `~/.config/imp/capture.tf`, then put this line first
 in the macro-format startup file used by the operator's actual TinyFugue
@@ -615,8 +619,8 @@ that presentation; no live `unknown` outcome was deliberately manufactured.
 ## Verified TinyFugue boundary
 
 The base hook contract was established against TinyFugue
-5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The current VPS build
-5.2.2-3-g4f0ff34 additionally provides the `GMCP_LOGIN` hook the operator's
+5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The earlier VPS build
+5.2.2-3-g4f0ff34 additionally provided the `GMCP_LOGIN` hook the operator's
 login scripts need (see
 [identity bootstrap prerequisite](#identity-bootstrap-prerequisite)).
 `GMCP`, `CONNECT`, and `WORLD` supply the package/world events used by the
