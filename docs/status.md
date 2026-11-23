@@ -533,10 +533,10 @@ was a TinyFugue defect, not an Imp defect: Imp's action path was unchanged acros
 0.4.0, 0.4.1 and 0.4.6. When a quoted command closed its pipe, TinyFugue cleared
 its reader slot but left the descriptor in its `active` readiness set. A later
 stale readiness bit then made it block in a pipe read. TinyFugue
-[PR #124](https://github.com/twilightsaurus/tinyfugue/pull/124) also clears the
+[PR #124](https://github.com/ingwarsw/tinyfugue/pull/124) also clears the
 `active` bit in `readers_clear()` and adds a native persistent-quote/GA
 regression test. It was released as tag
-[`5.2.4`](https://github.com/twilightsaurus/tinyfugue/releases/tag/5.2.4)
+[`5.2.4`](https://github.com/ingwarsw/tinyfugue/releases/tag/5.2.4)
 (commit `9e8894501366012106f577fef1471e84ed429e39`). Imp
 [PR #54](https://github.com/i-mud/imp/pull/54) strengthens the TF restart test
 and documents the required build; acceptance used no Imp code change.

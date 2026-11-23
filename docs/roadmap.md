@@ -944,7 +944,7 @@ Slice 25 acceptance and nested-include/real-runtime CI follow-ups are unchanged.
 
 **Re-acceptance with TinyFugue 5.2.4: PASS; Slice 26 complete.** The action
 freeze was a TinyFugue readiness defect, fixed in TinyFugue
-[PR #124](https://github.com/twilightsaurus/tinyfugue/pull/124) and released as
+[PR #124](https://github.com/ingwarsw/tinyfugue/pull/124) and released as
 `5.2.4`; Imp's action path was unchanged. With the unchanged published 0.4.6
 runtime and desktop, the NAT and Direct hosts each passed one UI Look, a
 relay-only restart and a feed-only restart. The same TF process survived, the UI
