@@ -73,13 +73,8 @@
     max-width: 100%;
     min-width: 3rem;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-6);
     border: 1px solid var(--accent-border);
-    border-radius: var(--radius);
     background: var(--accent-subtle);
-    color: var(--text);
-    cursor: pointer;
-    font-size: var(--font-xs);
   }
 
   .alert-toggle-pill:hover,

@@ -1,28 +1,32 @@
 <script lang="ts">
   import Settings from '@lucide/svelte/icons/settings';
+  import X from '@lucide/svelte/icons/x';
 
   let {
-    onopen,
-    open = $bindable(false),
-    trigger = $bindable<HTMLButtonElement | undefined>(),
+    controls,
+    expanded,
+    ontoggle,
   }: {
-    onopen: (keyboard: boolean) => void;
-    open?: boolean;
-    trigger?: HTMLButtonElement | undefined;
+    controls: string;
+    expanded: boolean;
+    ontoggle: (keyboard: boolean) => void;
   } = $props();
 </script>
 
 <div class="settings">
   <button
-    bind:this={trigger}
-    class="settings-button icon-btn"
-    aria-label="Settings"
-    aria-expanded={open}
+    class="settings-button icon-btn panel-shortcut"
+    type="button"
+    aria-label={expanded ? 'Close settings' : 'Settings'}
+    aria-expanded={expanded}
+    aria-controls={controls}
     aria-haspopup="dialog"
     onclick={(event) => {
       event.stopPropagation();
-      if (!open) onopen(event.detail === 0);
-      open = !open;
-    }}><Settings size={14} /></button
+      if (event.detail <= 1) ontoggle(event.detail === 0);
+    }}
   >
+    <Settings size={14} aria-hidden="true" />
+    {#if expanded}<X class="shortcut-dismiss" size={10} strokeWidth={3} aria-hidden="true" />{/if}
+  </button>
 </div>

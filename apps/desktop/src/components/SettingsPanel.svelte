@@ -74,7 +74,7 @@
     <div class="section-head">
       <div id="connection-settings-title" class="menu-title">Connection</div>
       <button
-        class="menu-button head-action"
+        class="manage-btn"
         type="button"
         data-connection-manager-trigger
         onclick={(event) => {
@@ -135,29 +135,6 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
-  }
-
-  .menu-button {
-    padding: var(--space-3) var(--space-4);
-    border: 0;
-    border-radius: var(--radius);
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    font-size: var(--font-xs);
-    text-align: left;
-  }
-
-  .menu-button:hover,
-  .menu-button:focus-visible {
-    background: var(--accent-hover);
-    outline: none;
-  }
-
-  .head-action {
-    flex: 0 0 auto;
-    padding-block: var(--space-1);
-    color: var(--accent);
   }
 
   .segmented {

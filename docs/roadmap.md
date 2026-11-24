@@ -970,11 +970,14 @@ verification and limitations.
    isolated Windows WebView2 verified that the normal expanded HUD grows
    and shrinks to fit target and action content at 320 logical pixels.
    Compact, Settings, Alerts, and manager sizing were unchanged by PR 1.
-2. **Contextual Alerts and Actions management (mandatory, 27-02 and 27-03).**
-   PR 2 moves management from Settings to the corresponding HUD surfaces,
-   including empty states. Closing a manager restores its originating
-   surface and focuses its Manage control.
-   Implemented and locally verified; awaiting independent PR review.
+2. **Contextual management and HUD navigation (mandatory, 27-02 and 27-03).**
+   [PR #57](https://github.com/i-mud/imp/pull/57) moves management from Settings
+   to the corresponding HUD surfaces, including empty states. Closing a manager
+   restores its originating surface and focuses Manage. Both modes keep the
+   same shortcut order, switch panels directly, and mark the active shortcut
+   with a small ×. Close Imp opens inline confirmation; canceling preserves the
+   current panel. Automated, Chromium, and isolated Windows WebView2 checks
+   passed; the PR is not merged.
 3. **Targeted visual and accessibility polish (conditional, 27-04 through
    27-06).** Awaits separate approval. Candidates are wrapping long action
    feedback (27-04), improving status and error text contrast (27-05), and

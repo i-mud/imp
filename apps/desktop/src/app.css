@@ -115,14 +115,10 @@
   --track-bg: rgba(23, 38, 54, 0.12);
 }
 
-/*
- * Shared "pill" button: every saved/manage action button (expanded action
- * strip, compact action panel, action-manager dialog) renders from this one
- * rule so the three surfaces can never drift apart again.
- */
 .action-btn,
+.alert-toggle-pill,
 .manage-btn {
-  padding: var(--space-3) var(--space-6);
+  padding: var(--space-1) var(--space-4);
   border-radius: var(--radius);
   color: var(--text);
   cursor: pointer;
@@ -135,11 +131,14 @@
 }
 
 .manage-btn {
-  border: 1px solid var(--input-border);
+  flex: 0 0 auto;
+  border: 0;
   background: transparent;
+  color: var(--accent);
 }
 
-.manage-btn:hover {
+.manage-btn:hover,
+.manage-btn:focus-visible {
   background: var(--accent-hover);
 }
 
@@ -318,6 +317,17 @@
   color: var(--text);
 }
 
+.panel-shortcut {
+  position: relative;
+}
+
+.panel-shortcut .shortcut-dismiss {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  pointer-events: none;
+}
+
 html,
 body,
 #app {
@@ -363,12 +373,15 @@ button {
 .alert-quick-list *,
 .action-bar,
 .action-bar *,
+.actions-body,
+.actions-body *,
 .action-dialog,
 .action-dialog *,
 .alert-dialog,
 .alert-dialog *,
 .connection-dialog,
 .connection-dialog *,
+.exit-confirmation button,
 button.close {
   app-region: no-drag;
 }

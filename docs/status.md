@@ -611,29 +611,63 @@ live MUD behavior were not exercised. Browser DPR is not native DPI evidence.
 The resize keeps the window origin fixed: growth near the bottom of the work
 area can extend below it. PR 1 fixes internal layout, not desktop placement.
 
-### PR 2 — Contextual Alerts and Actions management (27-02 and 27-03)
+### PR 2 — Contextual management and HUD navigation (27-02 and 27-03)
 
 Manage Actions opens from the expanded action strip or compact Actions
 palette. Manage Alerts opens from the bell panel in either mode. These
 entries stay available with no saved definitions; Settings no longer links
 to either manager. Close or Escape returns to the originating surface and
-focuses its Manage button. For keyboard users, opening the compact Actions
-palette or either Alerts panel focuses its Manage button; dismissing the
-panel with Escape or its Close control restores the owning trigger. An
-outside pointer press dismisses a compact attached panel without taking focus.
+focuses its Manage button. Opening Actions or Alerts by keyboard focuses
+Manage; opening Settings by keyboard focuses the selected Display option.
+In either display mode, the top row keeps the same order: Alerts, Actions,
+Settings, Close Imp. Selecting another panel shortcut switches directly.
+The active shortcut gains a small × and a matching accessible label
+(for example, “Close actions”). Activating it again or pressing Escape
+collapses the panel and returns focus to its shortcut. An outside pointer
+press dismisses a compact attached panel without taking focus.
 
-Implemented and locally verified; awaiting independent PR review, not yet
-merged. `npm run check` passed, including 199 desktop tests (44 targeted,
-30 new). Chromium covered 24 paired configurations across both themes and
-display modes, empty/one/16 definitions, and 16px/20px fonts. All 12 closed
-compact layouts were unchanged, and Manage controls stayed in place after
-2,150px of horizontal scrolling or 641px of vertical scrolling.
+Close Imp shows an inline confirmation in the top row without changing the
+window size or the underlying panel. Focus starts on Cancel and stays within
+the two confirmation controls. Cancel or Escape restores the row and focus to
+Close Imp. Only Confirm closes the app from that prompt.
+
+[PR #57](https://github.com/i-mud/imp/pull/57) is not merged. The final
+`npm run check` passed, including 226 desktop tests (57 HUD DOM tests);
+64 focused tests passed across four suites.
+
+Isolated Windows WebView2 mocks passed 340 checkpoints at 96 DPI across
+both modes and themes. Across 96 exit-confirmation steps, the app made
+no resize requests and the native window emitted no resize events.
+Each of four deliberate Confirm activations requested exactly one close;
+focus transfers were checked on the private Windows desktop. Minimum
+compact width remained 280 logical pixels. At 320 logical pixels wide,
+the expanded HUD measured 174 → 221 → 174 with no saved actions and
+186 → 233 → 186 with overflowing actions as a target appeared and
+cleared; each transition emitted one native resize event.
+
+Chromium passed 11,728 assertions across 24 profiles and eight cross-layout
+cases, including direct switching, settings saves, manager return and focus,
+pending actions, and target transitions. All 96 inline-confirmation scenarios
+preserved window size. The shortest compact fixture measured 280 × 32 at
+normal font size and 348 × 32 at enlarged font size; the active × had at
+least 5.2:1 contrast in the tested profiles.
+
+Final acceptance used disposable mocks, not the installed HUD or a live MUD.
+
+Earlier contextual-management evidence predates final shortcut and exit behavior:
+`npm run check` passed 199 desktop tests (44 targeted, 30 new); Chromium
+covered 24 paired configurations across both themes and display modes,
+empty/one/16 definitions, and 16px/20px fonts. All 12 closed compact layouts
+were unchanged, and Manage controls stayed in place after 2,150px of
+horizontal scrolling or 641px of vertical scrolling.
 
 Isolated Windows WebView2 mock runs recorded 40 candidate and 26 baseline
 measurements. They verified the 280px compact baseline, every manager origin,
 Close/Escape return, deletion of the last definition, and target transitions.
-See [Before and after in WebView2](audits/slice-27-contextual-management.png).
-The native DPI and desktop-edge placement limits above still apply.
+The [earlier WebView2 comparison](audits/slice-27-contextual-management.png)
+shows the contextual manager layout, not the final navigation. Native DPI was
+not established beyond 100% scale. Desktop-edge placement remains a separate
+limitation: a resize does not move the window back onto the work area.
 
 PR 3 is conditional and awaits separate approval. Long action-feedback
 wrapping, status/error contrast, and broader manager keyboard containment
@@ -732,10 +766,10 @@ These checks require a native platform, real processes, or operator-controlled
 infrastructure and remain separate from CI:
 
 Slice-specific evidence below records what was exercised at that milestone,
-not the current package version or release procedure. In particular, pre-Slice-16
-SSH tests used local port `8787`; today's SSH consumer port is `8789`, and the
-desktop-owned local node runs even in Direct mode. Historical release mechanics
-are superseded by [`releases.md`](releases.md).
+not the current HUD navigation, package version, or release procedure. In
+particular, pre-Slice-16 SSH tests used local port `8787`; today's SSH consumer
+port is `8789`, and the desktop-owned local node runs even in Direct mode.
+Historical release mechanics are superseded by [`releases.md`](releases.md).
 
 | Evidence                  | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1693,7 +1727,7 @@ immutable [historical audit](audits/2026-10-03-full-repository-audit.md):
   choices remain disabled while saving.
 - Keyboard display changes retain Settings and restore selection focus after
   the compact/expanded remount. Pointer display changes still dismiss Settings.
-  Other Settings/Actions navigation and Escape handlers are unchanged.
+  At Slice 22, the other Settings/Actions navigation and Escape handlers were unchanged.
 - The TinyFugue acceptance guide uses async `createRuntimeClients()` and its
   returned `actionSink`, preserving the current exact-context consumer route,
   fixed-macro bridge, and no-retry/no-replay contract.
@@ -1705,8 +1739,8 @@ were inspected for expanded Settings at 320x227, compact attached Settings,
 320-wide Connection/Alerts dialogs, and client-neutral offline/action feedback.
 No unexpected wrapping or clipping was observed on those surfaces.
 
-The existing Node-only Vitest stack has no DOM/keyboard test library. Focused
-regressions therefore check rendered native-radio labels, grouping, and checked
+At Slice 22, the Node-only Vitest stack had no DOM/keyboard test library. Focused
+regressions checked rendered native-radio labels, grouping, and checked
 attributes; real Chromium keyboard/interaction assertions supplement them.
 The documented factory was executed in the relay-mode browser and returned a
 `RelayActionSink`; an unavailable endpoint returned `unknown`, not a fabricated

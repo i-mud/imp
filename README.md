@@ -227,7 +227,14 @@ To create action shortcuts, choose **Manage** in the expanded HUD's action
 strip. In compact mode, open **Actions** (swords icon) to find **Manage**.
 To configure alerts, open **Alerts** (bell icon) in either display mode and
 choose **Manage alerts**. Both managers are available even when nothing is
-saved.
+saved. In both display modes, the top row keeps the same shortcut order:
+**Alerts**, **Actions**, **Settings**, **Close Imp**. Select another panel
+shortcut to switch directly. The open panel's icon gains a small ×; select
+it again or press **Escape** to collapse the panel.
+
+**Close Imp** shows an inline **Close Imp?** confirmation in the top row.
+**Confirm** exits Imp. **Cancel** or **Escape** leaves the current panel open
+and returns focus to **Close Imp**.
 
 **Close** or **Escape** in a manager returns you to the HUD surface that
 opened it and focuses its Manage control. Use the Alerts panel's quick

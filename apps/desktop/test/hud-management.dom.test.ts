@@ -11,6 +11,7 @@ import {
 } from '../src/lib/alerts/definitions.ts';
 import { INITIAL_MODEL } from '../src/lib/hud/model.ts';
 import { saveDisplayMode, type DisplayMode } from '../src/lib/hud/presentation.ts';
+import * as tunnel from '../src/lib/tunnel.ts';
 import { closeWindow } from '../src/lib/window.ts';
 
 vi.mock(import('../src/lib/window.ts'), async (importOriginal) => ({
@@ -76,9 +77,21 @@ function keyboardActivate(button: HTMLElement) {
   flushSync(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })));
 }
 
+function pressKey(key: string, shiftKey = false, repeat = false) {
+  const event = new KeyboardEvent('keydown', { key, shiftKey, repeat, bubbles: true, cancelable: true });
+  return flushSync(() => document.activeElement!.dispatchEvent(event));
+}
+
 function escape() {
-  const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-  flushSync(() => document.activeElement!.dispatchEvent(event));
+  pressKey('Escape');
+}
+
+function pointerDown(target: HTMLElement) {
+  flushSync(() => target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+}
+
+function shortcut(label: string) {
+  return control<HTMLButtonElement>(`button[aria-label="${label}"]`);
 }
 
 function expectFocus(target: HTMLElement) {
@@ -100,7 +113,7 @@ const surfaces = [
 ] as const;
 
 describe.each(surfaces)('$mode $kind management', ({ mode, kind, trigger }) => {
-  const quick = `[aria-label="Saved ${kind}s"]`;
+  const quick = `${trigger === null ? '.action-bar' : ''}[aria-label="Saved ${kind}s"]`;
   const manage = `button[aria-label="Manage ${kind}s"]`;
   const editor = `[role="dialog"][aria-labelledby="${kind}-dialog-title"]`;
   const saved = `[aria-labelledby="saved-${kind}s-title"]`;
@@ -175,14 +188,317 @@ describe.each(surfaces)('$mode $kind management', ({ mode, kind, trigger }) => {
   if (trigger !== null) {
     it('returns focus to the owning trigger when Escape dismisses its quick surface', async () => {
       mountHud(mode);
-      const owner = control(`button[aria-label="${trigger}"]`);
       await expectFocus(control(manage, openQuick()));
       escape();
       expect(document.querySelector(quick)).toBeNull();
+      const owner = shortcut(trigger);
       await expectFocus(owner);
       expect(owner.getAttribute('aria-expanded')).toBe('false');
     });
   }
+});
+
+const panels = {
+  Alerts: {
+    selector: '[aria-label="Saved alerts"]',
+    focus: 'button[aria-label="Manage alerts"]',
+    closeLabel: 'Close alerts',
+    icon: 'bell',
+  },
+  Actions: {
+    selector: '[aria-label="Saved actions"]',
+    focus: 'button[aria-label="Manage actions"]',
+    closeLabel: 'Close actions',
+    icon: 'swords',
+  },
+  Settings: {
+    selector: '[aria-label="Imp settings"]',
+    focus: 'input[name="display-mode"]:checked',
+    closeLabel: 'Close settings',
+    icon: 'settings',
+  },
+} as const;
+type PanelShortcut = keyof typeof panels;
+
+const shortcutOrder = ['Alerts', 'Actions', 'Settings'] as const;
+
+describe.each(['expanded', 'compact'] as const)('%s panel shortcuts', (mode) => {
+  function expectShortcuts(active?: PanelShortcut) {
+    const cluster = control(mode === 'compact' ? '.compact-controls' : '.titlebar');
+    const buttons = [...cluster.querySelectorAll('button')];
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      ...shortcutOrder.map((label) => (active === label ? panels[label].closeLabel : label)),
+      'Close Imp',
+    ]);
+    for (const button of buttons) {
+      expect(button.disabled).toBe(false);
+      expect(button.closest('[hidden], [aria-hidden="true"], .hidden')).toBeNull();
+    }
+    for (const [index, label] of shortcutOrder.entries()) {
+      const button = buttons[index]!;
+      const { icon, selector } = panels[label];
+      expect(button.querySelector(`svg.lucide-${icon}[aria-hidden="true"]`)).not.toBeNull();
+      const dismiss = button.querySelector('svg.lucide-x');
+      expect(dismiss?.getAttribute('aria-hidden')).toBe(active === label ? 'true' : undefined);
+      expect(button.getAttribute('aria-expanded')).toBe(String(active === label));
+      if (active === label) expect(button.getAttribute('aria-controls')).toBe(control(selector).id);
+    }
+  }
+
+  it('switches directly between every pair of panels and focuses the new panel', async () => {
+    mountHud(mode);
+    expectShortcuts();
+
+    for (const label of [
+      'Settings',
+      'Alerts',
+      'Actions',
+      'Settings',
+      'Actions',
+      'Alerts',
+      'Settings',
+    ] as const) {
+      keyboardActivate(shortcut(label));
+      const { selector, focus } = panels[label];
+      const surface = control(selector);
+      expectShortcuts(label);
+      for (const other of Object.values(panels)) {
+        if (other.selector !== selector) expect(document.querySelector(other.selector)).toBeNull();
+      }
+      await expectFocus(control(focus, surface));
+    }
+
+    escape();
+    expect(document.querySelector(panels.Settings.selector)).toBeNull();
+    expectShortcuts();
+    await expectFocus(shortcut('Settings'));
+    expect(closeWindow).not.toHaveBeenCalled();
+  });
+
+  it.each(shortcutOrder)('toggles %s or restores focus on Escape', async (label) => {
+    mountHud(mode);
+    keyboardActivate(shortcut(label));
+    const { selector, closeLabel } = panels[label];
+    const surface = control(selector);
+    expectShortcuts(label);
+    const collapse = shortcut(closeLabel);
+    pointerDown(collapse);
+    expect(surface.isConnected).toBe(true);
+    click(collapse);
+    expect(surface.isConnected).toBe(false);
+    expectShortcuts();
+    await expectFocus(shortcut(label));
+
+    keyboardActivate(shortcut(label));
+    const reopened = control(selector);
+    await expectFocus(control(panels[label].focus, reopened));
+    escape();
+    expect(reopened.isConnected).toBe(false);
+    expectShortcuts();
+    await expectFocus(shortcut(label));
+    expect(closeWindow).not.toHaveBeenCalled();
+  });
+
+  it.each(['Actions', 'Alerts'] as const)('returns to routed %s after editing', async (label) => {
+    mountHud(mode, true);
+    const source = label === 'Actions' ? 'Alerts' : 'Actions';
+    keyboardActivate(shortcut(source));
+    keyboardActivate(shortcut(label));
+
+    const { selector, focus } = panels[label];
+    const surface = control(selector);
+    const contextualActions = mode === 'expanded' && label === 'Actions';
+    if (contextualActions) {
+      expect(surface.id).toBe('expanded-actions-panel');
+      expect(document.querySelector('.action-bar')).toBeNull();
+    }
+    const entry = control(focus, surface);
+    keyboardActivate(entry);
+    const editor = `[role="dialog"][aria-labelledby="${label === 'Actions' ? 'action' : 'alert'}-dialog-title"]`;
+    expect(document.querySelector(editor)).not.toBeNull();
+    expect(surface.isConnected).toBe(false);
+    escape();
+    expect(document.querySelector(editor)).toBeNull();
+    const returned = control(selector);
+    expect(returned.id).toBe(surface.id);
+    expectShortcuts(label);
+    if (contextualActions) expect(document.querySelector('.action-bar')).toBeNull();
+    await expectFocus(control(focus, returned));
+
+    escape();
+    expect(returned.isConnected).toBe(false);
+    expectShortcuts();
+    await expectFocus(shortcut(label));
+    if (contextualActions) expect(document.querySelector('.action-bar')).not.toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('returns to routed Settings after closing Connection management', async () => {
+    mountHud(mode);
+    keyboardActivate(shortcut('Alerts'));
+    keyboardActivate(shortcut('Settings'));
+    const { selector } = panels.Settings;
+    const entry = control('[data-connection-manager-trigger]', control(selector));
+    click(entry);
+    expect(entry.isConnected).toBe(false);
+    click(shortcut('Close connection settings'));
+    const returned = control('[data-connection-manager-trigger]', control(selector));
+    expectShortcuts('Settings');
+    await expectFocus(returned);
+  });
+
+  const exitDialog = '[role="alertdialog"]';
+  const exitBar = mode === 'compact' ? '.compact-row' : '.titlebar';
+
+  function exitAction(label: string) {
+    const button = [...control(exitDialog, control(exitBar)).querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === label,
+    );
+    if (!button) throw new Error(`Missing exit action: ${label}`);
+    return button;
+  }
+
+  it.each([null, ...shortcutOrder])('replaces the top bar and cancels exit with %s open', async (active) => {
+    mountHud(mode);
+    if (active !== null) keyboardActivate(shortcut(active));
+    const surface = control(
+      active === null ? (mode === 'compact' ? '.panel' : '.empty-state') : panels[active].selector,
+    );
+    const bar = control(exitBar);
+    const regularControls = control('.row-controls', bar);
+    const hasBody = !surface.contains(bar);
+    const exit = shortcut('Close Imp');
+
+    pointerDown(exit);
+    expect(surface.isConnected).toBe(true);
+    keyboardActivate(exit);
+    const dialog = control(exitDialog, bar);
+    const title = document.getElementById(dialog.getAttribute('aria-labelledby') ?? '');
+    expect(title?.textContent?.trim()).toBe('Close Imp?');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect([...dialog.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
+      'Cancel',
+      'Confirm',
+    ]);
+    expect(regularControls.inert).toBe(true);
+    expect(regularControls.contains(exit)).toBe(true);
+    expect(regularControls.contains(dialog)).toBe(false);
+    expect(surface.isConnected).toBe(true);
+    if (hasBody) expect(surface.inert).toBe(true);
+    const cancel = exitAction('Cancel');
+    await expectFocus(cancel);
+    expect(closeWindow).not.toHaveBeenCalled();
+
+    pointerDown(cancel);
+    click(cancel);
+    expect(document.querySelector(exitDialog)).toBeNull();
+    expect(surface.isConnected).toBe(true);
+    expect(regularControls.inert).toBe(false);
+    if (hasBody) expect(surface.inert).toBe(false);
+    expectShortcuts(active ?? undefined);
+    await expectFocus(exit);
+    expect(closeWindow).not.toHaveBeenCalled();
+
+    keyboardActivate(exit);
+    await expectFocus(exitAction('Cancel'));
+    escape();
+    expect(document.querySelector(exitDialog)).toBeNull();
+    expect(surface.isConnected).toBe(true);
+    expect(regularControls.inert).toBe(false);
+    if (hasBody) expect(surface.inert).toBe(false);
+    expectShortcuts(active ?? undefined);
+    await expectFocus(exit);
+
+    if (active !== null) {
+      escape();
+      expect(surface.isConnected).toBe(false);
+      await expectFocus(shortcut(active));
+    }
+    expect(closeWindow).not.toHaveBeenCalled();
+  });
+
+  it('closes Imp only after explicit confirmation', async () => {
+    mountHud(mode);
+    keyboardActivate(shortcut('Settings'));
+    const exit = shortcut('Close Imp');
+    keyboardActivate(exit);
+    const defaultAction = exitAction('Cancel');
+    await expectFocus(defaultAction);
+    keyboardActivate(defaultAction);
+    expect(document.querySelector(exitDialog)).toBeNull();
+    await expectFocus(exit);
+    expect(closeWindow).not.toHaveBeenCalled();
+
+    keyboardActivate(exit);
+    const cancel = exitAction('Cancel');
+    const confirm = exitAction('Confirm');
+    await expectFocus(cancel);
+
+    pressKey('Tab', true);
+    expect(document.activeElement).toBe(confirm);
+    pressKey('Tab');
+    expect(document.activeElement).toBe(cancel);
+    expect(closeWindow).not.toHaveBeenCalled();
+
+    keyboardActivate(confirm);
+    expect(closeWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not activate exit controls twice from the same pointer or key gesture', async () => {
+    mountHud(mode);
+    const exit = shortcut('Close Imp');
+    exit.focus();
+    expect(pressKey('Enter', false, true)).toBe(false);
+    expect(document.querySelector(exitDialog)).toBeNull();
+
+    click(exit);
+    const cancel = exitAction('Cancel');
+    const confirm = exitAction('Confirm');
+    await expectFocus(cancel);
+    expect(pressKey('Enter', false, true)).toBe(false);
+    pressKey('Tab');
+    expect(pressKey(' ', false, true)).toBe(false);
+    cancel.focus();
+    const nextPress = new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 2 });
+    expect(confirm.dispatchEvent(nextPress)).toBe(false);
+    flushSync(() => confirm.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+    expect(closeWindow).not.toHaveBeenCalled();
+    expect(document.querySelector(exitDialog)).not.toBeNull();
+    expect(document.activeElement).toBe(cancel);
+
+    flushSync(() => confirm.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+    expect(closeWindow).toHaveBeenCalledTimes(1);
+    for (const label of [...shortcutOrder, 'Close Imp']) {
+      flushSync(() => shortcut(label).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+      expectShortcuts();
+      expect(document.querySelector(exitDialog)).toBeNull();
+    }
+  });
+});
+
+it('ignores a Connection load from a dismissed manager after reopening', async () => {
+  const stale = Promise.withResolvers<tunnel.ConnectionSettings | null>();
+  const current = Promise.withResolvers<tunnel.ConnectionSettings | null>();
+  vi.spyOn(tunnel, 'loadConnectionSettings')
+    .mockReturnValueOnce(stale.promise)
+    .mockReturnValueOnce(current.promise);
+
+  mountHud('expanded');
+  click(shortcut('Settings'));
+  click(control('[data-connection-manager-trigger]'));
+  click(shortcut('Close connection settings'));
+  click(control('[data-connection-manager-trigger]'));
+
+  stale.reject(new Error('Stale load failed'));
+  await expect(stale.promise).rejects.toThrow('Stale load failed');
+  await tick();
+  expect(control('.connection-dialog').textContent).toContain('Loading connection settings');
+  expect(document.querySelector('.connection-dialog [role="alert"]')).toBeNull();
+
+  current.resolve({ mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false });
+  await current.promise;
+  await tick();
+  expect(control<HTMLInputElement>('input[name="connection-mode"][value="local"]').checked).toBe(true);
 });
 
 it('keeps only display, theme, and Connection management in Settings', () => {
@@ -274,27 +590,21 @@ it.each(['expanded', 'compact'] as const)('keeps invocation pending across %s ma
   expect(control('[aria-live="polite"]').textContent).toContain('Forwarded to the game client.');
 });
 
-it('dismisses compact quick panels from outside without letting the chevron close Imp', () => {
+it('dismisses a compact panel from outside, not from its controls', () => {
   mountHud('compact');
-  const actions = control('button[aria-label="Actions"]');
-  const alerts = control('button[aria-label="Alerts"]');
-  const pointerDown = (target: HTMLElement) => {
-    flushSync(() => target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
-  };
-
-  click(actions);
-  const chevron = control('button[aria-label="Close actions"]');
-  pointerDown(chevron);
-  expect(actions.getAttribute('aria-expanded')).toBe('true');
-  click(chevron);
-  expect(actions.getAttribute('aria-expanded')).toBe('false');
-  expect(closeWindow).not.toHaveBeenCalled();
-
+  click(shortcut('Actions'));
+  const actions = control(panels.Actions.selector);
+  const alerts = shortcut('Alerts');
+  pointerDown(alerts);
+  expect(actions.isConnected).toBe(true);
   click(alerts);
-  pointerDown(control('button[aria-label="Manage alerts"]'));
-  expect(alerts.getAttribute('aria-expanded')).toBe('true');
+  expect(actions.isConnected).toBe(false);
+
+  const alertPanel = control(panels.Alerts.selector);
+  pointerDown(control(panels.Alerts.focus, alertPanel));
+  expect(alertPanel.isConnected).toBe(true);
   pointerDown(document.body);
-  expect(document.querySelector('[aria-label="Saved alerts"]')).toBeNull();
-  expect(alerts.getAttribute('aria-expanded')).toBe('false');
+  expect(alertPanel.isConnected).toBe(false);
+  expect(shortcut('Alerts').getAttribute('aria-expanded')).toBe('false');
   expect(closeWindow).not.toHaveBeenCalled();
 });

@@ -1,29 +1,31 @@
 <script lang="ts">
   import Swords from '@lucide/svelte/icons/swords';
+  import X from '@lucide/svelte/icons/x';
 
   let {
-    onopen,
-    open = $bindable(false),
-    trigger = $bindable<HTMLButtonElement | undefined>(),
+    controls,
+    expanded,
+    ontoggle,
   }: {
-    onopen: (keyboard: boolean) => void;
-    open?: boolean;
-    trigger?: HTMLButtonElement | undefined;
+    controls: string;
+    expanded: boolean;
+    ontoggle: (keyboard: boolean) => void;
   } = $props();
 </script>
 
 <div class="actions-menu">
   <button
-    bind:this={trigger}
-    class="icon-btn"
+    class="icon-btn panel-shortcut"
     type="button"
-    aria-label="Actions"
-    aria-expanded={open}
-    aria-controls="compact-actions-panel"
+    aria-label={expanded ? 'Close actions' : 'Actions'}
+    aria-expanded={expanded}
+    aria-controls={controls}
     onclick={(event) => {
       event.stopPropagation();
-      if (!open) onopen(event.detail === 0);
-      open = !open;
-    }}><Swords size={14} /></button
+      if (event.detail <= 1) ontoggle(event.detail === 0);
+    }}
   >
+    <Swords size={14} aria-hidden="true" />
+    {#if expanded}<X class="shortcut-dismiss" size={10} strokeWidth={3} aria-hidden="true" />{/if}
+  </button>
 </div>
