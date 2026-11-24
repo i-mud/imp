@@ -613,8 +613,8 @@ area can extend below it. PR 1 fixes internal layout, not desktop placement.
 
 ### PR 2 — Contextual management and HUD navigation (27-02 and 27-03)
 
-Manage Actions opens from the expanded action strip or compact Actions
-palette. Manage Alerts opens from the bell panel in either mode. These
+Manage Actions opens from the Actions palette in either display mode or
+directly from the expanded footer. Manage Alerts opens from the bell panel in either mode. These
 entries stay available with no saved definitions; Settings no longer links
 to either manager. Close or Escape returns to the originating surface and
 focuses its Manage button. Opening Actions or Alerts by keyboard focuses
@@ -644,6 +644,8 @@ compact width remained 280 logical pixels. At 320 logical pixels wide,
 the expanded HUD measured 174 → 221 → 174 with no saved actions and
 186 → 233 → 186 with overflowing actions as a target appeared and
 cleared; each transition emitted one native resize event.
+The [final WebView2 before/after comparison](audits/slice-27-contextual-management.png)
+shows the stable shortcuts and inline exit confirmation in both layouts.
 
 Chromium passed 11,728 assertions across 24 profiles and eight cross-layout
 cases, including direct switching, settings saves, manager return and focus,
@@ -664,9 +666,7 @@ horizontal scrolling or 641px of vertical scrolling.
 Isolated Windows WebView2 mock runs recorded 40 candidate and 26 baseline
 measurements. They verified the 280px compact baseline, every manager origin,
 Close/Escape return, deletion of the last definition, and target transitions.
-The [earlier WebView2 comparison](audits/slice-27-contextual-management.png)
-shows the contextual manager layout, not the final navigation. Native DPI was
-not established beyond 100% scale. Desktop-edge placement remains a separate
+Native DPI was not established beyond 100% scale. Desktop-edge placement remains a separate
 limitation: a resize does not move the window back onto the work area.
 
 PR 3 is conditional and awaits separate approval. Long action-feedback

@@ -223,8 +223,8 @@ the VPS.
 After TinyFugue is connected to the MUD, the HUD should begin showing live
 character state.
 
-To create action shortcuts, choose **Manage** in the expanded HUD's action
-strip. In compact mode, open **Actions** (swords icon) to find **Manage**.
+To create action shortcuts in either display mode, open **Actions** (swords
+icon) and choose **Manage**. The expanded HUD also has **Manage** in its footer.
 To configure alerts, open **Alerts** (bell icon) in either display mode and
 choose **Manage alerts**. Both managers are available even when nothing is
 saved. In both display modes, the top row keeps the same shortcut order:
