@@ -777,7 +777,10 @@ height grew from 174 logical pixels with no actions to 201 with one row,
 224 with two, and 247 with overflow and three visible rows. An appearing
 target increased that last height from 247 to 294. Clearing the target
 restored the height to 247. With enlarged font metrics the same
-overflowing HUD measured 305 → 363 → 305, matching in both themes. These were
+overflowing HUD measured 305 → 363 → 305, matching in both themes.
+In both themes, the normal compact HUD returned to 280 × 32 after
+closing an overflowing Actions or Alerts panel, and the compact width
+never exceeded 560 logical pixels in the width-cap checks. These were
 disposable mocks, not the installed HUD or a live MUD session. Enlarged
 font metrics do not establish higher or mixed native DPI behavior.
 
