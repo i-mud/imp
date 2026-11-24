@@ -5,40 +5,56 @@
     definitions,
     saveError,
     ontoggle,
+    onmanage,
   }: {
     definitions: readonly AlertDefinition[];
     saveError: string | null;
     ontoggle: (id: string, enabled: boolean) => boolean;
+    onmanage: () => void;
   } = $props();
 </script>
 
 <div class="alert-quick-list">
-  {#if definitions.length === 0}
-    <span class="empty">No alerts defined.</span>
-  {:else}
-    {#each definitions as definition (definition.id)}
-      <label class="alert-toggle-pill">
-        <input
-          type="checkbox"
-          checked={definition.enabled}
-          onchange={(event) => {
-            if (!ontoggle(definition.id, event.currentTarget.checked)) {
-              event.currentTarget.checked = definition.enabled;
-            }
-          }}
-        />
-        <span>{definition.label}</span>
-      </label>
-    {/each}
+  <div class="alert-toggle-list">
+    {#if definitions.length === 0}
+      <span class="empty">No alerts defined.</span>
+    {:else}
+      {#each definitions as definition (definition.id)}
+        <label class="alert-toggle-pill">
+          <input
+            type="checkbox"
+            checked={definition.enabled}
+            onchange={(event) => {
+              if (!ontoggle(definition.id, event.currentTarget.checked)) {
+                event.currentTarget.checked = definition.enabled;
+              }
+            }}
+          />
+          <span>{definition.label}</span>
+        </label>
+      {/each}
+    {/if}
+  </div>
+  {#if saveError !== null}
+    <div class="save-error" role="alert">{saveError}</div>
   {/if}
+  <button class="manage-btn" type="button" aria-label="Manage alerts" onclick={() => onmanage()}
+    >Manage alerts</button
+  >
 </div>
-
-{#if saveError !== null}
-  <div class="save-error" role="alert">{saveError}</div>
-{/if}
 
 <style>
   .alert-quick-list {
+    display: grid;
+    min-width: 0;
+    gap: var(--space-4);
+  }
+
+  .manage-btn {
+    justify-self: end;
+  }
+
+  .alert-toggle-list {
     display: flex;
     flex-wrap: wrap;
     align-content: flex-start;
@@ -57,13 +73,8 @@
     max-width: 100%;
     min-width: 3rem;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-6);
     border: 1px solid var(--accent-border);
-    border-radius: var(--radius);
     background: var(--accent-subtle);
-    color: var(--text);
-    cursor: pointer;
-    font-size: var(--font-xs);
   }
 
   .alert-toggle-pill:hover,
@@ -91,7 +102,6 @@
   }
 
   .save-error {
-    margin-top: var(--space-4);
     color: var(--bad);
   }
 </style>

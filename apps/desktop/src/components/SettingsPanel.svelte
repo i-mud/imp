@@ -9,22 +9,16 @@
     mode,
     theme,
     appVersion,
-    alertSaveError,
     onmodechange,
     onthemechange,
     onmanageconnection,
-    onmanagealerts,
-    onmanageactions,
   }: {
     mode: DisplayMode;
     theme: ThemePreference;
     appVersion: string | null;
-    alertSaveError: string | null;
     onmodechange: (mode: DisplayMode, keyboard: boolean) => void;
     onthemechange: (theme: ThemePreference) => void;
     onmanageconnection: (invoker: HTMLButtonElement) => void;
-    onmanagealerts: (invoker: HTMLButtonElement) => void;
-    onmanageactions: (invoker: HTMLButtonElement) => void;
   } = $props();
 
   const THEME_OPTIONS = [
@@ -80,46 +74,12 @@
     <div class="section-head">
       <div id="connection-settings-title" class="menu-title">Connection</div>
       <button
-        class="menu-button head-action"
+        class="manage-btn"
         type="button"
         data-connection-manager-trigger
         onclick={(event) => {
           event.stopPropagation();
           onmanageconnection(event.currentTarget);
-        }}>Manage</button
-      >
-    </div>
-  </section>
-
-  <section class="settings-section" aria-labelledby="alert-settings-title">
-    <div class="section-head">
-      <div id="alert-settings-title" class="menu-title">Alerts</div>
-      <button
-        class="menu-button head-action"
-        type="button"
-        data-alert-manager-trigger
-        onclick={(event) => {
-          event.stopPropagation();
-          onmanagealerts(event.currentTarget);
-        }}>Manage</button
-      >
-    </div>
-
-    {#if alertSaveError !== null}
-      <p class="alert-save-error" role="alert">{alertSaveError}</p>
-    {/if}
-  </section>
-
-  <section class="settings-section" aria-labelledby="action-settings-title">
-    <div class="section-head">
-      <div id="action-settings-title" class="menu-title">Actions</div>
-      <button
-        class="menu-button head-action"
-        type="button"
-        data-action-manager-trigger
-        onclick={(event) => {
-          event.stopPropagation();
-          onmanageactions(event.currentTarget);
         }}>Manage</button
       >
     </div>
@@ -177,29 +137,6 @@
     gap: var(--space-4);
   }
 
-  .menu-button {
-    padding: var(--space-3) var(--space-4);
-    border: 0;
-    border-radius: var(--radius);
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    font-size: var(--font-xs);
-    text-align: left;
-  }
-
-  .menu-button:hover,
-  .menu-button:focus-visible {
-    background: var(--accent-hover);
-    outline: none;
-  }
-
-  .head-action {
-    flex: 0 0 auto;
-    padding-block: var(--space-1);
-    color: var(--accent);
-  }
-
   .segmented {
     display: flex;
     flex: 0 0 auto;
@@ -249,15 +186,5 @@
   .segmented input:focus-visible + span {
     outline: 2px solid var(--accent-focus);
     outline-offset: -2px;
-  }
-
-  .alert-save-error {
-    margin: 0;
-    padding: var(--space-1) var(--space-2);
-    font-size: var(--font-xs);
-  }
-
-  .alert-save-error {
-    color: var(--bad);
   }
 </style>

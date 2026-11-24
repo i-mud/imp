@@ -6,11 +6,13 @@
     pendingActionId,
     feedback,
     oninvoke,
+    onmanage,
   }: {
     definitions: readonly ActionDefinition[];
     pendingActionId: string | null;
     feedback: string | null;
     oninvoke: (definition: ActionDefinition) => void;
+    onmanage: () => void;
   } = $props();
 </script>
 
@@ -29,6 +31,9 @@
       </button>
     {/each}
   </div>
+  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => onmanage()}
+    >Manage</button
+  >
   {#if feedback}
     <div class="action-feedback" aria-live="polite">{feedback}</div>
   {/if}
@@ -37,6 +42,8 @@
 <style>
   .action-bar {
     display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     min-width: 0;
     gap: var(--space-6);
     padding: var(--section-pad);
@@ -54,14 +61,14 @@
     scrollbar-width: thin;
   }
 
-  button {
+  .action-buttons button {
     flex: 0 0 auto;
     max-width: 9rem;
     min-width: 3rem;
     overflow: hidden;
   }
 
-  button span {
+  .action-buttons span {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -69,6 +76,7 @@
   }
 
   .action-feedback {
+    grid-column: 1 / -1;
     min-width: 0;
     overflow: hidden;
     color: var(--muted);

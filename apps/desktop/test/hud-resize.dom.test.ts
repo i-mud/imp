@@ -137,31 +137,26 @@ it('cancels a pending normal resize on branch exit and starts fresh after the ac
 
   setBounds(panel, 259.9);
   observer.deliver();
-  click('button[aria-label="Settings"]');
+  expect(vi.getTimerCount()).toBe(1);
+  click('button[aria-label="Manage actions"]');
   expect(observer.disconnect).toHaveBeenCalledOnce();
-  setBounds(element('.titlebar'), 23.2);
-  setBounds(element('.settings-body'), 177.4);
-  vi.advanceTimersToNextFrame();
-
-  click('[data-action-manager-trigger]');
-  setBounds(element('.manager-dialog'), 294.1);
+  const manager = element('.manager-dialog');
+  setBounds(manager, 294.1);
   vi.advanceTimersToNextFrame();
 
   click('button[aria-label="Close action manager"]');
-  setBounds(element('.titlebar'), 23.2);
-  setBounds(element('.settings-body'), 175.4);
-  vi.advanceTimersToNextFrame();
-  click('button[aria-label="Close settings"]');
+  expect(observerOf(manager).disconnect).toHaveBeenCalledOnce();
   const returnedPanel = element('.panel');
+  expect(returnedPanel).not.toBe(panel);
+  const returnedObserver = observerOf(returnedPanel);
+  expect(returnedObserver).not.toBe(observer);
   setBounds(returnedPanel, 133.1);
-  observerOf(returnedPanel).deliver();
+  returnedObserver.deliver();
   vi.advanceTimersToNextFrame();
 
   expect(requestedSizes()).toEqual([
     { width: 320, height: 134 },
-    { width: 320, height: 201 },
     { width: 320, height: 295 },
-    { width: 320, height: 199 },
     { width: 320, height: 134 },
   ]);
 });

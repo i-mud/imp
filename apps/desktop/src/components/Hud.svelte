@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   import ActionBar from './ActionBar.svelte';
   import ActionDialog from './ActionDialog.svelte';
@@ -9,6 +9,7 @@
   import ActionsMenu from './ActionsMenu.svelte';
   import CompactVital from './CompactVital.svelte';
   import ConnectionDialog from './ConnectionDialog.svelte';
+  import ExitConfirmation from './ExitConfirmation.svelte';
   import SettingsMenu from './SettingsMenu.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
   import StatusIndicator from './StatusIndicator.svelte';
@@ -47,7 +48,6 @@
   } from '../lib/hud/presentation.ts';
   import {
     actionDialogWindowSize,
-    closeWindow,
     compactPanelWindowSize,
     compactWindowSize,
     EXPANDED_WINDOW_WIDTH,
@@ -55,8 +55,10 @@
   } from '../lib/window.ts';
   import { applyTheme, loadTheme, saveTheme, type ThemePreference } from '../lib/hud/theme.ts';
   import { loadAppVersion } from '../lib/version.ts';
-  import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import X from '@lucide/svelte/icons/x';
+
+  type Panel = 'settings' | 'actions' | 'alerts';
+  type ManagerOrigin = 'footer-actions' | 'actions' | 'alerts';
 
   let {
     model,
@@ -77,14 +79,10 @@
   let compactRow = $state<HTMLElement>();
   let compactPanel = $state<HTMLDivElement>();
   let compactControls = $state<HTMLElement>();
-  let compactSettingsTrigger = $state<HTMLButtonElement>();
-  let compactActionsTrigger = $state<HTMLButtonElement>();
-  let compactAlertsTrigger = $state<HTMLButtonElement>();
-  let settingsOpen = $state(false);
-  let actionsOpen = $state(false);
-  let alertsOpen = $state(false);
-  let actionDialogOpen = $state(false);
-  let alertDialogOpen = $state(false);
+  let openPanel = $state<Panel | null>(null);
+  let exitInvoker = $state<HTMLButtonElement | null>(null);
+  let managerOrigin = $state<ManagerOrigin | null>(null);
+  const actionDialogOpen = $derived(managerOrigin === 'footer-actions' || managerOrigin === 'actions');
   let connectionDialogOpen = $state(false);
   let actionDialogWidth = $state<number>(EXPANDED_WINDOW_WIDTH);
   let actionSaveError = $state<string | null>(null);
@@ -92,8 +90,6 @@
   let connectionSettings = $state<ConnectionSettings | null>(null);
   let connectionLoadError = $state<string | null>(null);
   let connectionSaveError = $state<string | null>(null);
-  let actionDialogInvoker: HTMLButtonElement | null = null;
-  let alertDialogInvoker: HTMLButtonElement | null = null;
   let connectionDialogInvoker: HTMLButtonElement | null = null;
   const actionInvocation = $state<ActionInvocationState>({
     pendingActionId: null,
@@ -137,16 +133,12 @@
   const showMana = $derived(character?.mana?.max !== 0);
 
   function setDisplayMode(mode: DisplayMode, keyboard: boolean): void {
-    settingsOpen = keyboard;
-    actionsOpen = false;
-    alertsOpen = false;
+    openPanel = keyboard ? 'settings' : null;
     displayMode = mode;
     saveDisplayMode(mode);
     // Keyboard selection remounts Settings in the other layout; keep its radio focus.
     if (keyboard) {
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLInputElement>('input[name="display-mode"]:checked')?.focus();
-      });
+      void focusPanelControl('input[name="display-mode"]:checked');
     }
   }
 
@@ -191,7 +183,7 @@
     return true;
   }
 
-  function openActionDialog(invoker: HTMLButtonElement): void {
+  function setManagerWidth(): void {
     if (displayMode === 'compact') {
       const row = compactRow;
       const hudPanel = panel;
@@ -203,98 +195,55 @@
     } else {
       actionDialogWidth = EXPANDED_WINDOW_WIDTH;
     }
-
-    actionDialogInvoker = invoker;
-    actionSaveError = null;
-    alertDialogOpen = false;
-    connectionDialogOpen = false;
-    settingsOpen = false;
-    actionsOpen = false;
-    alertsOpen = false;
-    actionDialogOpen = true;
   }
 
-  function closeActionDialog(): void {
-    actionDialogOpen = false;
-    settingsOpen = true;
-    const invoker = actionDialogInvoker;
-    requestAnimationFrame(() => {
-      const target = invoker?.isConnected
-        ? invoker
-        : (document.querySelector<HTMLButtonElement>('[data-action-manager-trigger]') ??
-          document.querySelector<HTMLButtonElement>('.settings-button') ??
-          document.querySelector<HTMLButtonElement>('button.close'));
-      target?.focus();
-      actionDialogInvoker = null;
-    });
+  async function focusPanelControl(selector = '.manage-btn'): Promise<void> {
+    const expectedPanel = openPanel;
+    await tick();
+    if (openPanel !== expectedPanel || exitInvoker !== null) return;
+    panel?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
   }
 
-  function openAlertDialog(invoker: HTMLButtonElement): void {
-    if (displayMode === 'compact') {
-      const row = compactRow;
-      const hudPanel = panel;
-      if (row !== undefined && hudPanel !== undefined) {
-        const rowBounds = row.getBoundingClientRect();
-        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
-        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
-      }
-    } else {
-      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
+  function togglePanel(next: Panel, keyboard: boolean): void {
+    if (openPanel === next) {
+      dismissPanel();
+      return;
     }
-
-    alertDialogInvoker = invoker;
-    actionDialogOpen = false;
-    connectionDialogOpen = false;
-    settingsOpen = false;
-    actionsOpen = false;
-    alertsOpen = false;
-    alertDialogOpen = true;
+    openPanel = next;
+    if (keyboard) {
+      void focusPanelControl(next === 'settings' ? 'input[name="display-mode"]:checked' : '.manage-btn');
+    }
   }
 
-  function closeAlertDialog(): void {
-    alertDialogOpen = false;
-    settingsOpen = true;
+  function openManager(origin: ManagerOrigin): void {
+    setManagerWidth();
+    if (origin !== 'alerts') actionSaveError = null;
+    openPanel = null;
+    managerOrigin = origin;
+  }
 
-    const invoker = alertDialogInvoker;
-    requestAnimationFrame(() => {
-      const target = invoker?.isConnected
-        ? invoker
-        : (document.querySelector<HTMLButtonElement>('[data-alert-manager-trigger]') ??
-          document.querySelector<HTMLButtonElement>('.settings-button') ??
-          document.querySelector<HTMLButtonElement>('button.close'));
+  function closeManager(): void {
+    const origin = managerOrigin;
+    if (origin === null) return;
 
-      target?.focus();
-      alertDialogInvoker = null;
-    });
+    managerOrigin = null;
+    openPanel = origin === 'footer-actions' ? null : origin;
+    void focusPanelControl();
   }
 
   async function openConnectionDialog(invoker: HTMLButtonElement): Promise<void> {
-    if (displayMode === 'compact') {
-      const row = compactRow;
-      const hudPanel = panel;
-      if (row !== undefined && hudPanel !== undefined) {
-        const rowBounds = row.getBoundingClientRect();
-        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
-        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
-      }
-    } else {
-      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
-    }
+    setManagerWidth();
 
     connectionDialogInvoker = invoker;
     connectionSettings = null;
     connectionLoadError = null;
     connectionSaveError = null;
-    actionDialogOpen = false;
-    alertDialogOpen = false;
-    settingsOpen = false;
-    actionsOpen = false;
-    alertsOpen = false;
+    openPanel = null;
     connectionDialogOpen = true;
 
     try {
       const loaded = await loadConnectionSettings();
-      if (!connectionDialogOpen) return;
+      if (connectionDialogInvoker !== invoker) return;
 
       if (loaded === null) {
         connectionLoadError = 'Connection settings are available only in the native Imp application.';
@@ -303,27 +252,18 @@
 
       connectionSettings = loaded;
     } catch {
-      if (connectionDialogOpen) {
+      if (connectionDialogInvoker === invoker) {
         connectionLoadError = 'Could not load native connection settings.';
       }
     }
   }
 
   function closeConnectionDialog(): void {
+    connectionDialogInvoker = null;
     connectionDialogOpen = false;
-    settingsOpen = true;
+    openPanel = 'settings';
 
-    const invoker = connectionDialogInvoker;
-    requestAnimationFrame(() => {
-      const target = invoker?.isConnected
-        ? invoker
-        : (document.querySelector<HTMLButtonElement>('[data-connection-manager-trigger]') ??
-          document.querySelector<HTMLButtonElement>('.settings-button') ??
-          document.querySelector<HTMLButtonElement>('button.close'));
-
-      target?.focus();
-      connectionDialogInvoker = null;
-    });
+    void focusPanelControl('[data-connection-manager-trigger]');
   }
 
   async function setConnectionSettings(update: ConnectionSettingsUpdate): Promise<boolean> {
@@ -343,62 +283,37 @@
     void invokeAction(actionInvocation, actionSink, context, definition);
   }
 
-  function closeOrDismiss(): void {
-    if (settingsOpen) {
-      settingsOpen = false;
-    } else if (actionsOpen) {
-      actionsOpen = false;
-    } else if (alertsOpen) {
-      alertsOpen = false;
-    } else {
-      closeWindow();
-    }
+  function dismissPanel(): void {
+    const dismissedPanel = openPanel;
+    if (dismissedPanel === null) return;
+
+    openPanel = null;
+    void focusPanelControl(`[aria-controls="${displayMode}-${dismissedPanel}-panel"]`);
   }
 
-  const closeLabel = $derived(
-    settingsOpen
-      ? 'Close settings'
-      : actionsOpen
-        ? 'Close actions'
-        : alertsOpen
-          ? 'Close alerts'
-          : 'Close Imp',
-  );
-  const CloseIcon = $derived(settingsOpen || actionsOpen || alertsOpen ? ChevronUp : X);
-
   $effect(() => {
-    if (displayMode !== 'compact' || (!settingsOpen && !actionsOpen && !alertsOpen)) return;
+    if (openPanel === null) return;
+    const isCompact = displayMode === 'compact';
     const attachedPanel = compactPanel;
-    const activeTrigger = alertsOpen
-      ? compactAlertsTrigger
-      : actionsOpen
-        ? compactActionsTrigger
-        : compactSettingsTrigger;
-    if (attachedPanel === undefined) return;
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (exitInvoker !== null || attachedPanel === undefined) return;
       const target = event.target as Node;
-      // The controls cluster owns its own open/close behaviour - the close
-      // button dismisses the open panel on click, so an outside-pointer
-      // dismissal here would swallow that state before the click lands.
+      // Let shortcut and Close Imp clicks act on the current surface.
       if (!attachedPanel.contains(target) && compactControls?.contains(target) !== true) {
-        settingsOpen = false;
-        actionsOpen = false;
-        alertsOpen = false;
+        openPanel = null;
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat) return;
+      if (exitInvoker !== null || openPanel === null) return;
       event.preventDefault();
-      settingsOpen = false;
-      actionsOpen = false;
-      alertsOpen = false;
-      requestAnimationFrame(() => activeTrigger?.focus());
+      dismissPanel();
     };
-    window.addEventListener('pointerdown', closeOnOutsidePointer);
+    if (isCompact) window.addEventListener('pointerdown', closeOnOutsidePointer);
     window.addEventListener('keydown', closeOnEscape);
     return () => {
-      window.removeEventListener('pointerdown', closeOnOutsidePointer);
+      if (isCompact) window.removeEventListener('pointerdown', closeOnOutsidePointer);
       window.removeEventListener('keydown', closeOnEscape);
     };
   });
@@ -423,7 +338,7 @@
   });
 
   $effect(() => {
-    if (actionDialogOpen || alertDialogOpen || connectionDialogOpen) {
+    if (managerOrigin !== null || connectionDialogOpen) {
       const observer = new ResizeObserver(() => resize());
 
       const resize = () => {
@@ -449,11 +364,11 @@
     }
 
     if (displayMode === 'expanded') {
-      if (settingsOpen || alertsOpen) {
+      if (openPanel !== null) {
         const hudPanel = panel;
         if (hudPanel === undefined) return;
 
-        const body = hudPanel.querySelector<HTMLElement>(settingsOpen ? '.settings-body' : '.alerts-body');
+        const body = hudPanel.querySelector<HTMLElement>(`.${openPanel}-body`);
         const titlebar = hudPanel.querySelector<HTMLElement>('.titlebar');
         if (body === null || titlebar === null) return;
 
@@ -502,7 +417,7 @@
 
     const row = compactRow;
     const hudPanel = panel;
-    const attachedPanel = settingsOpen || actionsOpen || alertsOpen ? compactPanel : undefined;
+    const attachedPanel = openPanel === null ? undefined : compactPanel;
     if (row === undefined || hudPanel === undefined) return;
 
     const resize = () => {
@@ -516,9 +431,9 @@
       const contentWidth = right - left + frameWidth;
       const contentHeight = bottom - rowBounds.top + frameHeight;
       resizeHudWindow(
-        settingsOpen || actionsOpen || alertsOpen
-          ? compactPanelWindowSize(contentWidth, contentHeight)
-          : compactWindowSize(contentWidth, contentHeight),
+        attachedPanel === undefined
+          ? compactWindowSize(contentWidth, contentHeight)
+          : compactPanelWindowSize(contentWidth, contentHeight),
       );
     };
     const frame = requestAnimationFrame(resize);
@@ -533,8 +448,65 @@
   });
 </script>
 
+{#snippet panelControls()}
+  <AlertsMenu
+    controls={`${displayMode}-alerts-panel`}
+    expanded={openPanel === 'alerts'}
+    ontoggle={(keyboard) => togglePanel('alerts', keyboard)}
+  />
+  <ActionsMenu
+    controls={`${displayMode}-actions-panel`}
+    expanded={openPanel === 'actions'}
+    ontoggle={(keyboard) => togglePanel('actions', keyboard)}
+  />
+  <SettingsMenu
+    controls={`${displayMode}-settings-panel`}
+    expanded={openPanel === 'settings'}
+    ontoggle={(keyboard) => togglePanel('settings', keyboard)}
+  />
+  <button
+    class="close icon-btn"
+    type="button"
+    aria-label="Close Imp"
+    aria-haspopup="dialog"
+    onkeydown={(event) => {
+      if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
+    }}
+    onclick={(event) => {
+      event.stopPropagation();
+      if (event.detail > 1) return;
+      exitInvoker = event.currentTarget;
+    }}><X size={18} /></button
+  >
+{/snippet}
+
+{#snippet actionList()}
+  <div class="compact-action-list">
+    {#if actions.length === 0}
+      <span class="compact-action-feedback">No actions defined.</span>
+    {:else}
+      {#each actions as definition (definition.id)}
+        <button
+          class="action-btn"
+          type="button"
+          disabled={actionInvocation.pendingActionId !== null}
+          onclick={() => invokeDefinition(definition)}>{definition.label}</button
+        >
+      {/each}
+    {/if}
+  </div>
+  {#if actionInvocation.feedback}
+    <div class="compact-action-feedback" aria-live="polite">
+      {actionInvocation.feedback}
+    </div>
+  {/if}
+  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => openManager('actions')}>
+    Manage
+  </button>
+{/snippet}
+
 <main
-  class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen && !connectionDialogOpen}
+  class:compact={displayMode === 'compact' && managerOrigin === null && !connectionDialogOpen}
   class="hud"
   aria-label="Imp companion HUD"
   data-tauri-drag-region
@@ -544,14 +516,14 @@
       definitions={actions}
       onchange={setActions}
       saveError={actionSaveError}
-      onclose={closeActionDialog}
+      onclose={closeManager}
     />
-  {:else if alertDialogOpen}
+  {:else if managerOrigin !== null}
     <AlertDialog
       definitions={alertDefinitions}
       onchange={setAlertDefinitions}
       saveError={alertSaveError}
-      onclose={closeAlertDialog}
+      onclose={closeManager}
     />
   {:else if connectionDialogOpen}
     <ConnectionDialog
@@ -564,191 +536,138 @@
   {:else}
     <div
       bind:this={panel}
-      class:expanded-main={displayMode === 'expanded' && !settingsOpen && !alertsOpen}
       style:--expanded-width={`${EXPANDED_WINDOW_WIDTH}px`}
-      class:has-compact-panel={displayMode === 'compact' && (settingsOpen || actionsOpen || alertsOpen)}
+      class:has-compact-panel={displayMode === 'compact' && openPanel !== null}
       class="panel"
     >
       {#if displayMode === 'compact'}
         <section bind:this={compactRow} class="compact-row">
-          <div class="compact-primary">
-            <StatusIndicator {status} label={statusLabel} />
-            <span class="compact-name">{characterName}</span>
-            <CompactVital label="HP" vital={character?.hp ?? null} color="var(--hp)" />
-            {#if showMana}
-              <CompactVital label="MN" vital={character?.mana ?? null} color="var(--mana)" />
-            {/if}
-            <CompactVital label="MV" vital={character?.moves ?? null} color="var(--moves)" />
+          <div class="row-controls" inert={exitInvoker !== null}>
+            <div class="compact-primary">
+              <StatusIndicator {status} label={statusLabel} />
+              <span class="compact-name">{characterName}</span>
+              <CompactVital label="HP" vital={character?.hp ?? null} color="var(--hp)" />
+              {#if showMana}
+                <CompactVital label="MN" vital={character?.mana ?? null} color="var(--mana)" />
+              {/if}
+              <CompactVital label="MV" vital={character?.moves ?? null} color="var(--moves)" />
+            </div>
+            <div bind:this={compactControls} class="compact-controls">
+              {@render panelControls()}
+            </div>
           </div>
-          <div bind:this={compactControls} class="compact-controls">
-            <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
-              <ActionsMenu
-                onopen={() => {
-                  settingsOpen = false;
-                  alertsOpen = false;
-                }}
-                bind:open={actionsOpen}
-                bind:trigger={compactActionsTrigger}
-              />
-            </span>
-            <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
-              <AlertsMenu
-                controls="compact-alerts-panel"
-                onopen={() => {
-                  settingsOpen = false;
-                  actionsOpen = false;
-                }}
-                bind:open={alertsOpen}
-                bind:trigger={compactAlertsTrigger}
-              />
-            </span>
-            <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
-              <SettingsMenu
-                bind:open={settingsOpen}
-                bind:trigger={compactSettingsTrigger}
-                onopen={() => {
-                  actionsOpen = false;
-                  alertsOpen = false;
-                }}
-              />
-            </span>
-            <button
-              class="close icon-btn"
-              aria-label={closeLabel}
-              onclick={(event) => {
-                event.stopPropagation();
-                closeOrDismiss();
-              }}><CloseIcon size={18} /></button
-            >
-          </div>
+          {#if exitInvoker !== null}
+            <ExitConfirmation invoker={exitInvoker} onclose={() => (exitInvoker = null)} />
+          {/if}
         </section>
-        {#if settingsOpen}
+        {#if openPanel === 'settings'}
           <div
             id="compact-settings-panel"
             bind:this={compactPanel}
             class="compact-attached-panel"
             role="dialog"
             aria-label="Imp settings"
+            inert={exitInvoker !== null}
           >
             <SettingsPanel
               mode={displayMode}
               {theme}
               {appVersion}
-              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
               onmanageconnection={(invoker) => {
                 void openConnectionDialog(invoker);
               }}
-              onmanagealerts={openAlertDialog}
-              onmanageactions={openActionDialog}
             />
           </div>
-        {:else if actionsOpen}
+        {:else if openPanel === 'actions'}
           <div
             id="compact-actions-panel"
             bind:this={compactPanel}
-            class="compact-attached-panel compact-actions-panel"
+            class="compact-attached-panel compact-actions-panel actions-panel"
             role="region"
             aria-label="Saved actions"
+            inert={exitInvoker !== null}
           >
-            <div class="compact-action-list">
-              {#if actions.length === 0}
-                <span class="compact-action-feedback">No actions defined.</span>
-              {:else}
-                {#each actions as definition (definition.id)}
-                  <button
-                    class="action-btn"
-                    type="button"
-                    disabled={actionInvocation.pendingActionId !== null}
-                    onclick={() => invokeDefinition(definition)}>{definition.label}</button
-                  >
-                {/each}
-              {/if}
-            </div>
-            {#if actionInvocation.feedback}
-              <div class="compact-action-feedback" aria-live="polite">
-                {actionInvocation.feedback ?? '\u00a0'}
-              </div>
-            {/if}
+            {@render actionList()}
           </div>
-        {:else if alertsOpen}
+        {:else if openPanel === 'alerts'}
           <div
             id="compact-alerts-panel"
             bind:this={compactPanel}
             class="compact-attached-panel compact-alerts-panel"
             role="region"
             aria-label="Saved alerts"
+            inert={exitInvoker !== null}
           >
             <AlertQuickList
               definitions={alertDefinitions}
               saveError={alertSaveError}
               ontoggle={setAlertDefinitionEnabled}
+              onmanage={() => openManager('alerts')}
             />
           </div>
         {/if}
       {:else}
         <header class="titlebar">
-          <div class="identity" data-tauri-drag-region>
-            <StatusIndicator {status} label={statusLabel} />
-            <span>{characterName}</span>
+          <div class="row-controls" inert={exitInvoker !== null}>
+            <div class="identity" data-tauri-drag-region>
+              <StatusIndicator {status} label={statusLabel} />
+              <span>{characterName}</span>
+            </div>
+            {@render panelControls()}
           </div>
-          <span class="control-slot" class:hidden={settingsOpen || alertsOpen}>
-            <AlertsMenu
-              controls="expanded-alerts-panel"
-              onopen={() => {
-                settingsOpen = false;
-                actionsOpen = false;
-              }}
-              bind:open={alertsOpen}
-            />
-          </span>
-
-          <span class="control-slot" class:hidden={settingsOpen || alertsOpen}>
-            <SettingsMenu
-              bind:open={settingsOpen}
-              onopen={() => {
-                actionsOpen = false;
-                alertsOpen = false;
-              }}
-            />
-          </span>
-          <button
-            class="close icon-btn"
-            aria-label={closeLabel}
-            onclick={(event) => {
-              event.stopPropagation();
-              closeOrDismiss();
-            }}><CloseIcon size={18} /></button
-          >
+          {#if exitInvoker !== null}
+            <ExitConfirmation invoker={exitInvoker} onclose={() => (exitInvoker = null)} />
+          {/if}
         </header>
 
-        {#if settingsOpen}
-          <div class="settings-body" role="dialog" aria-label="Imp settings">
+        {#if openPanel === 'settings'}
+          <div
+            id="expanded-settings-panel"
+            class="settings-body"
+            role="dialog"
+            aria-label="Imp settings"
+            inert={exitInvoker !== null}
+          >
             <SettingsPanel
               mode={displayMode}
               {theme}
               {appVersion}
-              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
               onmanageconnection={(invoker) => {
                 void openConnectionDialog(invoker);
               }}
-              onmanagealerts={openAlertDialog}
-              onmanageactions={openActionDialog}
             />
           </div>
-        {:else if alertsOpen}
-          <div id="expanded-alerts-panel" class="alerts-body" role="region" aria-label="Saved alerts">
+        {:else if openPanel === 'actions'}
+          <div
+            id="expanded-actions-panel"
+            class="actions-body actions-panel"
+            role="region"
+            aria-label="Saved actions"
+            inert={exitInvoker !== null}
+          >
+            {@render actionList()}
+          </div>
+        {:else if openPanel === 'alerts'}
+          <div
+            id="expanded-alerts-panel"
+            class="alerts-body"
+            role="region"
+            aria-label="Saved alerts"
+            inert={exitInvoker !== null}
+          >
             <AlertQuickList
               definitions={alertDefinitions}
               saveError={alertSaveError}
               ontoggle={setAlertDefinitionEnabled}
+              onmanage={() => openManager('alerts')}
             />
           </div>
         {:else if isFresh && character !== null}
-          <section class="content">
+          <section class="content" inert={exitInvoker !== null}>
             <div class="vitals">
               <VitalBar label="HP" vital={character.hp} color="var(--hp)" />
               {#if showMana}
@@ -761,7 +680,7 @@
             {/if}
           </section>
         {:else if character !== null}
-          <section class="content last-known">
+          <section class="content last-known" inert={exitInvoker !== null}>
             <div class="vitals">
               <VitalBar label="HP" vital={character.hp} color="var(--hp)" />
               {#if showMana}
@@ -774,24 +693,27 @@
             {/if}
           </section>
         {:else if model.phase === 'connected'}
-          <section class="empty-state">
+          <section class="empty-state" inert={exitInvoker !== null}>
             <strong>Connected to relay</strong>
             <span>Waiting for game data…</span>
           </section>
         {:else}
-          <section class="empty-state">
+          <section class="empty-state" inert={exitInvoker !== null}>
             <strong>{model.phase === 'reconnecting' ? 'Reconnecting to relay…' : 'Relay unavailable'}</strong>
             <span>{model.detail ?? 'Start the relay, then connect your MUD client.'}</span>
           </section>
         {/if}
 
-        {#if !settingsOpen && !alertsOpen && actions.length > 0}
-          <ActionBar
-            definitions={actions}
-            pendingActionId={actionInvocation.pendingActionId}
-            feedback={actionInvocation.feedback}
-            oninvoke={invokeDefinition}
-          />
+        {#if openPanel === null}
+          <div class="action-footer" inert={exitInvoker !== null}>
+            <ActionBar
+              definitions={actions}
+              pendingActionId={actionInvocation.pendingActionId}
+              feedback={actionInvocation.feedback}
+              oninvoke={invokeDefinition}
+              onmanage={() => openManager('footer-actions')}
+            />
+          </div>
         {/if}
       {/if}
     </div>
@@ -818,21 +740,36 @@
   .hud:not(.compact) .panel {
     height: max-content;
     align-content: start;
-  }
-
-  .expanded-main {
     /* Measure at the destination width, not the previous surface's viewport. */
     width: var(--expanded-width);
   }
 
   .titlebar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
-    align-items: center;
-    gap: var(--space-4);
+    grid-template-columns: minmax(0, 1fr);
     min-height: 2.05rem;
     padding: 0 0.52rem 0 var(--space-7);
     border-bottom: 1px solid var(--divider);
+  }
+
+  .row-controls {
+    display: grid;
+    grid-area: 1 / 1;
+    align-items: center;
+  }
+
+  .row-controls[inert] {
+    visibility: hidden;
+  }
+
+  .titlebar .row-controls {
+    grid-template-columns: minmax(0, 1fr) repeat(4, auto);
+    gap: var(--space-4);
+  }
+
+  .compact-row .row-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-3);
   }
 
   .identity {
@@ -854,12 +791,9 @@
     white-space: nowrap;
   }
 
-  .control-slot.hidden {
-    visibility: hidden;
-  }
-
   .settings-body,
-  .alerts-body {
+  .alerts-body,
+  .actions-body {
     min-height: 0;
     overflow: hidden;
     padding: var(--section-pad);
@@ -896,6 +830,11 @@
     line-height: 1.35;
   }
 
+  .action-footer {
+    display: grid;
+    min-width: 0;
+  }
+
   .compact .panel {
     width: max-content;
     height: max-content;
@@ -913,9 +852,7 @@
 
   .compact-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--space-3);
+    grid-template-columns: minmax(0, 1fr);
     width: max-content;
     max-width: calc(560px - 2px);
     min-height: 30px;
@@ -923,7 +860,7 @@
   }
 
   .has-compact-panel .compact-row {
-    border-bottom: 1px solid var(--divider);
+    box-shadow: inset 0 -1px var(--divider);
   }
 
   .compact-attached-panel {
@@ -935,10 +872,18 @@
   .compact-actions-panel,
   .compact-alerts-panel {
     /* Wrapped labels must not contribute max-content window width. */
-    display: grid;
     width: 0;
     min-width: 100%;
+  }
+
+  .actions-panel,
+  .compact-alerts-panel {
+    display: grid;
     gap: var(--space-6);
+  }
+
+  .actions-panel > .manage-btn {
+    justify-self: end;
   }
 
   .compact-action-list {

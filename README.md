@@ -223,7 +223,22 @@ the VPS.
 After TinyFugue is connected to the MUD, the HUD should begin showing live
 character state.
 
-You can then configure alerts and create action shortcuts from Imp's settings.
+To create action shortcuts in either display mode, open **Actions** (swords
+icon) and choose **Manage**. The expanded HUD also has **Manage** in its footer.
+To configure alerts, open **Alerts** (bell icon) in either display mode and
+choose **Manage alerts**. Both managers are available even when nothing is
+saved. In both display modes, the top row keeps the same shortcut order:
+**Alerts**, **Actions**, **Settings**, **Close Imp**. Select another panel
+shortcut to switch directly. The open panel's icon gains a small ×; select
+it again or press **Escape** to collapse the panel.
+
+**Close Imp** shows an inline **Close Imp?** confirmation in the top row.
+**Confirm** exits Imp. **Cancel** or **Escape** leaves the current panel open
+and returns focus to **Close Imp**.
+
+**Close** or **Escape** in a manager returns you to the HUD surface that
+opened it and focuses its Manage control. Use the Alerts panel's quick
+toggles to enable and disable individual alerts.
 
 ## Connection modes
 

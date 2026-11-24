@@ -90,12 +90,26 @@ If the generalized store does not yet exist, Imp reads the previous
 the default `low-health` vital definition. Once generalized definitions are
 saved, that store takes precedence, including an intentionally empty list.
 
-The settings surface exposes a dedicated alert manager. Operators can create,
-edit, delete, enable, and disable both threshold and received-text alerts and
-independently select sound and desktop-notification effects. Enabled state is a
-persisted quick-toggle rather than part of the edit form. The compact and
-expanded Bell surfaces expose the same enabled state through a shared quick
-alert list.
+Open **Alerts** (bell icon) in either display mode and choose **Manage
+alerts** below the quick-toggle list. The management control remains
+available when no alerts are saved. The manager creates, edits, and deletes
+vital-threshold and received-text alerts and configures their independent
+sound and desktop-notification effects. Enabled state is a persisted quick
+toggle rather than part of the edit form; the manager and both Alerts panels
+show the same enabled state.
+
+Opening Alerts by keyboard focuses its Manage button. **Close** or **Escape**
+in the manager restores the originating Alerts panel and focuses **Manage
+alerts**. While the panel is open, the bell icon gains a small × and the
+accessible name **Close alerts**. Activating it again or pressing **Escape**
+collapses the panel and restores focus to **Alerts**. Clicking outside the
+compact attached panel dismisses it without moving focus back to the bell.
+
+In both display modes, **Alerts**, **Actions**, **Settings**, and **Close Imp**
+keep that order and position as panels change. Select **Actions** or **Settings**
+to switch directly from Alerts. **Close Imp** shows an inline confirmation in
+the top row. **Cancel** or **Escape** leaves Alerts open and returns focus to
+**Close Imp**; **Confirm** exits Imp.
 
 ## Vital threshold semantics
 
@@ -252,3 +266,7 @@ zero-definition Actions/Alerts affordances were also exercised successfully.
 Status: verified for configurable vital and received-text alerts
 Verified against: desktop unit tests, strict Svelte/TypeScript checking, and
 Windows-native live text-alert acceptance.
+
+See [Slice 27 status](../../status.md#slice-27-implementation--in-progress)
+for current navigation acceptance; the rendered UI evidence above records the
+older Slice 10 navigation, not the current HUD behavior.
