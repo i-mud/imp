@@ -173,9 +173,7 @@ Otherwise an administrator can enable lingering for your account.
 
 For an already-running TinyFugue, run `/load ~/.config/imp/capture.tf` now;
 installing files does not reload that process. A matching normalized checkpoint
-can recover previously captured identity without reconnecting, but cannot recover
-identity the hook never captured. Otherwise, restart with the hook loaded early
-and make a fresh identity-bearing MUD login.
+can restore previously captured identity without reconnecting to the MUD.
 
 For custom TinyFugue layouts, detailed verification, diagnostics, upgrades, or
 Direct WSS deployment, see [VPS deployment](deploy/README.md).

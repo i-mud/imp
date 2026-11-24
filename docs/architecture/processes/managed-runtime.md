@@ -147,21 +147,12 @@ shutdown.
 
 ## TinyFugue identity bootstrap
 
-The reboot discards the ephemeral normalized checkpoint by design, and AVATAR
-sends the full identity-bearing `Char.Status` only once, at character login.
-Recovery therefore depends on two operator-owned preconditions holding at that
-login, both live-verified: the capture hook is loaded by the TinyFugue startup
-file actually in use before anything connects, and that TinyFugue build's GMCP
-support includes the `GMCP_LOGIN` hook its login scripts use to negotiate
-capabilities and send `Char.Login`. The invariant is the capability, not a
-version string - public version numbering does not prove `GMCP_LOGIN` is
-compiled in - though the build verified live is `5.2.2-3-g4f0ff34`. The
-previously installed TinyFugue binary did not provide `GMCP_LOGIN`, and
-Imp stayed identity-less after reboot with it.
+The normalized checkpoint lives under `$XDG_RUNTIME_DIR` and does not survive
+reboot. Without a matching checkpoint, the feed waits for character identity
+from `Char.Status.character_name`.
 
-Imp holds no workaround for a missing identity. It does not infer the
-local character from `Room.Players` or `Char.Group.List`, does not persist
-identity outside `$XDG_RUNTIME_DIR`, and sends no GMCP request of its own.
+Imp does not infer the local character from `Room.Players` or `Char.Group.List`
+and sends no GMCP requests of its own.
 
 ## Runtime paths
 
@@ -364,23 +355,23 @@ remain platform-owned.
 
 ## Failure boundaries
 
-| Failure                                        | Recovery / visible result                                                                        |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| desktop-owned node exits or becomes unhealthy  | `NodeSupervisor` terminates only its owned child and retries with bounded backoff                |
-| desktop node port `8787` already occupied      | report local node unavailable; never adopt, replace, bind over, or kill the owner                |
-| VPS relay process exits                        | systemd restarts it; publishers reconnect; remote HUD clients reconnect                          |
-| gateway process exits                          | its owning supervisor/systemd restarts it; node/feed continue independently                      |
-| feed process exits                             | lock releases with the process; systemd starts one replacement                                   |
-| normalized TinyFugue checkpoint lost at reboot | identity returns only after fresh identity-bearing GMCP under the documented login prerequisites |
-| TinyFugue absent                               | VPS services stay healthy; node reports feed down/stale                                          |
-| spool target replaced                          | next TinyFugue hook call reopens the stable path                                                 |
-| Managed SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                           |
-| healthy Imp relay already owns `8789`          | Managed mode adopts and monitors it; spawns no child                                             |
-| adopted `8789` relay disappears                | Managed mode starts its own SSH child once the port is free                                      |
-| unrelated process owns `8789`                  | report transport unavailable; spawn, bind, and kill nothing                                      |
-| Mudlet helper exits                            | that profile stops producing/consuming until its adapter lifecycle starts a helper again         |
-| TinyFugue closes action pipe reader            | idle helper writes nothing, closes its WebSocket, and exits                                      |
-| Imp closes                                     | terminate and reap only node, gateway, and SSH children owned by that Imp process                |
+| Failure                                        | Recovery / visible result                                                                |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| desktop-owned node exits or becomes unhealthy  | `NodeSupervisor` terminates only its owned child and retries with bounded backoff        |
+| desktop node port `8787` already occupied      | report local node unavailable; never adopt, replace, bind over, or kill the owner        |
+| VPS relay process exits                        | systemd restarts it; publishers reconnect; remote HUD clients reconnect                  |
+| gateway process exits                          | its owning supervisor/systemd restarts it; node/feed continue independently              |
+| feed process exits                             | lock releases with the process; systemd starts one replacement                           |
+| normalized TinyFugue checkpoint lost at reboot | feed waits for `Char.Status.character_name` before publishing character state            |
+| TinyFugue absent                               | VPS services stay healthy; node reports feed down/stale                                  |
+| spool target replaced                          | next TinyFugue hook call reopens the stable path                                         |
+| Managed SSH child exits / network drops        | supervisor retries with capped backoff; HUD reconnects                                   |
+| healthy Imp relay already owns `8789`          | Managed mode adopts and monitors it; spawns no child                                     |
+| adopted `8789` relay disappears                | Managed mode starts its own SSH child once the port is free                              |
+| unrelated process owns `8789`                  | report transport unavailable; spawn, bind, and kill nothing                              |
+| Mudlet helper exits                            | that profile stops producing/consuming until its adapter lifecycle starts a helper again |
+| TinyFugue closes action pipe reader            | idle helper writes nothing, closes its WebSocket, and exits                              |
+| Imp closes                                     | terminate and reap only node, gateway, and SSH children owned by that Imp process        |
 
 ## Source and checks
 

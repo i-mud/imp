@@ -121,8 +121,8 @@ context's action while feed state is stale.
 
 For an already-running TF using the old hook, install the new bundle and run
 `/load ~/.config/imp/capture.tf` once before testing recovery; reconnecting the
-MUD is unnecessary if checkpoint identity survives. Reboot still discards that
-ephemeral identity and requires the documented login-time GMCP bootstrap.
+MUD is unnecessary to restore a matching checkpoint. Without one (including
+after a reboot), the feed waits for character identity from GMCP.
 
 ## HUD presentation states
 

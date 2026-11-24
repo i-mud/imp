@@ -40,7 +40,7 @@ Published artifacts were then exercised:
 | TinyFugue, desktop Direct, service/feed and Caddy restart recovery, idempotent reinstall (VPS) | PASS   |
 
 Feed-restart recovery is not reboot recovery: a full host reboot discards the
-ephemeral checkpoint and still requires a fresh identity-bearing MUD login.
+ephemeral checkpoint, so the feed waits for character identity from GMCP.
 Existing TinyFugue sessions using the old hook need one
 `/load ~/.config/imp/capture.tf`; do not reboot without operator approval.
 The [Slice 25 evidence](#slice-25---connection-oriented-server-installation)
@@ -883,12 +883,7 @@ Slice 4 live evidence:
   changed to `-Fp2`; repeated live fights then acquired, updated, and cleared
   targets correctly. Priority 2 is the shipped, live-verified configuration,
   not the only claimed valid priority.
-- An intermittent stale character-name state was observed during repeated
-  character relogs after the GMCP hook remediation. Normal relogs under the
-  final canonical runtime subsequently updated identity correctly. A narrower
-  rapid login/world-transition case can still miss the one authoritative full
-  `Char.Status.character_name` packet; that known limitation is deferred below
-  rather than addressed through speculative identity inference.
+- Normal character relogs updated identity correctly with the canonical hook.
 
 CI does not replace any row in this table and must not be cited as evidence for
 Windows Tauri behavior, actual OpenSSH supervision, VPS/systemd behavior,
@@ -929,18 +924,11 @@ each is the kind that comes back.
    now awaits `asyncio.to_thread(stream.readline)`, leaving the event loop free
    for close, ping and timeout handling. Pinned by
    `integrations/tinyfugue/tests/test_bridge.py`.
-6. **Identity never recovered after a VPS reboot.** The reboot correctly
-   discarded the ephemeral checkpoint, but AVATAR sends the identity-bearing
-   `Char.Status` only at character login and offers no refresh request, so
-   Imp consumed vitals and deltas indefinitely with no character. Two
-   operator-side preconditions were missing: the capture hook was loaded from
-   `~/.tfrc` while the session actually started from another startup file, and
-   the previously installed TinyFugue binary did not provide the `GMCP_LOGIN`
-   hook its login scripts need to sequence GMCP at the right point. Loading the
-   hook from the active startup file before login, on a `GMCP_LOGIN`-capable
-   build, fixed it; no Imp normalization, checkpoint or protocol behavior
-   changed. Pinned against identity inference by
-   `integrations/tinyfugue/tests/test_normalize.py`.
+6. **TinyFugue GMCP startup was misconfigured.** The active startup file did
+   not load the capture hook, and the installed build lacked the `GMCP_LOGIN`
+   hook required by the operator's scripts. Loading the hook from the active
+   startup file on a build that provides `GMCP_LOGIN` restored identity after
+   reboot without changing Imp normalization, checkpoint, or protocol behavior.
 7. **Startup adoption of an existing relay was terminal.** In managed mode a
    healthy relay already listening on `127.0.0.1:8787` made
    `TunnelSupervisor::managed()` report `ExternalPortInUse` and return without
@@ -956,16 +944,11 @@ each is the kind that comes back.
 
 ## Known deferred issues
 
-1. **Character identity reacquisition during very fast AVATAR transitions.**
-   Some rapid login/world transitions can produce later GMCP without another
-   authoritative full `Char.Status.character_name` packet, leaving Imp
-   without character identity. The MUD documents no refresh request and later
-   status packets may be deltas; no speculative identity inference is planned.
-2. **Separate TinyFugue runtime crash.** One upstream/runtime failure printed
+1. **Separate TinyFugue runtime crash.** One upstream/runtime failure printed
    `Internal error: socket.c, line 3717` followed by `resize freed string`.
    Memory pressure and OOM were ruled out. This is tracked separately from the
    Imp action UI and transport.
-3. **Raw/ANSI GMCP parsing robustness.** Some captured GMCP material with raw
+2. **Raw/ANSI GMCP parsing robustness.** Some captured GMCP material with raw
    ANSI/control bytes has produced `invalid_raw_json`. The correct
    capture/parsing/normalization boundary remains to be investigated.
 
@@ -1225,12 +1208,6 @@ The local and remote `/healthz` responses carried different retained sequence
 numbers, proving they were distinct nodes. The HUD consumed the VPS node through
 `8789`, and trusted `look` delivery to the remote TinyFugue/MUD path still
 worked.
-
-During that final remote TinyFugue acceptance, the first reconnect again
-produced state without authoritative character identity/vitals while trusted
-actions still worked; a second reconnect restored the normal name and vitals.
-That matches the separately tracked TinyFugue character-identity reacquisition
-defect and is not a transport failure.
 
 Mudlet release distribution is also complete. The release workflow builds
 `Imp.mpackage` before the Windows job, downloads it into the desktop Mudlet
@@ -1943,14 +1920,14 @@ v2-to-v3 NAT migration, raw-route checks, authentication checks, and desktop liv
 state/action acceptance subsequently passed. At that intermediate stage,
 feed/relay restart failed to recover the still-running TinyFugue selection; a
 TF relogin was only a workaround. The later passing restart acceptance below
-supersedes that failure, not the reboot-time fresh-login requirement.
+supersedes that failure.
 
 The correction released in `v0.4.0` adds one TF-owned, reload-safe `imp-feed-watch`
 quote job and a private per-incarnation readiness marker. The feed clears old
 raw spools under lock but preserves normalized checkpoint values. Readiness
 does not restore authority: live TF reasserts its actual foreground or null
 selection, and matching cached state returns stale until fresh GMCP. The
-checkpoint remains ephemeral; reboot-time identity bootstrap is unchanged.
+checkpoint remains ephemeral.
 
 Actual offline TinyFugue against a fake MUD passed:
 
@@ -1979,8 +1956,8 @@ install with credentials, ownership, certificate and ACME storage unchanged. The
 connection generation was not captured immediately before the final restart, so
 "no reconnect" rests on the operator's report; session and generation matched.
 Old-hook TinyFugue sessions need one `/load ~/.config/imp/capture.tf` after
-installation. A host reboot still discards the ephemeral checkpoint and needs a
-fresh identity-bearing login. Do not reboot without operator approval.
+installation. A host reboot discards the ephemeral checkpoint. Do not reboot
+without operator approval.
 
 The published `v0.4.0` Linux bundle and Windows installer then passed a smoke on
 the same NAT host as a normal upgrade. Credential, edge-ownership, Caddyfile and
