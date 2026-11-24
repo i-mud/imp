@@ -585,6 +585,60 @@ Retained limitations, none blocking:
 - Arbitrary nested-include detection, real-runtime CI and live native SSH
   connectivity remain open follow-ups.
 
+## Slice 27 implementation — in progress
+
+### PR 1 — Expanded HUD layout (27-01)
+
+[PR #56](https://github.com/i-mud/imp/pull/56) merged in `2de4eb6`. The
+normal expanded HUD measures the full panel at 320 logical pixels wide. When
+a target appears or clears, the window grows or shrinks even if saved actions
+are unchanged. Chromium and isolated Windows WebView2 mock runs verified
+that the target and action strip no longer overlap in the tested layouts:
+
+| Runtime                      | Height: no target → target → cleared | Target-to-footer gap |
+| ---------------------------- | ------------------------------------ | -------------------- |
+| Chromium, 16px font          | 175 → 218 → 175                      | 8px                  |
+| Chromium, 20px font          | 217 → 271 → 217                      | 10px                 |
+| Windows WebView2, 100% scale | 183 → 230 → 183                      | 8px                  |
+
+PR 1 passed `npm run check`, ten focused sizing/lifecycle tests, and 200
+Chromium cases. All 80 paired Chromium and 25 paired Windows comparisons for
+compact, attached-panel, and manager sizing matched the previous baseline.
+
+Native checks used a disposable configuration on a private desktop at 100%
+scale; higher native DPI, mixed-scale transitions, and installed-profile and
+live MUD behavior were not exercised. Browser DPR is not native DPI evidence.
+The resize keeps the window origin fixed: growth near the bottom of the work
+area can extend below it. PR 1 fixes internal layout, not desktop placement.
+
+### PR 2 — Contextual Alerts and Actions management (27-02 and 27-03)
+
+Manage Actions opens from the expanded action strip or compact Actions
+palette. Manage Alerts opens from the bell panel in either mode. These
+entries stay available with no saved definitions; Settings no longer links
+to either manager. Close or Escape returns to the originating surface and
+focuses its Manage button. For keyboard users, opening the compact Actions
+palette or either Alerts panel focuses its Manage button; dismissing the
+panel with Escape or its Close control restores the owning trigger. An
+outside pointer press dismisses a compact attached panel without taking focus.
+
+Implemented and locally verified; awaiting independent PR review, not yet
+merged. `npm run check` passed, including 199 desktop tests (44 targeted,
+30 new). Chromium covered 24 paired configurations across both themes and
+display modes, empty/one/16 definitions, and 16px/20px fonts. All 12 closed
+compact layouts were unchanged, and Manage controls stayed in place after
+2,150px of horizontal scrolling or 641px of vertical scrolling.
+
+Isolated Windows WebView2 mock runs recorded 40 candidate and 26 baseline
+measurements. They verified the 280px compact baseline, every manager origin,
+Close/Escape return, deletion of the last definition, and target transitions.
+See [Before and after in WebView2](audits/slice-27-contextual-management.png).
+The native DPI and desktop-edge placement limits above still apply.
+
+PR 3 is conditional and awaits separate approval. Long action-feedback
+wrapping, status/error contrast, and broader manager keyboard containment
+are not part of PR 2.
+
 ## Working end to end
 
 Imp currently supports TinyFugue and Mudlet as MUD-client adapters. Both feed
@@ -840,10 +894,10 @@ the canonical `v0.1.0` release was published after Slice 15.
   synchronized quick toggles, intrinsic expanded Settings/Alerts heights with
   no large blank region, native-height restoration while switching panels, and
   compact panel dismissal behavior.
-- Compact Actions now mirrors Alerts at zero definitions: its Swords trigger
-  remains available and opens a `No actions defined.` state rather than
-  disappearing. The expanded action strip remains absent when there are no
-  actions.
+- At Slice 10, the compact Actions trigger stayed available with zero
+  definitions and showed `No actions defined.`; the expanded action strip
+  still disappeared when empty. Slice 27 PR 2 provides management in both
+  empty states.
 
 ### Slice 8 native and live action evidence
 

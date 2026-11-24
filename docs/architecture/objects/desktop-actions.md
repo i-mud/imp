@@ -16,9 +16,9 @@ or game-state model.
   the one pending UI invocation, result feedback, and calls the injected
   `ActionSink`.
 - `apps/desktop/src/components/ActionDialog.svelte` edits the local definitions.
-- `apps/desktop/src/components/ActionBar.svelte` and
-  `apps/desktop/src/components/ActionsMenu.svelte` render the expanded and
-  compact invocation surfaces.
+- `apps/desktop/src/components/ActionBar.svelte` renders the expanded action
+  strip; `ActionsMenu.svelte` renders the compact Actions trigger. `Hud.svelte`
+  renders the compact palette and coordinates navigation to the manager.
 - `apps/desktop/src/lib/action/types.ts` remains the outbound desktop boundary.
   `StateSource` remains inbound-only.
 
@@ -53,32 +53,38 @@ secrets.
 
 The normal expanded HUD lays out at 320 logical pixels wide without stretching
 to the viewport height. `Hud.svelte` observes the panel's intrinsic border box,
-so the titlebar, vitals, optional target and action strip, wrapped feedback, and
-frame contribute to the measured height. It rounds the height up to a whole
+so the titlebar, vitals, optional target, action strip, feedback, and frame
+contribute to the measured height. It rounds the height up to a whole
 logical pixel, coalesces resize requests in `requestAnimationFrame`, and skips
 unchanged sizes within that branch. Leaving the branch cancels any pending
 frame. Expanded Settings and Alerts retain their separate measurement paths.
 
 Compact width follows the current intrinsic HUD row within the 280-560 pixel
 bounds. The compact sizing helpers floor content height at 30 pixels and bound
-it to 160 pixels; an attached Settings or Actions panel retains that width and
-may grow only to the 420-pixel panel-height bound. Browser measurement observed
-a 30-pixel compact row; the outer framed panel can measure 32 pixels because of
+it to 160 pixels; an attached panel retains that width and may grow only to
+the 420-pixel panel-height bound. Browser measurement observed a 30-pixel
+compact row; the outer framed panel can measure 32 pixels because of
 its borders.
 
-Manage Actions keeps its separate content-height measurement and uses the
-width of the HUD that opened it. Expanded mode opens management at 320 pixels.
-Compact mode captures the intrinsic compact baseline before replacing Settings;
-closing management measures the restored current content again rather than treating the
-dialog width as a new baseline. The management header remains draggable, while
-its Close button, fields, buttons, list, and scrollbar remain non-drag regions.
+Both action surfaces have a **Manage** button (`Manage actions` to assistive
+technology). It sits to the right of the expanded action list or below the
+compact **Actions** palette list, outside the scrolling area and available
+even when no actions are saved.
+
+The manager measures its own content height and uses the originating HUD
+width: 320 logical pixels in expanded mode, or the compact baseline captured
+before replacing the palette. Close or Escape restores the originating action
+strip or palette and focuses its Manage button. Closing the compact palette
+then measures the current HUD content instead of reusing the manager width.
+The management header remains draggable; its Close button, fields, buttons,
+list, and scrollbar remain non-drag regions.
 
 The compact Actions trigger is the keyboard-focusable Lucide `Swords` icon with
 accessible name `Actions`. Its attached palette wraps label-sized buttons, bounds
 long labels to the panel width, and scrolls vertically without widening the HUD.
-While Settings or Actions is open both triggers are hidden but keep their layout
-space, and the Close control dismisses the open panel instead of closing the
-window.
+Opening the palette by keyboard focuses its Manage button. Escape or the
+panel's Close control returns focus to the Actions trigger. Clicking outside
+the attached palette dismisses it without moving focus back to the trigger.
 
 ## Invocation and results
 
@@ -107,8 +113,10 @@ resends. The Slice 7 no-replay contract is unchanged.
 
 ## Verification
 
-Status: verified for actions. The layout acceptance below predates Slice 27's
-normal expanded HUD sizing change.
+Status: verified for action definitions and dispatch. See
+[Slice 27 status](../../status.md#slice-27-implementation--in-progress) for the
+expanded layout baseline and contextual management acceptance. The older
+rendered UI evidence below predates contextual management.
 
 The canonical automated gate (`npm run check`) covers definition validation,
 create/edit/delete persistence, the 64-definition limit, storage-write failure,

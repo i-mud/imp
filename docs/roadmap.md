@@ -961,19 +961,22 @@ and real-runtime CI remain retained limitations or follow-ups.
 
 ### Slice 27 - HUD layout and usability polish
 
-In progress. The initial HUD audit identified three bounded PRs:
+In progress. The initial HUD audit identified three bounded PRs; see the
+[implementation status](status.md#slice-27-implementation--in-progress) for
+verification and limitations.
 
-1. **Expanded HUD layout correctness (mandatory, 27-01).** Size the normal
-   expanded HUD to its full content at 320 pixels wide so target and action
-   content fit without overlap, and the window shrinks when content leaves.
-   Compact, Settings, Alerts, and manager sizing stay unchanged in this PR.
+1. **Expanded HUD layout correctness (mandatory, 27-01).** Merged as
+   [PR #56](https://github.com/i-mud/imp/pull/56) (`2de4eb6`). Chromium and
+   isolated Windows WebView2 verified that the normal expanded HUD grows
+   and shrinks to fit target and action content at 320 logical pixels.
+   Compact, Settings, Alerts, and manager sizing were unchanged by PR 1.
 2. **Contextual Alerts and Actions management (mandatory, 27-02 and 27-03).**
-   Move management entry points from Settings to the corresponding HUD
-   surfaces, including empty states. Restore the originating surface and focus
-   when leaving a manager, and correct keyboard focus and dismissal in those
-   contextual panels.
+   PR 2 moves management from Settings to the corresponding HUD surfaces,
+   including empty states. Closing a manager restores its originating
+   surface and focuses its Manage control.
+   Implemented and locally verified; awaiting independent PR review.
 3. **Targeted visual and accessibility polish (conditional, 27-04 through
-   27-06).** Requires separate approval. Candidates are wrapping long action
+   27-06).** Awaits separate approval. Candidates are wrapping long action
    feedback (27-04), improving status and error text contrast (27-05), and
    verifying manager keyboard traversal in native WebView2 before changing
    focus containment (27-06).

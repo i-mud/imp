@@ -101,6 +101,8 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   expect(socket.url).toBe(direct.remoteUrl);
 
   await click('[aria-label="Settings"]');
+  const connectionTrigger = document.querySelector('[data-connection-manager-trigger]');
+  expect(connectionTrigger).not.toBeNull();
   await click('[data-connection-manager-trigger]');
   expect(document.querySelector('[role="dialog"][aria-labelledby="connection-dialog-title"]')).not.toBeNull();
   await vi.waitFor(() => {
@@ -134,6 +136,12 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   expect(socket.close).not.toHaveBeenCalled();
 
   await click('.form-actions button:last-child');
+  expect(connectionTrigger!.isConnected).toBe(false);
+  expect(document.querySelector('[aria-label="Imp settings"]')).not.toBeNull();
+  const returnedTrigger = document.querySelector('[data-connection-manager-trigger]');
+  expect(returnedTrigger).not.toBeNull();
+  expect(returnedTrigger).not.toBe(connectionTrigger);
+  await vi.waitFor(() => expect(document.activeElement).toBe(returnedTrigger));
   // The retained real client still authenticates with its original runtime credential after saving.
   flushSync(() => socket.dispatchEvent(new Event('open')));
   expect(socket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ type: 'auth', token }));

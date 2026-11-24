@@ -120,14 +120,32 @@
  * strip, compact action panel, action-manager dialog) renders from this one
  * rule so the three surfaces can never drift apart again.
  */
-.action-btn {
+.action-btn,
+.manage-btn {
   padding: var(--space-3) var(--space-6);
-  border: 1px solid var(--accent-border);
   border-radius: var(--radius);
-  background: var(--accent-subtle);
   color: var(--text);
   cursor: pointer;
   font-size: var(--font-xs);
+}
+
+.action-btn {
+  border: 1px solid var(--accent-border);
+  background: var(--accent-subtle);
+}
+
+.manage-btn {
+  border: 1px solid var(--input-border);
+  background: transparent;
+}
+
+.manage-btn:hover {
+  background: var(--accent-hover);
+}
+
+.manage-btn:focus-visible {
+  outline: 2px solid var(--accent-focus);
+  outline-offset: -2px;
 }
 
 .action-btn:hover,

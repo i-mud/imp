@@ -12,12 +12,9 @@ describe('native segmented radio semantics', () => {
         mode: 'compact',
         theme: 'light',
         appVersion: null,
-        alertSaveError: null,
         onmodechange: () => {},
         onthemechange: () => {},
         onmanageconnection: () => {},
-        onmanagealerts: () => {},
-        onmanageactions: () => {},
       },
     });
 

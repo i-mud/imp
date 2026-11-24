@@ -90,12 +90,19 @@ If the generalized store does not yet exist, Imp reads the previous
 the default `low-health` vital definition. Once generalized definitions are
 saved, that store takes precedence, including an intentionally empty list.
 
-The settings surface exposes a dedicated alert manager. Operators can create,
-edit, delete, enable, and disable both threshold and received-text alerts and
-independently select sound and desktop-notification effects. Enabled state is a
-persisted quick-toggle rather than part of the edit form. The compact and
-expanded Bell surfaces expose the same enabled state through a shared quick
-alert list.
+Open **Alerts** (bell icon) in either display mode and choose **Manage
+alerts** below the quick-toggle list. The management control remains
+available when no alerts are saved. The manager creates, edits, and deletes
+vital-threshold and received-text alerts and configures their independent
+sound and desktop-notification effects. Enabled state is a persisted quick
+toggle rather than part of the edit form; the manager and both Alerts panels
+show the same enabled state.
+
+Opening the Alerts panel by keyboard focuses its Manage button. Close or
+Escape in the manager restores the originating Alerts panel and focuses
+**Manage alerts**. Escape or the panel's Close control then restores focus to
+the bell trigger. Clicking outside the compact attached panel dismisses it
+without moving focus back to the trigger.
 
 ## Vital threshold semantics
 
@@ -252,3 +259,7 @@ zero-definition Actions/Alerts affordances were also exercised successfully.
 Status: verified for configurable vital and received-text alerts
 Verified against: desktop unit tests, strict Svelte/TypeScript checking, and
 Windows-native live text-alert acceptance.
+
+See [Slice 27 status](../../status.md#slice-27-implementation--in-progress)
+for contextual management acceptance; the rendered UI evidence above predates
+that navigation change.

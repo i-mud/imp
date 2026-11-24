@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   import ActionBar from './ActionBar.svelte';
   import ActionDialog from './ActionDialog.svelte';
@@ -58,6 +58,8 @@
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import X from '@lucide/svelte/icons/x';
 
+  type ManagerOrigin = 'expanded-actions' | 'compact-actions' | 'expanded-alerts' | 'compact-alerts';
+
   let {
     model,
     actionSink,
@@ -77,14 +79,16 @@
   let compactRow = $state<HTMLElement>();
   let compactPanel = $state<HTMLDivElement>();
   let compactControls = $state<HTMLElement>();
-  let compactSettingsTrigger = $state<HTMLButtonElement>();
+  let settingsTrigger = $state<HTMLButtonElement>();
   let compactActionsTrigger = $state<HTMLButtonElement>();
-  let compactAlertsTrigger = $state<HTMLButtonElement>();
+  let alertsTrigger = $state<HTMLButtonElement>();
   let settingsOpen = $state(false);
   let actionsOpen = $state(false);
   let alertsOpen = $state(false);
-  let actionDialogOpen = $state(false);
-  let alertDialogOpen = $state(false);
+  let managerOrigin = $state<ManagerOrigin | null>(null);
+  const actionDialogOpen = $derived(
+    managerOrigin === 'expanded-actions' || managerOrigin === 'compact-actions',
+  );
   let connectionDialogOpen = $state(false);
   let actionDialogWidth = $state<number>(EXPANDED_WINDOW_WIDTH);
   let actionSaveError = $state<string | null>(null);
@@ -92,8 +96,6 @@
   let connectionSettings = $state<ConnectionSettings | null>(null);
   let connectionLoadError = $state<string | null>(null);
   let connectionSaveError = $state<string | null>(null);
-  let actionDialogInvoker: HTMLButtonElement | null = null;
-  let alertDialogInvoker: HTMLButtonElement | null = null;
   let connectionDialogInvoker: HTMLButtonElement | null = null;
   const actionInvocation = $state<ActionInvocationState>({
     pendingActionId: null,
@@ -191,7 +193,7 @@
     return true;
   }
 
-  function openActionDialog(invoker: HTMLButtonElement): void {
+  function setManagerWidth(): void {
     if (displayMode === 'compact') {
       const row = compactRow;
       const hudPanel = panel;
@@ -203,90 +205,39 @@
     } else {
       actionDialogWidth = EXPANDED_WINDOW_WIDTH;
     }
+  }
 
-    actionDialogInvoker = invoker;
-    actionSaveError = null;
-    alertDialogOpen = false;
-    connectionDialogOpen = false;
+  async function focusPanelControl(selector = '.manage-btn'): Promise<void> {
+    await tick();
+    panel?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+  }
+
+  function openManager(origin: ManagerOrigin): void {
+    setManagerWidth();
+    if (origin === 'expanded-actions' || origin === 'compact-actions') actionSaveError = null;
     settingsOpen = false;
     actionsOpen = false;
     alertsOpen = false;
-    actionDialogOpen = true;
+    managerOrigin = origin;
   }
 
-  function closeActionDialog(): void {
-    actionDialogOpen = false;
-    settingsOpen = true;
-    const invoker = actionDialogInvoker;
-    requestAnimationFrame(() => {
-      const target = invoker?.isConnected
-        ? invoker
-        : (document.querySelector<HTMLButtonElement>('[data-action-manager-trigger]') ??
-          document.querySelector<HTMLButtonElement>('.settings-button') ??
-          document.querySelector<HTMLButtonElement>('button.close'));
-      target?.focus();
-      actionDialogInvoker = null;
-    });
-  }
+  function closeManager(): void {
+    const origin = managerOrigin;
+    if (origin === null) return;
 
-  function openAlertDialog(invoker: HTMLButtonElement): void {
-    if (displayMode === 'compact') {
-      const row = compactRow;
-      const hudPanel = panel;
-      if (row !== undefined && hudPanel !== undefined) {
-        const rowBounds = row.getBoundingClientRect();
-        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
-        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
-      }
-    } else {
-      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
-    }
-
-    alertDialogInvoker = invoker;
-    actionDialogOpen = false;
-    connectionDialogOpen = false;
-    settingsOpen = false;
-    actionsOpen = false;
-    alertsOpen = false;
-    alertDialogOpen = true;
-  }
-
-  function closeAlertDialog(): void {
-    alertDialogOpen = false;
-    settingsOpen = true;
-
-    const invoker = alertDialogInvoker;
-    requestAnimationFrame(() => {
-      const target = invoker?.isConnected
-        ? invoker
-        : (document.querySelector<HTMLButtonElement>('[data-alert-manager-trigger]') ??
-          document.querySelector<HTMLButtonElement>('.settings-button') ??
-          document.querySelector<HTMLButtonElement>('button.close'));
-
-      target?.focus();
-      alertDialogInvoker = null;
-    });
+    managerOrigin = null;
+    actionsOpen = origin === 'compact-actions';
+    alertsOpen = origin === 'compact-alerts' || origin === 'expanded-alerts';
+    void focusPanelControl();
   }
 
   async function openConnectionDialog(invoker: HTMLButtonElement): Promise<void> {
-    if (displayMode === 'compact') {
-      const row = compactRow;
-      const hudPanel = panel;
-      if (row !== undefined && hudPanel !== undefined) {
-        const rowBounds = row.getBoundingClientRect();
-        const frameWidth = hudPanel.offsetWidth - hudPanel.clientWidth;
-        actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
-      }
-    } else {
-      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
-    }
+    setManagerWidth();
 
     connectionDialogInvoker = invoker;
     connectionSettings = null;
     connectionLoadError = null;
     connectionSaveError = null;
-    actionDialogOpen = false;
-    alertDialogOpen = false;
     settingsOpen = false;
     actionsOpen = false;
     alertsOpen = false;
@@ -344,15 +295,16 @@
   }
 
   function closeOrDismiss(): void {
-    if (settingsOpen) {
-      settingsOpen = false;
-    } else if (actionsOpen) {
-      actionsOpen = false;
-    } else if (alertsOpen) {
-      alertsOpen = false;
-    } else {
+    if (!settingsOpen && !actionsOpen && !alertsOpen) {
       closeWindow();
+      return;
     }
+
+    const trigger = alertsOpen ? alertsTrigger : actionsOpen ? compactActionsTrigger : settingsTrigger;
+    settingsOpen = false;
+    actionsOpen = false;
+    alertsOpen = false;
+    void tick().then(() => trigger?.focus({ preventScroll: true }));
   }
 
   const closeLabel = $derived(
@@ -367,16 +319,12 @@
   const CloseIcon = $derived(settingsOpen || actionsOpen || alertsOpen ? ChevronUp : X);
 
   $effect(() => {
-    if (displayMode !== 'compact' || (!settingsOpen && !actionsOpen && !alertsOpen)) return;
+    if (!settingsOpen && !actionsOpen && !alertsOpen) return;
+    const isCompact = displayMode === 'compact';
     const attachedPanel = compactPanel;
-    const activeTrigger = alertsOpen
-      ? compactAlertsTrigger
-      : actionsOpen
-        ? compactActionsTrigger
-        : compactSettingsTrigger;
-    if (attachedPanel === undefined) return;
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (attachedPanel === undefined) return;
       const target = event.target as Node;
       // The controls cluster owns its own open/close behaviour - the close
       // button dismisses the open panel on click, so an outside-pointer
@@ -388,17 +336,15 @@
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat) return;
+      if (!settingsOpen && !actionsOpen && !alertsOpen) return;
       event.preventDefault();
-      settingsOpen = false;
-      actionsOpen = false;
-      alertsOpen = false;
-      requestAnimationFrame(() => activeTrigger?.focus());
+      closeOrDismiss();
     };
-    window.addEventListener('pointerdown', closeOnOutsidePointer);
+    if (isCompact) window.addEventListener('pointerdown', closeOnOutsidePointer);
     window.addEventListener('keydown', closeOnEscape);
     return () => {
-      window.removeEventListener('pointerdown', closeOnOutsidePointer);
+      if (isCompact) window.removeEventListener('pointerdown', closeOnOutsidePointer);
       window.removeEventListener('keydown', closeOnEscape);
     };
   });
@@ -423,7 +369,7 @@
   });
 
   $effect(() => {
-    if (actionDialogOpen || alertDialogOpen || connectionDialogOpen) {
+    if (managerOrigin !== null || connectionDialogOpen) {
       const observer = new ResizeObserver(() => resize());
 
       const resize = () => {
@@ -534,7 +480,7 @@
 </script>
 
 <main
-  class:compact={displayMode === 'compact' && !actionDialogOpen && !alertDialogOpen && !connectionDialogOpen}
+  class:compact={displayMode === 'compact' && managerOrigin === null && !connectionDialogOpen}
   class="hud"
   aria-label="Imp companion HUD"
   data-tauri-drag-region
@@ -544,14 +490,14 @@
       definitions={actions}
       onchange={setActions}
       saveError={actionSaveError}
-      onclose={closeActionDialog}
+      onclose={closeManager}
     />
-  {:else if alertDialogOpen}
+  {:else if managerOrigin !== null}
     <AlertDialog
       definitions={alertDefinitions}
       onchange={setAlertDefinitions}
       saveError={alertSaveError}
-      onclose={closeAlertDialog}
+      onclose={closeManager}
     />
   {:else if connectionDialogOpen}
     <ConnectionDialog
@@ -583,9 +529,10 @@
           <div bind:this={compactControls} class="compact-controls">
             <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
               <ActionsMenu
-                onopen={() => {
+                onopen={(keyboard) => {
                   settingsOpen = false;
                   alertsOpen = false;
+                  if (keyboard) void focusPanelControl();
                 }}
                 bind:open={actionsOpen}
                 bind:trigger={compactActionsTrigger}
@@ -594,26 +541,29 @@
             <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
               <AlertsMenu
                 controls="compact-alerts-panel"
-                onopen={() => {
+                onopen={(keyboard) => {
                   settingsOpen = false;
                   actionsOpen = false;
+                  if (keyboard) void focusPanelControl();
                 }}
                 bind:open={alertsOpen}
-                bind:trigger={compactAlertsTrigger}
+                bind:trigger={alertsTrigger}
               />
             </span>
             <span class="control-slot" class:hidden={settingsOpen || actionsOpen || alertsOpen}>
               <SettingsMenu
                 bind:open={settingsOpen}
-                bind:trigger={compactSettingsTrigger}
-                onopen={() => {
+                bind:trigger={settingsTrigger}
+                onopen={(keyboard) => {
                   actionsOpen = false;
                   alertsOpen = false;
+                  if (keyboard) void focusPanelControl('input[name="display-mode"]:checked');
                 }}
               />
             </span>
             <button
               class="close icon-btn"
+              type="button"
               aria-label={closeLabel}
               onclick={(event) => {
                 event.stopPropagation();
@@ -634,14 +584,11 @@
               mode={displayMode}
               {theme}
               {appVersion}
-              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
               onmanageconnection={(invoker) => {
                 void openConnectionDialog(invoker);
               }}
-              onmanagealerts={openAlertDialog}
-              onmanageactions={openActionDialog}
             />
           </div>
         {:else if actionsOpen}
@@ -671,6 +618,12 @@
                 {actionInvocation.feedback ?? '\u00a0'}
               </div>
             {/if}
+            <button
+              class="manage-btn"
+              type="button"
+              aria-label="Manage actions"
+              onclick={() => openManager('compact-actions')}>Manage</button
+            >
           </div>
         {:else if alertsOpen}
           <div
@@ -684,6 +637,7 @@
               definitions={alertDefinitions}
               saveError={alertSaveError}
               ontoggle={setAlertDefinitionEnabled}
+              onmanage={() => openManager('compact-alerts')}
             />
           </div>
         {/if}
@@ -696,25 +650,30 @@
           <span class="control-slot" class:hidden={settingsOpen || alertsOpen}>
             <AlertsMenu
               controls="expanded-alerts-panel"
-              onopen={() => {
+              onopen={(keyboard) => {
                 settingsOpen = false;
                 actionsOpen = false;
+                if (keyboard) void focusPanelControl();
               }}
               bind:open={alertsOpen}
+              bind:trigger={alertsTrigger}
             />
           </span>
 
           <span class="control-slot" class:hidden={settingsOpen || alertsOpen}>
             <SettingsMenu
               bind:open={settingsOpen}
-              onopen={() => {
+              bind:trigger={settingsTrigger}
+              onopen={(keyboard) => {
                 actionsOpen = false;
                 alertsOpen = false;
+                if (keyboard) void focusPanelControl('input[name="display-mode"]:checked');
               }}
             />
           </span>
           <button
             class="close icon-btn"
+            type="button"
             aria-label={closeLabel}
             onclick={(event) => {
               event.stopPropagation();
@@ -729,14 +688,11 @@
               mode={displayMode}
               {theme}
               {appVersion}
-              {alertSaveError}
               onmodechange={setDisplayMode}
               onthemechange={setTheme}
               onmanageconnection={(invoker) => {
                 void openConnectionDialog(invoker);
               }}
-              onmanagealerts={openAlertDialog}
-              onmanageactions={openActionDialog}
             />
           </div>
         {:else if alertsOpen}
@@ -745,6 +701,7 @@
               definitions={alertDefinitions}
               saveError={alertSaveError}
               ontoggle={setAlertDefinitionEnabled}
+              onmanage={() => openManager('expanded-alerts')}
             />
           </div>
         {:else if isFresh && character !== null}
@@ -785,12 +742,13 @@
           </section>
         {/if}
 
-        {#if !settingsOpen && !alertsOpen && actions.length > 0}
+        {#if !settingsOpen && !alertsOpen}
           <ActionBar
             definitions={actions}
             pendingActionId={actionInvocation.pendingActionId}
             feedback={actionInvocation.feedback}
             oninvoke={invokeDefinition}
+            onmanage={() => openManager('expanded-actions')}
           />
         {/if}
       {/if}
@@ -939,6 +897,10 @@
     width: 0;
     min-width: 100%;
     gap: var(--space-6);
+  }
+
+  .compact-actions-panel > .manage-btn {
+    justify-self: end;
   }
 
   .compact-action-list {

@@ -8,7 +8,7 @@
     trigger = $bindable<HTMLButtonElement | undefined>(),
   }: {
     controls: string;
-    onopen: () => void;
+    onopen: (keyboard: boolean) => void;
     open?: boolean;
     trigger?: HTMLButtonElement | undefined;
   } = $props();
@@ -24,7 +24,7 @@
     aria-controls={controls}
     onclick={(event) => {
       event.stopPropagation();
-      if (!open) onopen();
+      if (!open) onopen(event.detail === 0);
       open = !open;
     }}><Bell size={14} /></button
   >

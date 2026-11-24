@@ -6,7 +6,7 @@
     open = $bindable(false),
     trigger = $bindable<HTMLButtonElement | undefined>(),
   }: {
-    onopen: () => void;
+    onopen: (keyboard: boolean) => void;
     open?: boolean;
     trigger?: HTMLButtonElement | undefined;
   } = $props();
@@ -22,7 +22,7 @@
     aria-controls="compact-actions-panel"
     onclick={(event) => {
       event.stopPropagation();
-      if (!open) onopen();
+      if (!open) onopen(event.detail === 0);
       open = !open;
     }}><Swords size={14} /></button
   >
