@@ -5,11 +5,7 @@ export interface HudWindowSize {
   readonly height: number;
 }
 
-// The action strip is measured at runtime; this is only the pre-measurement floor.
-export const ACTION_STRIP_HEIGHT = 50;
-export const EXPANDED_WINDOW_SIZE: HudWindowSize = { width: 320, height: 142 };
-export const EXPANDED_WITH_TARGET_WINDOW_SIZE: HudWindowSize = { width: 320, height: 190 };
-export const EXPANDED_SETTINGS_WINDOW_SIZE: HudWindowSize = { width: 320, height: 227 };
+export const EXPANDED_WINDOW_WIDTH = 320;
 
 const COMPACT_MIN_WIDTH = 280;
 const COMPACT_MAX_WIDTH = 560;

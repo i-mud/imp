@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  actionDialogWindowSize,
-  compactPanelWindowSize,
-  compactWindowSize,
-  EXPANDED_SETTINGS_WINDOW_SIZE,
-  EXPANDED_WINDOW_SIZE,
-  EXPANDED_WITH_TARGET_WINDOW_SIZE,
-} from '../src/lib/window.ts';
+import { actionDialogWindowSize, compactPanelWindowSize, compactWindowSize } from '../src/lib/window.ts';
 
 describe('compactWindowSize', () => {
   it('rounds rendered content up to a stable logical window size', () => {
@@ -20,17 +13,6 @@ describe('compactWindowSize', () => {
   it('keeps measured compact dimensions within the owned window bounds', () => {
     expect(compactWindowSize(1, 1)).toEqual({ width: 280, height: 30 });
     expect(compactWindowSize(1000, 1000)).toEqual({ width: 560, height: 160 });
-  });
-});
-
-describe('expanded window sizes', () => {
-  it('preserves the established dimensions', () => {
-    expect(EXPANDED_WINDOW_SIZE).toEqual({ width: 320, height: 142 });
-    expect(EXPANDED_WITH_TARGET_WINDOW_SIZE).toEqual({ width: 320, height: 190 });
-  });
-
-  it('pins the expanded settings size', () => {
-    expect(EXPANDED_SETTINGS_WINDOW_SIZE).toEqual({ width: 320, height: 227 });
   });
 });
 

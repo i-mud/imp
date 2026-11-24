@@ -51,12 +51,13 @@ secrets.
 
 ## Window sizing and interaction
 
-Expanded mode remains 320 pixels wide: 142 or 190 pixels high without actions,
-and 227 pixels high for Settings. With actions the strip is not a fixed height:
-`Hud.svelte` observes the rendered `.action-bar` and resizes the window to the
-base height plus the measured strip, so a wrapped result message grows the
-window instead of compressing the buttons. `ACTION_STRIP_HEIGHT` remains only as
-the pre-measurement fallback used before the first observation.
+The normal expanded HUD lays out at 320 logical pixels wide without stretching
+to the viewport height. `Hud.svelte` observes the panel's intrinsic border box,
+so the titlebar, vitals, optional target and action strip, wrapped feedback, and
+frame contribute to the measured height. It rounds the height up to a whole
+logical pixel, coalesces resize requests in `requestAnimationFrame`, and skips
+unchanged sizes within that branch. Leaving the branch cancels any pending
+frame. Expanded Settings and Alerts retain their separate measurement paths.
 
 Compact width follows the current intrinsic HUD row within the 280-560 pixel
 bounds. The compact sizing helpers floor content height at 30 pixels and bound
@@ -65,10 +66,10 @@ may grow only to the 420-pixel panel-height bound. Browser measurement observed
 a 30-pixel compact row; the outer framed panel can measure 32 pixels because of
 its borders.
 
-Manage Actions uses the width of the HUD that opened it and a fixed 400-pixel
-height. Expanded mode therefore opens management at 320 pixels. Compact mode
-captures the intrinsic compact baseline before replacing Settings; closing
-management measures the restored current content again rather than treating the
+Manage Actions keeps its separate content-height measurement and uses the
+width of the HUD that opened it. Expanded mode opens management at 320 pixels.
+Compact mode captures the intrinsic compact baseline before replacing Settings;
+closing management measures the restored current content again rather than treating the
 dialog width as a new baseline. The management header remains draggable, while
 its Close button, fields, buttons, list, and scrollbar remain non-drag regions.
 
@@ -106,7 +107,8 @@ resends. The Slice 7 no-replay contract is unchanged.
 
 ## Verification
 
-Status: verified
+Status: verified for actions. The layout acceptance below predates Slice 27's
+normal expanded HUD sizing change.
 
 The canonical automated gate (`npm run check`) covers definition validation,
 create/edit/delete persistence, the 64-definition limit, storage-write failure,

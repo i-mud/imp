@@ -47,13 +47,10 @@
   } from '../lib/hud/presentation.ts';
   import {
     actionDialogWindowSize,
-    ACTION_STRIP_HEIGHT,
     closeWindow,
     compactPanelWindowSize,
     compactWindowSize,
-    EXPANDED_SETTINGS_WINDOW_SIZE,
-    EXPANDED_WINDOW_SIZE,
-    EXPANDED_WITH_TARGET_WINDOW_SIZE,
+    EXPANDED_WINDOW_WIDTH,
     resizeHudWindow,
   } from '../lib/window.ts';
   import { applyTheme, loadTheme, saveTheme, type ThemePreference } from '../lib/hud/theme.ts';
@@ -89,7 +86,7 @@
   let actionDialogOpen = $state(false);
   let alertDialogOpen = $state(false);
   let connectionDialogOpen = $state(false);
-  let actionDialogWidth = $state(EXPANDED_SETTINGS_WINDOW_SIZE.width);
+  let actionDialogWidth = $state<number>(EXPANDED_WINDOW_WIDTH);
   let actionSaveError = $state<string | null>(null);
   let alertSaveError = $state<string | null>(null);
   let connectionSettings = $state<ConnectionSettings | null>(null);
@@ -138,7 +135,6 @@
   const target = $derived(model.state.target);
   const characterName = $derived(character?.name ?? 'Imp');
   const showMana = $derived(character?.mana?.max !== 0);
-  const expandedBase = $derived(target !== null ? EXPANDED_WITH_TARGET_WINDOW_SIZE : EXPANDED_WINDOW_SIZE);
 
   function setDisplayMode(mode: DisplayMode, keyboard: boolean): void {
     settingsOpen = keyboard;
@@ -205,7 +201,7 @@
         actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
       }
     } else {
-      actionDialogWidth = EXPANDED_SETTINGS_WINDOW_SIZE.width;
+      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
     }
 
     actionDialogInvoker = invoker;
@@ -243,7 +239,7 @@
         actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
       }
     } else {
-      actionDialogWidth = EXPANDED_SETTINGS_WINDOW_SIZE.width;
+      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
     }
 
     alertDialogInvoker = invoker;
@@ -282,7 +278,7 @@
         actionDialogWidth = compactWindowSize(rowBounds.width + frameWidth, rowBounds.height).width;
       }
     } else {
-      actionDialogWidth = EXPANDED_SETTINGS_WINDOW_SIZE.width;
+      actionDialogWidth = EXPANDED_WINDOW_WIDTH;
     }
 
     connectionDialogInvoker = invoker;
@@ -467,7 +463,7 @@
           const frameHeight = hudPanel.offsetHeight - hudPanel.clientHeight;
 
           resizeHudWindow({
-            width: EXPANDED_SETTINGS_WINDOW_SIZE.width,
+            width: EXPANDED_WINDOW_WIDTH,
             height: Math.ceil(titlebarHeight + bodyHeight + frameHeight),
           });
         };
@@ -482,29 +478,25 @@
           observer.disconnect();
         };
       }
-      if (actions.length === 0) {
-        resizeHudWindow(expandedBase);
-        return;
-      }
-
       const hudPanel = panel;
       if (hudPanel === undefined) return;
 
-      const resize = () => {
-        const actionBarHeight =
-          hudPanel.querySelector('.action-bar')?.getBoundingClientRect().height ?? ACTION_STRIP_HEIGHT;
-        resizeHudWindow({
-          width: expandedBase.width,
-          height: expandedBase.height + Math.ceil(actionBarHeight),
+      let frame: number | undefined;
+      let lastHeight: number | undefined;
+      const observer = new ResizeObserver(() => {
+        if (frame !== undefined) return;
+        frame = requestAnimationFrame(() => {
+          frame = undefined;
+          const height = Math.ceil(hudPanel.getBoundingClientRect().height);
+          if (height === lastHeight) return;
+          lastHeight = height;
+          resizeHudWindow({ width: EXPANDED_WINDOW_WIDTH, height });
         });
-      };
-      const frame = requestAnimationFrame(resize);
-      const observer = new ResizeObserver(resize);
-      const actionBar = hudPanel.querySelector('.action-bar');
-      if (actionBar !== null) observer.observe(actionBar);
+      });
+      observer.observe(hudPanel, { box: 'border-box' });
       return () => {
-        cancelAnimationFrame(frame);
         observer.disconnect();
+        if (frame !== undefined) cancelAnimationFrame(frame);
       };
     }
 
@@ -572,8 +564,8 @@
   {:else}
     <div
       bind:this={panel}
-      class:has-actions={displayMode === 'expanded' && !settingsOpen && !alertsOpen && actions.length > 0}
-      class:has-expanded-panel={displayMode === 'expanded' && (settingsOpen || alertsOpen)}
+      class:expanded-main={displayMode === 'expanded' && !settingsOpen && !alertsOpen}
+      style:--expanded-width={`${EXPANDED_WINDOW_WIDTH}px`}
       class:has-compact-panel={displayMode === 'compact' && (settingsOpen || actionsOpen || alertsOpen)}
       class="panel"
     >
@@ -824,17 +816,13 @@
   }
 
   .hud:not(.compact) .panel {
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .hud:not(.compact) .panel.has-actions {
-    grid-template-rows: auto minmax(0, 1fr) auto;
-  }
-
-  .hud:not(.compact) .panel.has-expanded-panel {
     height: max-content;
-    grid-template-rows: auto auto;
     align-content: start;
+  }
+
+  .expanded-main {
+    /* Measure at the destination width, not the previous surface's viewport. */
+    width: var(--expanded-width);
   }
 
   .titlebar {
