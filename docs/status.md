@@ -883,7 +883,11 @@ Slice 4 live evidence:
   changed to `-Fp2`; repeated live fights then acquired, updated, and cleared
   targets correctly. Priority 2 is the shipped, live-verified configuration,
   not the only claimed valid priority.
-- Normal character relogs updated identity correctly with the canonical hook.
+- After the GMCP hook remediation, repeated character relogs intermittently
+  left a stale character name. Normal relogs with the final hook updated
+  identity correctly, but rapid login/world transitions could still miss an
+  authoritative `Char.Status.character_name` update. That defect was
+  [subsequently resolved upstream](#avatar-gmcp-identity-resolution).
 
 CI does not replace any row in this table and must not be cited as evidence for
 Windows Tauri behavior, actual OpenSSH supervision, VPS/systemd behavior,
@@ -924,11 +928,13 @@ each is the kind that comes back.
    now awaits `asyncio.to_thread(stream.readline)`, leaving the event loop free
    for close, ping and timeout handling. Pinned by
    `integrations/tinyfugue/tests/test_bridge.py`.
-6. **TinyFugue GMCP startup was misconfigured.** The active startup file did
-   not load the capture hook, and the installed build lacked the `GMCP_LOGIN`
-   hook required by the operator's scripts. Loading the hook from the active
-   startup file on a build that provides `GMCP_LOGIN` restored identity after
-   reboot without changing Imp normalization, checkpoint, or protocol behavior.
+6. **TinyFugue GMCP startup was misconfigured.** After a VPS reboot discarded
+   the ephemeral checkpoint, Imp received vitals and status deltas without
+   character identity. The hook was configured in `~/.tfrc`, not the startup
+   file TinyFugue used, and the installed build lacked the `GMCP_LOGIN` hook
+   required by the operator's scripts. Loading the hook from the active startup
+   file on a build with `GMCP_LOGIN` restored identity after reboot without
+   changing Imp normalization, checkpoint, or protocol behavior.
 7. **Startup adoption of an existing relay was terminal.** In managed mode a
    healthy relay already listening on `127.0.0.1:8787` made
    `TunnelSupervisor::managed()` report `ExternalPortInUse` and return without
@@ -941,6 +947,13 @@ each is the kind that comes back.
    supervisor spawns its own child once the port is free. Pinned by
    `apps/desktop/src-tauri/src/tunnel.rs`. This is distinct from the earlier
    owned-child reboot recovery, which already worked.
+
+## AVATAR GMCP identity resolution
+
+The project owner reported the character identity reacquisition defect directly
+to AVATAR's lead programmer, who later announced the fix in AVATAR's changelog.
+This closes the deferred issue on upstream confirmation, not Imp live
+verification.
 
 ## Known deferred issues
 
@@ -1208,6 +1221,12 @@ The local and remote `/healthz` responses carried different retained sequence
 numbers, proving they were distinct nodes. The HUD consumed the VPS node through
 `8789`, and trusted `look` delivery to the remote TinyFugue/MUD path still
 worked.
+
+The first reconnect in that final remote TinyFugue acceptance left the HUD
+without authoritative character identity or vitals, while trusted actions
+still worked. A second reconnect restored the name and vitals. This was the
+[identity defect later resolved upstream](#avatar-gmcp-identity-resolution),
+not a transport failure.
 
 Mudlet release distribution is also complete. The release workflow builds
 `Imp.mpackage` before the Windows job, downloads it into the desktop Mudlet

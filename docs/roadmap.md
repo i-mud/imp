@@ -588,8 +588,8 @@ simultaneously: `imp-node.exe` owned local `8787` while the desktop-owned
 that the MUD-client adapter boundary no longer changes with the HUD connection
 mode.
 
-Slice 16 is complete. Imp-to-Imp chaining, TinyFugue identity reacquisition, and
-raw/ANSI GMCP robustness remain separate candidate work.
+Slice 16 is complete. Imp-to-Imp chaining and raw/ANSI GMCP robustness remain
+separate candidate work.
 
 ### Slice 17 - Input boundary correctness
 

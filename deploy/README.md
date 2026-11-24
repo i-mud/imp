@@ -858,8 +858,10 @@ and send `Char.Login`. Use a TinyFugue build that exposes this hook. The
 verified build was `5.2.2-3-g4f0ff34`, but a version number does not establish
 that the hook is compiled in.
 
-Verify that Imp publishes a snapshot: `/healthz` should report
-`has_snapshot: true` with a non-null `seq`.
+Verify that the relay's `/healthz` reports `feed: live`, `has_snapshot: true`,
+and a non-null `seq`. Confirm the HUD shows the character currently connected
+in TinyFugue's selected world. A retained snapshot can have a non-null `seq`
+even when the feed is stale or down.
 
 The build, the upgrade and the login scripts are operator-owned; Imp
 never modifies them and sends no GMCP itself.
