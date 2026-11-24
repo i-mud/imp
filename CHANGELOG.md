@@ -10,6 +10,16 @@ public release versions.
 
 No changes yet.
 
+## [0.5.0] - 2026-11-24
+
+### Bug Fixes
+
+- refine HUD navigation and confirm window exit inline ([477d8bf](https://github.com/i-mud/imp/commit/477d8bf940c41e04654a9a35ed105c56fa658306))
+
+### Features
+
+- manage alerts and actions from contextual HUD panels ([7b41ad0](https://github.com/i-mud/imp/commit/7b41ad07faf9a417a6367824446abe99d28d0393))
+
 ## [0.4.7] - 2026-11-24
 
 ### Bug Fixes
