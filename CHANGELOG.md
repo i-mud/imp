@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.5.1] - 2026-11-24
+
+### Bug Fixes
+
+- **desktop:** keep HUD feedback readable and restore save focus ([4f4ca07](https://github.com/i-mud/imp/commit/4f4ca079fe04db2aae3126e6ac63fd407ed70e4b))
+
 ## [0.5.0] - 2026-11-24
 
 ### Bug Fixes
