@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.4.7] - 2026-11-24
+
+### Bug Fixes
+
+- size expanded HUD from intrinsic content ([af70450](https://github.com/i-mud/imp/commit/af7045046bb9d380713ad4c5dd625d523817619e))
+
 ## [0.4.6] - 2026-10-30
 
 ### Bug Fixes
