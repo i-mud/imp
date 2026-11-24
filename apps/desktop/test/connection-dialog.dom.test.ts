@@ -16,12 +16,15 @@ afterEach(async () => {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   for (const component of mounted.splice(0)) await unmount(component);
   document.body.replaceChildren();
+  vi.restoreAllMocks();
 });
 
 async function setup(
   settings = DIRECT,
   onsave = vi.fn<ComponentProps<typeof ConnectionDialog>['onsave']>().mockResolvedValue(true),
 ) {
+  // JSDOM ties document focus to element focus instead of tracking an active window.
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   const settingsStore = writable(settings);
   const errorStore = writable<string | null>(null);
   const currentSettings = fromStore(settingsStore);
@@ -312,4 +315,34 @@ describe('ConnectionDialog credential-discard interactions', () => {
       expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'local' });
     },
   );
+});
+
+describe('ConnectionDialog save focus', () => {
+  it.each([
+    { success: true, focus: 'lost' },
+    { success: false, focus: 'lost' },
+    { success: true, focus: 'outside' },
+    { success: true, focus: 'inactive' },
+  ])('handles $focus focus after an ordinary save (success: $success)', async ({ success, focus }) => {
+    const deferred = Promise.withResolvers<boolean>();
+    await setup({ ...DIRECT, mode: 'external' }, vi.fn().mockReturnValue(deferred.promise));
+    const save = button('Save');
+    save.focus();
+    await click(save);
+    expect(button('Saving…').disabled).toBe(true);
+
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    if (focus !== 'outside') outside.blur();
+    if (focus === 'inactive') vi.mocked(document.hasFocus).mockReturnValue(false);
+
+    deferred.resolve(success);
+    await vi.waitFor(() => {
+      expect(button('Save').disabled).toBe(false);
+      expect(document.activeElement).toBe(
+        focus === 'lost' ? save : focus === 'outside' ? outside : document.body,
+      );
+    });
+  });
 });

@@ -483,7 +483,7 @@
 {#snippet actionList()}
   <div class="compact-action-list">
     {#if actions.length === 0}
-      <span class="compact-action-feedback">No actions defined.</span>
+      <span class="compact-action-empty">No actions defined.</span>
     {:else}
       {#each actions as definition (definition.id)}
         <button
@@ -496,7 +496,7 @@
     {/if}
   </div>
   {#if actionInvocation.feedback}
-    <div class="compact-action-feedback" aria-live="polite">
+    <div class="action-feedback" aria-live="polite">
       {actionInvocation.feedback}
     </div>
   {/if}
@@ -906,7 +906,7 @@
     text-align: left;
   }
 
-  .compact-action-feedback {
+  .compact-action-empty {
     overflow: hidden;
     color: var(--muted);
     font-size: var(--font-2xs);

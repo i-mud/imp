@@ -229,7 +229,7 @@
   }
 
   header .persistence-error {
-    color: var(--bad);
+    color: var(--bad-text);
   }
 
   .dialog-close {
@@ -296,7 +296,7 @@
 
   .error {
     overflow-wrap: anywhere;
-    color: var(--bad);
+    color: var(--bad-text);
     font-size: var(--font-2xs);
   }
 
