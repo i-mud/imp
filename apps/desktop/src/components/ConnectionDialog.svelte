@@ -108,9 +108,9 @@
       saved = await onsave(update);
     } finally {
       saving = false;
-      if (discardConfirmed) {
-        await tick();
-        saveButton?.focus();
+      await tick();
+      if (saveButton?.isConnected && document.hasFocus() && document.activeElement === document.body) {
+        saveButton.focus();
       }
     }
   }
@@ -457,11 +457,11 @@
   }
 
   .error {
-    color: var(--bad);
+    color: var(--bad-text);
   }
 
   .saved-message {
-    color: var(--good);
+    color: var(--good-text);
   }
 
   .form-actions {

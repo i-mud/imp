@@ -60,6 +60,10 @@ logical pixel, coalesces resize requests in `requestAnimationFrame`, and skips
 unchanged sizes within that branch. Leaving the branch cancels any pending
 frame. Expanded contextual panels are measured separately from the normal HUD.
 
+Both action surfaces wrap feedback inside their current width. Feedback uses
+its natural height up to four lines; longer diagnostics scroll within the
+live region rather than pushing Manage outside the compact panel.
+
 Compact width follows the current intrinsic HUD row within the 280-560 pixel
 bounds. The compact sizing helpers floor content height at 30 pixels and bound
 it to 160 pixels; an attached panel retains that width and may grow only to

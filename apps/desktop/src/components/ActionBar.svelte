@@ -77,10 +77,5 @@
 
   .action-feedback {
     grid-column: 1 / -1;
-    min-width: 0;
-    overflow: hidden;
-    color: var(--muted);
-    font-size: var(--font-2xs);
-    line-height: 1;
   }
 </style>

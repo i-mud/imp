@@ -102,6 +102,6 @@
   }
 
   .save-error {
-    color: var(--bad);
+    color: var(--bad-text);
   }
 </style>

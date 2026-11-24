@@ -10,7 +10,7 @@
   --panel: rgba(12, 18, 27, 0.94);
   --panel-edge: rgba(104, 133, 156, 0.2);
   --muted: #91a1b2;
-  --dimmed: #6e7b88;
+  --dimmed: #7d8a97;
   --text: #ecf3fa;
   --hp: #ef5b68;
   --mana: #5e9df8;
@@ -22,6 +22,9 @@
   --warn-rgb: 229, 171, 84;
   --bad: #ef5b68;
   --bad-rgb: 239, 91, 104;
+  /* Text needs 4.5:1 on the translucent panel; status dots keep their palette. */
+  --good-text: var(--good);
+  --bad-text: var(--bad);
   --accent-rgb: 94, 157, 248;
   --divider: rgba(191, 215, 235, 0.13);
   --input-border: rgba(191, 215, 235, 0.2);
@@ -108,6 +111,8 @@
   --warn-rgb: 168, 108, 20;
   --bad: #cf3242;
   --bad-rgb: 207, 50, 66;
+  --good-text: #117950;
+  --bad-text: #c42e3f;
   --accent-rgb: 47, 111, 208;
   --divider: rgba(23, 38, 54, 0.16);
   --input-border: rgba(23, 38, 54, 0.26);
@@ -128,6 +133,18 @@
 .action-btn {
   border: 1px solid var(--accent-border);
   background: var(--accent-subtle);
+}
+
+.action-feedback {
+  min-width: 0;
+  /* Leave room for the compact action list and Manage button. */
+  max-height: 4lh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  color: var(--muted);
+  font-size: var(--font-2xs);
+  line-height: 1.5;
 }
 
 .manage-btn {
