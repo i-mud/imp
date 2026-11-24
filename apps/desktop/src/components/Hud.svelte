@@ -481,7 +481,11 @@
 {/snippet}
 
 {#snippet actionList()}
-  <div class="compact-action-list">
+  <h2>Actions</h2>
+  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => openManager('actions')}>
+    Manage
+  </button>
+  <div class="compact-action-list contextual-items">
     {#if actions.length === 0}
       <span class="compact-action-empty">No actions defined.</span>
     {:else}
@@ -500,9 +504,6 @@
       {actionInvocation.feedback}
     </div>
   {/if}
-  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => openManager('actions')}>
-    Manage
-  </button>
 {/snippet}
 
 <main
@@ -584,7 +585,7 @@
           <div
             id="compact-actions-panel"
             bind:this={compactPanel}
-            class="compact-attached-panel compact-actions-panel actions-panel"
+            class="compact-attached-panel compact-actions-panel contextual-list"
             role="region"
             aria-label="Saved actions"
             inert={exitInvoker !== null}
@@ -644,7 +645,7 @@
         {:else if openPanel === 'actions'}
           <div
             id="expanded-actions-panel"
-            class="actions-body actions-panel"
+            class="actions-body contextual-list"
             role="region"
             aria-label="Saved actions"
             inert={exitInvoker !== null}
@@ -874,28 +875,6 @@
     /* Wrapped labels must not contribute max-content window width. */
     width: 0;
     min-width: 100%;
-  }
-
-  .actions-panel,
-  .compact-alerts-panel {
-    display: grid;
-    gap: var(--space-6);
-  }
-
-  .actions-panel > .manage-btn {
-    justify-self: end;
-  }
-
-  .compact-action-list {
-    display: flex;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    max-height: 12rem;
-    min-height: 0;
-    gap: var(--space-3);
-    overflow-x: hidden;
-    overflow-y: auto;
-    padding-right: var(--space-1);
   }
 
   .compact-action-list button {

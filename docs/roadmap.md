@@ -961,7 +961,8 @@ and real-runtime CI remain retained limitations or follow-ups.
 
 ### Slice 27 - HUD layout and usability polish
 
-In progress. The initial HUD audit identified three bounded PRs; see the
+In progress. The initial HUD audit identified three bounded PRs; a fourth
+refines the Actions and Alerts cards. See the
 [implementation status](status.md#slice-27-implementation--in-progress) for
 verification and limitations.
 
@@ -980,8 +981,15 @@ verification and limitations.
    [v0.5.0](https://github.com/i-mud/imp/releases/tag/v0.5.0).
 3. **Targeted visual and accessibility polish (27-04 through 27-06).**
    PR 3 covers long action feedback, status and error text contrast, and
-   keyboard traversal in the three managers. Slice 27 remains in progress
-   pending independent review and published-artifact acceptance.
+   keyboard traversal in the three managers. Merged as
+   [PR #58](https://github.com/i-mud/imp/pull/58) and shipped in
+   [v0.5.1](https://github.com/i-mud/imp/releases/tag/v0.5.1). The user's
+   published v0.5.1 Windows acceptance passed all 27 checks for PRs 1–3.
+4. **Actions and Alerts cards and themed scrollbars.** The expanded Actions
+   footer wraps to three rows before scrolling. Both display modes keep
+   titles and Manage above the full-width lists, and HUD and manager
+   scrollbars follow the theme. Slice 27 remains in progress pending
+   final published-artifact acceptance of PR 4.
 
 ## Candidate work
 

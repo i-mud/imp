@@ -120,6 +120,34 @@
   --track-bg: rgba(23, 38, 54, 0.12);
 }
 
+.contextual-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.contextual-list h2 {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.contextual-items:empty {
+  display: none;
+}
+
+.contextual-items {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: start;
+  min-width: 0;
+  max-height: 12rem;
+  gap: var(--space-3);
+  overflow: hidden auto;
+}
+
 .action-btn,
 .alert-toggle-pill,
 .manage-btn {
@@ -135,7 +163,15 @@
   background: var(--accent-subtle);
 }
 
+.contextual-items,
+.action-feedback,
+.manager-dialog .saved-list,
+.action-dialog textarea {
+  scrollbar-color: var(--muted) var(--track-bg);
+}
+
 .action-feedback {
+  grid-column: 1 / -1;
   min-width: 0;
   /* Leave room for the compact action list and Manage button. */
   max-height: 4lh;

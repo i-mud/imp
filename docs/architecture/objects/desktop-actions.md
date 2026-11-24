@@ -71,10 +71,18 @@ the 420-pixel panel-height bound. Browser measurement observed a 30-pixel
 compact row; the outer framed panel can measure 32 pixels because of
 its borders.
 
-The expanded action strip and the **Actions** palette have a **Manage** button
-(`Manage actions` to assistive technology). It sits outside the scrolling list
-and remains available even when no actions are saved. Settings no longer links
-to the manager.
+The expanded Actions footer and both **Actions** palettes place the title
+and **Manage** (`Manage actions` to assistive technology) above a
+full-width wrapping list. Manage stays outside the scroller even when no
+actions are saved or an action is pending. Settings does not link to the
+manager.
+
+The footer displays up to three rows of single-line buttons at the current
+font size, then scrolls vertically. Long labels truncate visually but
+retain their full name. An empty footer has no list or reserved list space;
+the palettes instead show an empty message. Feedback remains below the
+list. The action lists, feedback, manager saved list, and command textarea
+use theme-matched scrollbar thumbs and tracks.
 
 The manager measures its own content height and uses the originating HUD
 width: 320 logical pixels in expanded mode, or the compact baseline captured
@@ -127,8 +135,8 @@ resends. The Slice 7 no-replay contract is unchanged.
 
 Status: verified for action definitions and dispatch. See
 [Slice 27 status](../../status.md#slice-27-implementation--in-progress) for the
-expanded layout baseline and current navigation acceptance. The older rendered
-UI evidence below documents earlier layouts, not the current panel navigation.
+expanded layout, navigation, and card acceptance. The older rendered UI
+evidence below documents earlier layouts, not the current cards.
 
 The canonical automated gate (`npm run check`) covers definition validation,
 create/edit/delete persistence, the 64-definition limit, storage-write failure,
