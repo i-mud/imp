@@ -45,6 +45,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
 | Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1` |
 | Slice 26 - Installation reliability and onboarding    | Complete    | No slice marker; accepted in `v0.4.6` |
+| Slice 27 - HUD layout and usability polish            | In progress | No slice marker                       |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -56,7 +57,8 @@ PR identities, verification, and retained limitations. Slice 24 is complete
 with non-blocking follow-ups. Slice 25 is complete: its implementation shipped
 in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
 `v0.4.1`, plus retained follow-ups. Slice 26 is complete: published `v0.4.6`
-was accepted with TinyFugue 5.2.4. Other candidates remain provisional.
+was accepted with TinyFugue 5.2.4. Slice 27 is in progress. Other candidates
+remain provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -955,6 +957,27 @@ requirement and strengthens the restart test. See the
 Constructed-fixture legacy recovery, root TLS archive evidence, nested includes
 and real-runtime CI remain retained limitations or follow-ups.
 
+## Active work
+
+### Slice 27 - HUD layout and usability polish
+
+In progress. The initial HUD audit identified three bounded PRs:
+
+1. **Expanded HUD layout correctness (mandatory, 27-01).** Size the normal
+   expanded HUD to its full content at 320 pixels wide so target and action
+   content fit without overlap, and the window shrinks when content leaves.
+   Compact, Settings, Alerts, and manager sizing stay unchanged in this PR.
+2. **Contextual Alerts and Actions management (mandatory, 27-02 and 27-03).**
+   Move management entry points from Settings to the corresponding HUD
+   surfaces, including empty states. Restore the originating surface and focus
+   when leaving a manager, and correct keyboard focus and dismissal in those
+   contextual panels.
+3. **Targeted visual and accessibility polish (conditional, 27-04 through
+   27-06).** Requires separate approval. Candidates are wrapping long action
+   feedback (27-04), improving status and error text contrast (27-05), and
+   verifying manager keyboard traversal in native WebView2 before changing
+   focus containment (27-06).
+
 ## Candidate work
 
 Unordered, deliberately without slice numbers, and provisional. Live evidence
@@ -1166,20 +1189,3 @@ This should reuse the existing client-neutral state/action and authenticated
 transport boundaries rather than introducing a second replication protocol.
 Multi-consumer action authority, credential ownership, discovery/pairing, and
 loop prevention need explicit design before implementation.
-
-### Desktop experience
-
-#### Further UI polish
-
-Run another focused desktop UI/UX pass based on issues observed during normal
-use rather than treating the current HUD as finished after the earlier polish
-slices.
-
-The work should begin by collecting concrete observed problems before selecting
-scope. Likely areas include compact/expanded layout behavior, panel sizing and
-consistency, controls and interaction flow, visual hierarchy, keyboard/focus
-behavior, and other rough edges exposed by sustained use.
-
-This should remain candidate work until the observed issues are inventoried and
-grouped into a coherent slice rather than turning individual cosmetic defects
-into separate roadmap items.
