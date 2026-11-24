@@ -133,9 +133,7 @@ for startup selection and the VPS systemd setup.
 For any already-running TinyFugue, run `/load ~/.config/imp/capture.tf` once
 after installation, before testing restart recovery. Installing the file does
 not reload that process. No MUD reconnect is needed when the matching normalized
-checkpoint still contains previously captured identity. It cannot recover
-identity never captured by a late-loaded hook; checkpoint loss or reboot also
-requires a fresh identity-bearing login with the hook loaded early.
+checkpoint still contains previously captured identity.
 
 The hook writes to the fixed path `~/.local/state/imp/spool`.
 `imp-feed` creates that path as a symlink into its private runtime
@@ -186,39 +184,16 @@ To stop the feed without closing TinyFugue, stop `imp-feed` (or
 spool path and loses updates rather than blocking. Reloading the hook preserves
 the live session identity and counters; exiting TinyFugue closes its helper pipes.
 
-## Identity bootstrap prerequisite
+## GMCP login and character identity
 
-AVATAR sends the full identity-bearing `Char.Status` only once, during initial
-character login, and documents no way to request another full snapshot; later
-`Char.Status` messages are deltas that may omit `character_name`. Capture of
-that single message therefore depends on the operator's TinyFugue sequencing
-GMCP login at the right negotiation point.
+The operator's login scripts use `GMCP_LOGIN` to negotiate GMCP capabilities
+and send `Char.Login`. Use a TinyFugue build that provides this hook; a version
+number alone does not establish that it is compiled in.
 
-The invariant is a TinyFugue build whose GMCP support includes the
-`GMCP_LOGIN` hook, with operator login scripts that use it to run their GMCP
-capability negotiation and send `Char.Login`. Without `GMCP_LOGIN` the operator
-login path cannot be relied on to sequence this correctly: Imp keeps
-normalizing `Char.Vitals` and `Char.Status` deltas but never observes identity,
-so no state is published.
-
-State it as a capability rather than a version: the build verified live was
-`5.2.2-3-g4f0ff34`, but an upstream or distribution version number does not by
-itself prove `GMCP_LOGIN` is compiled into the binary in use. The conclusive
-signal is that login produces a full `Char.Status` carrying `character_name`
-and Imp publishes a snapshot and writes its checkpoint. The verified run
-observed `Char.StatusVars` immediately followed by that full `Char.Status`;
-AVATAR does not document the ordering as a guarantee, so it is an observation,
-not a protocol requirement Imp relies on - the normalizer accumulates
-packages in whatever order they arrive.
-
-Imp does not work around a missing identity: it never infers the local
-character from `Room.Players` or `Char.Group.List`, never persists identity
-across a reboot, and implements no `Char.Status` refresh request.
-
-Even with those prerequisites, a very fast AVATAR login/world transition can
-still be followed only by delta packets that omit `character_name`. Imp then
-has no authoritative identity to publish. This known reacquisition limitation is
-deferred; it is not attributed to the configurable action UI.
+Imp gets character identity from `Char.Status.character_name`. Without a
+matching checkpoint, it waits for GMCP to supply identity. Imp does not send
+GMCP requests or infer the local character from `Room.Players` or
+`Char.Group.List`.
 
 ## Live feed transport: a drained spool, not a FIFO
 
@@ -621,14 +596,11 @@ that presentation; no live `unknown` outcome was deliberately manufactured.
 The base hook contract was established against TinyFugue
 5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The earlier VPS build
 5.2.2-3-g4f0ff34 additionally provided the `GMCP_LOGIN` hook the operator's
-login scripts need (see
-[identity bootstrap prerequisite](#identity-bootstrap-prerequisite)).
+[login scripts use](#gmcp-login-and-character-identity).
 `GMCP`, `CONNECT`, and `WORLD` supply the package/world events used by the
-versioned hook. `GMCP_LOGIN` remains required by the operator's login scripts
-for GMCP negotiation and identity bootstrap, but Imp does not treat it as
-a new connection-generation boundary. `fwrite(filename, data)` appends data and a newline
-to a fixed filename; `time()` supplies epoch seconds with six fractional
-digits.
+versioned hook. Imp does not treat `GMCP_LOGIN` as a connection-generation
+boundary. `fwrite(filename, data)` appends data and a newline to a fixed
+filename; `time()` supplies epoch seconds with six fractional digits.
 
 All Imp hooks use explicit priority 2 and `-F`. TinyFugue runs the
 highest-priority matching hook first and stops unless it falls through. The

@@ -164,10 +164,8 @@ The work included:
   fall-through so it runs ahead of ordinary priority-1 handlers without
   consuming their event.
 
-The live work also exposed two issues that remain explicitly deferred today:
-very-fast character/world transitions can still lose authoritative identity,
-and some raw ANSI/control-byte GMCP material is still rejected rather than
-silently sanitized.
+The live work also exposed raw ANSI/control-byte GMCP material that Imp still
+rejects rather than silently sanitizing.
 
 ## ✅ Slice 5 - HUD UI refinement
 
@@ -590,8 +588,8 @@ simultaneously: `imp-node.exe` owned local `8787` while the desktop-owned
 that the MUD-client adapter boundary no longer changes with the HUD connection
 mode.
 
-Slice 16 is complete. Imp-to-Imp chaining, TinyFugue identity reacquisition, and
-raw/ANSI GMCP robustness remain separate candidate work.
+Slice 16 is complete. Imp-to-Imp chaining and raw/ANSI GMCP robustness remain
+separate candidate work.
 
 ### Slice 17 - Input boundary correctness
 
@@ -747,9 +745,9 @@ Direct, feed restart, and idempotent reinstall. Those runs used
 smoke on that host, and the published `v0.4.1` server bundle passed clean
 directly-addressed automatic Direct acceptance on a VPS, including public-CA
 verification and live runtime acceptance. That run also found a
-directly-addressed DNS preflight defect in `v0.4.0`, fixed in `v0.4.1`. A full
-host reboot still needs a fresh identity-bearing login; service-restart recovery
-does not remove that requirement.
+directly-addressed DNS preflight defect in `v0.4.0`, fixed in `v0.4.1`.
+Service-restart coverage does not extend to a host reboot, which discards the
+ephemeral checkpoint.
 
 #### Acceptance follow-ups
 
@@ -1023,15 +1021,6 @@ capture previews, action-template previews, cooldown/debounce behavior, and a
 safe way to test a reaction without sending its action.
 
 ### Reliability
-
-#### Character identity reacquisition
-
-Rapid AVATAR login and world transitions can produce later GMCP without another
-authoritative `Char.Status.character_name`, leaving Imp without character
-identity. This remains a deferred defect in [`status.md`](status.md).
-
-Any fix must preserve the current invariant: identity is never inferred from
-ambiguous group/player data, and Imp never invents an identity it was not told.
 
 #### Raw/ANSI GMCP robustness
 

@@ -186,10 +186,8 @@ After feed restart, readiness is not authority: the live TF hook reasserts its
 actual foreground context or null selection, never blindly trusting a saved
 selection. Matching normalized checkpoint values return as stale until fresh
 authoritative GMCP arrives. No MUD reconnect is required while matching cached
-identity survives. This cannot recover identity that was never captured because
-the hook loaded too late. The checkpoint is ephemeral: reboot or checkpoint loss
-still requires fresh identity-bearing login GMCP under the documented TinyFugue
-prerequisites, with the hook loaded before login.
+identity survives. Without a matching checkpoint (including after a reboot),
+the feed waits for character identity from GMCP.
 
 Configuration and state directories are kept private to the user.
 
@@ -829,16 +827,12 @@ See [TinyFugue startup file](#tinyfugue-startup-file) for existing-file selectio
 safe automatic insertion, and cases requiring manual early-loading setup.
 
 Load the hook before anything in that startup path can connect or log in to
-the MUD. AVATAR sends the full identity-bearing `Char.Status` only once, during
-initial character login, and provides no supported way to request another full
-snapshot; later `Char.Status` messages are deltas that may omit
-`character_name`. Loading is additive: Imp does not own or replace the
-operator's GMCP negotiation or connection macros. Repeated loads replace the
-named Imp definitions rather than duplicating them.
+the MUD. Loading is additive: Imp does not own or replace the operator's GMCP
+negotiation or connection macros. Repeated loads replace the named Imp
+definitions rather than duplicating them.
 The Imp `GMCP`, `CONNECT`, and `WORLD` hooks are defined at priority 2
 with fall-through (`-Fp2`) so they observe without consuming operator events.
-`GMCP_LOGIN` remains an operator login-script prerequisite but is not a
-Imp capture hook.
+The operator's login scripts use `GMCP_LOGIN`; Imp does not hook it.
 Imp runs ahead of default priority-1 handlers such as `received-gmcp`; the
 `-F` flag lets those handlers run afterward. Two same-priority
 non-fall-through GMCP hooks previously lost whole events intermittently. Do
@@ -859,27 +853,15 @@ why this is a plain drained file rather than a FIFO.
 
 ## TinyFugue GMCP login prerequisite
 
-Because that identity message is sent once, capture depends on the operator's
-TinyFugue performing GMCP login sequencing at the right negotiation point. The
-invariant is a **build whose GMCP support includes the `GMCP_LOGIN` hook**,
-driving operator login scripts that use it to run their GMCP capability
-negotiation and send `Char.Login`. Without `GMCP_LOGIN` the operator login path
-cannot be relied on to sequence this correctly, and Imp then keeps
-consuming `Char.Vitals` and `Char.Status` deltas without ever observing
-`character_name`, so the HUD stays down.
+The operator's login scripts use `GMCP_LOGIN` to negotiate GMCP capabilities
+and send `Char.Login`. Use a TinyFugue build that exposes this hook. The
+verified build was `5.2.2-3-g4f0ff34`, but a version number does not establish
+that the hook is compiled in.
 
-This is stated as a capability, not a version. The build verified live was
-TinyFugue `5.2.2-3-g4f0ff34`; an upstream or distribution version number does
-not by itself prove `GMCP_LOGIN` is compiled into the binary in use, so confirm
-the capability. The conclusive signal is on the first login after installing
-the hook: login produces a full `Char.Status` carrying `character_name`, and
-Imp obtains a snapshot and writes its checkpoint - visible as
-`has_snapshot: true` with a non-null `seq` on `/healthz`. In the verified run,
-`Char.StatusVars` was observed immediately followed by that full identity-bearing
-`Char.Status`; AVATAR does not document that ordering as a guarantee, so treat
-it as an observation rather than a requirement. When the signal is missing,
-[bounded diagnostic capture](#diagnostic-raw-capture-opt-in-vps) shows which
-packages did arrive.
+Verify that the relay's `/healthz` reports `feed: live`, `has_snapshot: true`,
+and a non-null `seq`. Confirm the HUD shows the character currently connected
+in TinyFugue's selected world. A retained snapshot can have a non-null `seq`
+even when the feed is stale or down.
 
 The build, the upgrade and the login scripts are operator-owned; Imp
 never modifies them and sends no GMCP itself.
@@ -942,16 +924,16 @@ curl -s http://127.0.0.1:8788/healthz
 
 ## Common failure diagnostics
 
-| Symptom                                                        | Check                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                                                 |
-| Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.                                   |
-| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging.                         |
-| Direct WSS path is unsafe or unit policy unsupported           | `imp-direct-wss status` names the directory and reason. For a shared group-writable or world-writable ancestor, remove that write access or give the directory the user's private group; do not loosen `~/.config/imp` or `gateway.env`.                                |
-| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                                                      |
-| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                                                   |
-| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                                          |
-| Feed consuming GMCP but relay reports `has_snapshot: false`    | No `Char.Status.character_name` has been observed since the feed started. Confirm the hook was loaded by the active startup file before login, and that the TinyFugue build provides `GMCP_LOGIN` (the TinyFugue integration section); then log the character in again. |
+| Symptom                                                        | Check                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                         |
+| Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.           |
+| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging. |
+| Direct WSS path is unsafe or unit policy unsupported           | `imp-direct-wss status` names the directory and reason. For a shared group-writable or world-writable ancestor, remove that write access or give the directory the user's private group; do not loosen `~/.config/imp` or `gateway.env`.        |
+| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                              |
+| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                           |
+| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                  |
+| Feed consuming GMCP but relay reports `has_snapshot: false`    | Confirm `imp_capture_gmcp` is loaded and use [bounded diagnostic capture](#diagnostic-raw-capture-opt-in-vps) to check for character identity and vitals.                                                                                       |
 
 ## Diagnostic raw capture (opt-in, VPS)
 
