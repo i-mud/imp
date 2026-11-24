@@ -976,13 +976,12 @@ verification and limitations.
    restores its originating surface and focuses Manage. Both modes keep the
    same shortcut order, switch panels directly, and mark the active shortcut
    with a small ×. Close Imp opens inline confirmation; canceling preserves the
-   current panel. Automated, Chromium, and isolated Windows WebView2 checks
-   passed; the PR is not merged.
-3. **Targeted visual and accessibility polish (conditional, 27-04 through
-   27-06).** Awaits separate approval. Candidates are wrapping long action
-   feedback (27-04), improving status and error text contrast (27-05), and
-   verifying manager keyboard traversal in native WebView2 before changing
-   focus containment (27-06).
+   current panel. Merged in `488a172` and released in
+   [v0.5.0](https://github.com/i-mud/imp/releases/tag/v0.5.0).
+3. **Targeted visual and accessibility polish (27-04 through 27-06).**
+   PR 3 covers long action feedback, status and error text contrast, and
+   keyboard traversal in the three managers. Slice 27 remains in progress
+   pending independent review and published-artifact acceptance.
 
 ## Candidate work
 

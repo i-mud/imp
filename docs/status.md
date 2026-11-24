@@ -631,7 +631,8 @@ window size or the underlying panel. Focus starts on Cancel and stays within
 the two confirmation controls. Cancel or Escape restores the row and focus to
 Close Imp. Only Confirm closes the app from that prompt.
 
-[PR #57](https://github.com/i-mud/imp/pull/57) is not merged. The final
+[PR #57](https://github.com/i-mud/imp/pull/57) merged in `488a172` and shipped in
+[v0.5.0](https://github.com/i-mud/imp/releases/tag/v0.5.0). Its final
 `npm run check` passed, including 226 desktop tests (57 HUD DOM tests);
 64 focused tests passed across four suites.
 
@@ -669,9 +670,69 @@ Close/Escape return, deletion of the last definition, and target transitions.
 Native DPI was not established beyond 100% scale. Desktop-edge placement remains a separate
 limitation: a resize does not move the window back onto the work area.
 
-PR 3 is conditional and awaits separate approval. Long action-feedback
-wrapping, status/error contrast, and broader manager keyboard containment
-are not part of PR 2.
+### PR 3 — Targeted visual and accessibility polish
+
+**27-04 — Feedback clipping.** A valid 64-character unbroken action label
+overflowed both live regions. At 16px in Chromium the pending text needed
+627px in a 294px expanded feedback area. Both regions now wrap at the
+current width and grow to at most four lines; longer diagnostics scroll to
+the final character. With 64 actions and enlarged (20px) metrics the compact
+panel measured 403px against its 420px limit. No invocation, result wording,
+live announcement, or native sizing logic changed.
+
+**27-05 — Status and error contrast.** The table gives minimum WCAG normal-text
+contrast over the measured black, slate (`#64758c`), and white backings. For
+each sample, composite the panel over the backing in sRGB, then compute
+relative luminance; do not sample antialiased glyph edges. The dark panel is
+`rgb(12 18 27 / 94%)` (white limits contrast); the light panel is
+`rgb(247 249 252 / 96%)` (black limits contrast).
+
+| Affected text                    | Foreground before → after | Ratio before → after |
+| -------------------------------- | ------------------------- | -------------------- |
+| Dark unknown vital/target, slash | `#6e7b88` → `#7d8a97`     | 3.77 → 4.63          |
+| Light error text                 | `#cf3242` → `#c42e3f`     | 4.36 → 4.79          |
+| Light Connection “Saved”         | `#12855a` → `#117950`     | 4.03 → 4.71          |
+
+The error text covers Actions, Alerts, the quick alert toggle, and Connection.
+Text-only semantic colors leave vital fills and status dots unchanged. These
+measurements are not a claim about arbitrary desktop composition or HDR.
+
+**27-06 — Manager keyboard traversal.** Actions, Alerts, and Connection
+replace the HUD rather than overlaying interactive controls. At a tab-order
+boundary, focus can land on BODY for one step; another Tab or Shift+Tab
+resumes traversal. No focus trap was added. A different loss was reproducible:
+ordinary Connection saves disabled the focused Save button and left focus on
+BODY after completion. Restore Save after controls re-enable, without moving
+focus from another control or activating an unfocused document.
+
+**Verification.** The full `npm run check` passed (230 desktop tests; 86
+tests in the four focused suites). Six Chromium non-regression profiles
+passed 2,952 assertions covering HUD sizing, switching, Manage, pending
+actions, failed saves, and exit confirmation. The separate contrast run
+paired 222 rendered states per revision. An installed Impeccable detector
+and manual design review supplemented browser measurements.
+
+The [before/after screenshots](audits/slice-27-feedback-and-contrast.png)
+are from isolated Windows/Tauri WebView2 mocks, not browser previews. In
+the enlarged light expanded HUD, a long diagnostic gave native heights of
+260 → 318 → 260 at width 320 as the target appeared and cleared. In compact
+mode the normal minimum remained 280 × 32; an enlarged 29-action panel
+measured 344 × 405. Scrolling to the last glyph and opening/canceling exit
+confirmation did not resize the window. Both monitors were at 100% scale;
+enlarged font metrics are not higher or mixed native DPI.
+
+All three managers were traversed forward and backward with empty and
+populated definitions in Chromium and WebView2. Disabled controls were
+skipped. Escape and both Close controls returned to the originating Manage
+button. A separate process took and returned focus on a private Windows
+desktop; completing a save while that process was active did not raise Imp.
+No visible-desktop Alt+Tab, installed HUD, or live MUD session was used.
+
+**Out of scope.** The contrast pass also found misses on Manage text in some
+states, light inactive option hovers, and dark Connection placeholders.
+These control/hint findings are separate from status text. Freshness design
+and fixed-origin desktop-edge placement remain deferred. Slice 27 remains
+in progress pending independent review and published-artifact acceptance.
 
 ## Working end to end
 
