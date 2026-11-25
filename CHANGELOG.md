@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.5.2] - 2026-11-25
+
+### Bug Fixes
+
+- wrap expanded HUD actions and keep Manage above scrolling lists ([6d84cd9](https://github.com/i-mud/imp/commit/6d84cd9e55120937c8a30abc9798abc1f6f5eff3))
+
 ## [0.5.1] - 2026-11-24
 
 ### Bug Fixes
