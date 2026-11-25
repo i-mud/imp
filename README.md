@@ -26,10 +26,10 @@ For Mudlet running on the same Windows machine as Imp, the simplest path is:
 MUD <-> Mudlet <-> Imp local node <-> Imp desktop
 ```
 
-Install Imp, launch it once so the Mudlet helper/package is provisioned, install
-`Imp.mpackage` in the Mudlet profile, and select **Local** connection mode. See
-[Windows installation](docs/install-windows.md#mudlet-integration) for the
-profile setup.
+Install Imp and launch it once to provision the Mudlet helper and package.
+Install `Imp.mpackage` in each Mudlet profile that should publish to Imp.
+The desktop defaults to **External**, so select **Local** in **Settings >
+Connection > Manage**, save, and restart Imp. See [Mudlet profile setup](docs/install-windows.md#mudlet-integration).
 
 For TinyFugue running on a VPS, the recommended remote setup is **Managed SSH**:
 
@@ -58,14 +58,18 @@ On the VPS:
   target); automatic Direct installs Caddy from the supported system apt
   repositories, so do not preinstall it;
 - `systemd --user`;
-- TinyFugue already installed and configured for GMCP; and
-- a TinyFugue build whose GMCP support includes the `GMCP_LOGIN` hook.
+- operator-installed, GMCP-capable TinyFugue **5.2.4 or later**, with the
+  upstream fix for freezes after actions; `5.2.4` is the live-verified build;
+- working GMCP negotiation and login. If your login scripts use `GMCP_LOGIN`
+  to negotiate GMCP and send `Char.Login`, the build must expose that hook;
+  Imp does not use the hook itself. A version string alone does not prove
+  that a custom build includes the hook or the upstream fix.
 
 On the desktop:
 
 - Windows x64;
-- Windows OpenSSH; and
-- an SSH host alias that can connect to the VPS non-interactively.
+- for Managed SSH, Windows OpenSSH and a [host alias that passes the BatchMode
+  preflight](docs/install-windows.md#managed-ssh).
 
 Released installations do **not** require an Imp source checkout, Node.js,
 npm, Rust, or `uv`.
@@ -91,54 +95,20 @@ cd imp-server-<version>
 ./install.sh
 ```
 
-A fresh interactive install asks whether the desktop will use **SSH**,
-**Direct WSS**, or **Install only / configure later**. For scripted installs,
-choose explicitly:
+A fresh interactive install asks which remote connection to configure. For
+this walkthrough select **SSH**; it provides the same loopback relay/feed
+setup for **Managed SSH** and **External SSH**, with no public edge. For
+scripts, use `./install.sh --connection ssh`. For **Direct WSS**,
+**Install only / configure later**, or an existing installation, see
+[server connection selection](deploy/README.md#connection-selection).
 
-```bash
-./install.sh --connection ssh
-./install.sh --connection direct --hostname imp.example.com
-./install.sh --connection none
-```
-
-SSH is the shared server configuration for both Managed SSH and External SSH.
-Automatic Direct setup requires a supported Debian/Ubuntu host and no
-operator-owned public edge. Both normal Direct topologies are supported:
-
-- **Directly addressed:** DNS points to a public address assigned to the server.
-- **Behind NAT:** DNS points to the router's public IPv4; forward router TCP 443
-  to the Imp server and add `--behind-nat` to the Direct installation command.
-
-Imp automatically installs and owns a dedicated Caddy edge; operator-managed
-Caddy is refused. It verifies trusted TLS and authenticated WSS before the
-provisioning command displays a token once.
-Never redirect or capture that terminal output. Fresh SSH and install-only
-installations leave Direct disabled. Existing installations with no connection
-option preserve their connection state and credentials without prompting.
-
-The installer uses an existing `~/.tfrc` by default. If it is absent and both
-stdin and stdout are interactive, it asks for the explicit path of an existing
-startup file; it never creates one or guesses a custom file. For a deterministic
-selection (required without an interactive terminal when the default is absent):
-
-```bash
-./install.sh --tf-startup "/path/to/your TinyFugue/startup-file"
-```
-
-An invalid or missing explicit file fails early. When startup inspection is safe,
-the installer backs up the selected file and prepends
-`/load ~/.config/imp/capture.tf` before its original commands. Duplicate detection
-covers one level of literal absolute or `~/` `/load` paths. An existing exact hook
-is preserved without rewriting; its ordering is not verified. Recognized unsafe
-includes, BOM-prefixed files, and legacy plain-world lists are left unchanged
-for manual setup. Arbitrary startup macros cannot be fully inspected.
-Confirm that your actual launch loads this file before any connection/login:
-`tf -f FILE` uses `FILE`, not the normal personal startup file. If managing the
-hook manually, put the load line first in a macro-format startup file. For a
-legacy plain-world list, put it after all world definitions but before connecting,
-or convert the definitions to `/addworld` first. Do not blindly prepend a command:
-that ends TinyFugue's legacy loader mode. Installer success alone does not
-establish runtime startup ordering.
+The installer selects an existing `~/.tfrc` by default. If your actual launch
+uses another startup file (for example, `tf -f"$HOME/path/to/.tfrc"`), pass
+that existing file to `--tf-startup`. If insertion is unsafe or the hook
+already exists, the installer leaves the file unchanged. In the startup file
+your actual invocation reads, confirm `/load ~/.config/imp/capture.tf` runs
+before any world connects or logs in. See [TinyFugue startup file setup](deploy/README.md#tinyfugue-startup-file)
+for manual placement, including legacy world lists.
 
 Check the required services:
 
@@ -171,9 +141,13 @@ loginctl enable-linger "$USER"
 
 Otherwise an administrator can enable lingering for your account.
 
-For an already-running TinyFugue, run `/load ~/.config/imp/capture.tf` now;
-installing files does not reload that process. A matching normalized checkpoint
-can restore previously captured identity without reconnecting to the MUD.
+Make sure the actual running TinyFugue process uses the corrected executable;
+upgrading a file on disk, reinstalling Imp, or reloading the hook does not
+patch an old TF process. Check the running process's executable, not just the
+`tf` found in a new shell. If TinyFugue is already running the corrected
+binary, installing Imp's files still does not load the hook in that session:
+run `/load ~/.config/imp/capture.tf`. A matching checkpoint can restore
+retained identity, but verify fresh GMCP before calling the feed live.
 
 For custom TinyFugue layouts, detailed verification, diagnostics, upgrades, or
 Direct WSS deployment, see [VPS deployment](deploy/README.md).
@@ -191,37 +165,20 @@ Launch Imp after installation.
 
 ### 3. Verify SSH access
 
-Before enabling Managed SSH, verify from PowerShell or another Windows terminal
-that your existing OpenSSH alias connects without an interactive password or
-host-key prompt:
-
-```text
-ssh <alias>
-```
-
-For example, if this works:
-
-```text
-ssh avatar
-```
-
-then `avatar` is the alias you enter in Imp.
+On Windows, [configure your OpenSSH host alias and run the BatchMode
+preflight](docs/install-windows.md#managed-ssh). Managed SSH cannot answer an
+interactive password, passphrase, or host-key prompt.
 
 ### 4. Connect Imp
 
-In Imp:
+Open **Settings > Connection > Manage**. Select **Managed**, enter the verified
+alias in **SSH target**, click **Save**, then quit and relaunch Imp. Imp starts
+and supervises its own SSH forward to the VPS loopback node.
 
-1. Open **Settings -> Connection**.
-2. Select **Managed**.
-3. Enter your OpenSSH host alias.
-4. Save.
-5. Restart Imp.
-
-Imp starts and supervises its own SSH forward to the loopback-only Imp node on
-the VPS.
-
-After TinyFugue is connected to the MUD, the HUD should begin showing live
-character state.
+The installed desktop version confirms only installation. **Connected to
+relay** without character data confirms only connectivity. Log in to the MUD
+through TinyFugue, select the intended world, and confirm the HUD shows that
+character and updates with live state. See [Windows verification](docs/install-windows.md#verify-the-installation).
 
 To create action shortcuts in either display mode, open **Actions** (swords
 icon) and choose **Manage**. The expanded HUD also has **Manage** in its footer.
@@ -246,12 +203,10 @@ Imp supports four desktop connection modes.
 
 ### Local
 
-Local mode consumes the desktop-owned same-host Imp node directly on
-`127.0.0.1:8787`. This is the normal mode for a local Mudlet integration.
-
-The local node is supervised independently of the HUD's selected connection
-mode, so local adapters may remain attached even while the HUD consumes another
-Imp node remotely.
+Local mode consumes the same-host Imp node on `127.0.0.1:8787`. Select it
+explicitly for [same-host Mudlet](docs/install-windows.md#local).
+Imp supervises its bundled node independently of the HUD's connection choice,
+so a local adapter can stay attached even while the HUD consumes a remote node.
 
 ### Managed SSH — recommended for remote SSH
 
@@ -265,51 +220,26 @@ For Unix source builds, jump/proxy clients must also remain foreground; the
 target's options do not propagate to OpenSSH's generated ProxyJump client. See
 the [foreground proxy configuration requirement](docs/architecture/processes/managed-runtime.md#desktop-tunnel-boundary).
 
-Imp does not store your SSH password or private key. The SSH local listener is
-`127.0.0.1:8789` and forwards the **entire remote relay TCP port** on `8787`;
-Imp uses its state/action routes, but SSH does not filter other relay routes.
+Imp does not store your SSH password or private key. It normally owns the
+loopback forward on `127.0.0.1:8789`, but never takes ownership of an existing
+forward. See [Managed SSH setup and ownership](docs/install-windows.md#managed-ssh).
 
 ### External SSH
 
-Use this when you want to manage the SSH process yourself:
-
-```bash
-ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
-```
-
-Leave Imp in **External** connection mode. It connects to the forwarded node at
-`127.0.0.1:8789`.
+External is the fresh-install default. Imp expects an endpoint at
+`127.0.0.1:8789`; you start, maintain, and stop the SSH process.
+See the [loopback-only forward example](docs/install-windows.md#external-ssh)
+for custom SSH daemon ports, host-key verification, and the trust boundary.
+Both SSH modes forward the entire remote relay TCP port, not just HUD routes.
 
 ### Direct WSS
 
-Direct mode does not use SSH. On a supported VPS or home Linux server, install
-from an interactive terminal with:
-
-```bash
-./install.sh --connection direct --hostname imp.example.com
-```
-
-For a home/router deployment, point one public A record at the router, remove
-AAAA records, and forward Internet TCP 443 to this server TCP 443:
-
-```bash
-./install.sh --connection direct --hostname imp.example.com --behind-nat
-```
-
-No router automation or NAT hairpin is required. Caddy uses TLS-ALPN-01 for
-public certificates; local readiness retains the public TLS identity while
-dialing the loopback edge. DNS/DDNS and the port forward remain operator-owned.
-
-The installer configures a narrowly owned Caddy edge, then delegates pairing to
-`imp-direct-wss`. Enter the displayed WSS URL and one-time pairing token in
-**Settings -> Connection -> Direct**, save, then restart Imp.
-
-An existing credential is preserved, never implicitly rotated; the installer
-reports that no new authenticated handoff was verified and gives recovery
-instructions. See [connection-oriented server deployment](deploy/README.md#connection-selection)
-for automatic-path restrictions and
-[`imp-direct-wss` recovery/manual deployment](deploy/README.md#direct-wss-gateway-advanced)
-for existing public edges, status, deliberate rotation, and bounded verification.
+Direct mode uses a publicly trusted TLS endpoint and an authenticated gateway
+instead of SSH. See [Direct server installation](deploy/README.md#connection-selection)
+for the supported automatic Caddy setup (including behind NAT) and
+[manual deployment or credential recovery](deploy/README.md#direct-wss-gateway-advanced)
+for existing public edges. To pair the desktop, follow
+[Windows Direct setup](docs/install-windows.md#direct-wss).
 
 ## What Imp provides
 
@@ -341,7 +271,7 @@ MUD <-> GMCP <-> Mudlet / TinyFugue
                +-> local HUD
 
 Managed/External remote consumption:
-Imp desktop :8789 -- SSH --> remote Imp node :8787
+Imp desktop -> 127.0.0.1:8789 -- SSH --> remote Imp node on 127.0.0.1:8787
 ```
 
 MUD-client integrations own client-specific lifecycle, foreground selection,
@@ -355,9 +285,9 @@ retained state, freshness, and the single-flight action broker.
 Outbound actions travel in the opposite direction and remain bound to the exact
 current client context. The final command write is client-specific.
 
-The node remains loopback-only. Remote UI access is a separate transport choice:
-Managed/External SSH forwards a consumer endpoint, while Direct WSS uses the
-separate authenticated gateway.
+The node remains loopback-only. Managed/External SSH forwards the entire
+relay TCP port without route filtering; Direct WSS uses the separate
+authenticated gateway.
 
 ## Installation and operation
 

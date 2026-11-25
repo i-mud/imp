@@ -3,9 +3,32 @@
 Canonical status for Imp. Platform-independent checks run in WSL2; the
 native shell is also runtime-verified on Windows 11 x64.
 
-## Last recorded published-artifact live acceptance
+## Slice 28 — External Alpha Readiness
 
-The last recorded published-artifact live acceptance used the
+**In progress.** The 28.0 audit is complete; it inspected
+[v0.5.3](https://github.com/i-mud/imp/releases/tag/v0.5.3), current
+instructions, and prior evidence without installing Imp or contacting
+testers. The separate [Slice 27 acceptance](#slice-27-implementation--complete)
+covers the operator's installed Windows checks, not independent onboarding.
+
+**28.1 is documentation only.** The External SSH example's omitted local
+bind address was a conditional hazard with nondefault OpenSSH client
+`GatewayPorts`, not an observed exposure. In an isolated Linux OpenSSH
+client/server check with `GatewayPorts=yes` and SSH on port 2222, the
+corrected example listened only on `127.0.0.1:8789`; the server's
+loopback port 8787 and the forwarded port 8789 returned the same fixture
+`/healthz` response.
+This checks the SSH bind and endpoint distinction, not native Windows
+behavior, Imp runtime acceptance, or live MUD state.
+
+No independent first-use success or external pilot outcomes have been
+recorded. Player-facing discovery and feedback work, the pilot, and its
+completion conditions are tracked in the
+[roadmap](roadmap.md#slice-28---external-alpha-readiness).
+
+## Slice 25 published-artifact live acceptance
+
+Published-artifact live acceptance for Slice 25 used the
 [`v0.4.1`](https://github.com/i-mud/imp/releases/tag/v0.4.1) Linux server bundle
 and the `v0.4.0` Windows x64 installer. The server needs no host Python. It ships
 SSH, Direct, and
@@ -476,8 +499,9 @@ isolated-character identity/vitals over WSS and a fresh/live feed observation
 passed, but relay/feed restart acceptance was **not tested**, stopped by failure.
 
 Minimal observed reproduction used the unchanged published 0.4.6 bundle,
-supported TF **5.2.3-6-ge164a1d**, early capture with the selected private startup
-file, isolated-character login and the actual Windows 0.4.6 Direct-WSS Look UI.
+the then-used TF build **5.2.3-6-ge164a1d**, early capture with the selected
+private startup file, isolated-character login and the actual Windows 0.4.6
+Direct-WSS Look UI.
 TF binary SHA256 was
 `705302c72060db7b408bb83cf61a7e529b32a710905e5b6407434116cd1b4728`.
 Read-only diagnosis found TF alive/sleeping in `anon_pipe_read`, with persistent

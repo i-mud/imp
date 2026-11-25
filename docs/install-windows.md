@@ -7,107 +7,121 @@ The Windows desktop application does not require Node.js, Rust, Python, WSL, or
 an Imp source checkout. For a local Mudlet setup, the installer carries the Imp
 node, Mudlet helper/runtime, and `Imp.mpackage`; no VPS installation is
 required. For remote TinyFugue deployments, install the Imp runtime separately
-from the self-contained Linux x86_64 server bundle; v0.4.0 needs no host Python.
-TinyFugue itself remains operator-installed.
-See [`../deploy/README.md`](../deploy/README.md).
+from the self-contained Linux x86_64 server bundle. TinyFugue itself remains
+operator-installed; see the [server prerequisites](../README.md#what-you-need).
 
 ## Install Imp
 
-1. Open the Imp GitHub release for the desired version.
+1. Open the [Imp GitHub release](https://github.com/i-mud/imp/releases) for the
+   desired version.
 2. Download the Windows x64 NSIS `.exe` installer attached to the release.
 3. Run the installer.
 4. Launch Imp.
-5. Open **Settings -> Connection** and configure one of the supported
-   transports below.
-6. Save the connection settings and restart Imp.
 
 The Windows installer is currently unsigned. Windows may display a reputation
 or SmartScreen warning depending on the download path and system configuration.
 
 The running native version is shown at the bottom of Imp's Settings panel.
+That confirms the desktop build, not that it is connected or receiving state.
+
+## Configure the connection
+
+In either HUD layout, open **Settings** (gear icon), then select **Manage** in
+the **Connection** section. Choose a mode below and fill in its fields. Click
+**Save**, then quit and relaunch Imp when it says **Saved. Restart Imp to use
+this connection.** Closing the manager does not save or restart Imp.
+
+**External** is the fresh-install default. Select **Local** explicitly for
+same-host Mudlet. For either remote SSH mode, choose **SSH**
+(`--connection ssh`) on the server: Managed and External differ only in who
+owns the SSH process on Windows, not in how the server is installed. See
+[server connection selection](../deploy/README.md#connection-selection) for
+all server choices.
 
 ## Local
 
-Local mode consumes the desktop-owned same-host Imp node on
-`127.0.0.1:8787`. It requires no SSH configuration and is the normal choice
-when Mudlet and Imp run on the same Windows machine.
-
-Select **Local**, save, and restart Imp. The local node itself is supervised in
-every connection mode, so a local Mudlet adapter remains attached even if the
-HUD is later switched to a remote node.
+Select **Local** for same-host Mudlet, then follow the [per-profile package
+setup](#mudlet-integration). Local mode consumes the same-host Imp node on
+`127.0.0.1:8787`; no VPS or SSH is required. Imp supervises its bundled node
+independently of the HUD's connection mode, so Mudlet can stay attached to
+that node even when the HUD consumes a different node remotely.
 
 ## Managed SSH
 
-Managed SSH is the simplest remote mode when the VPS is already reachable
-through a working OpenSSH host alias.
-
-Imp uses the Windows system OpenSSH client and does not store an SSH
+Managed SSH uses the Windows system OpenSSH client and your existing OpenSSH
+configuration, keys, `known_hosts`, and agent. Imp does not store your SSH
 password or private key.
 
-Before configuring Imp, verify from a terminal that the alias connects
-without an interactive password or host-key prompt:
+Create or reuse a `Host` entry in `%USERPROFILE%\.ssh\config`, for example:
 
-```text
-ssh <alias>
+```sshconfig
+Host imp-vps
+    HostName vps.example.com
+    User muduser
+    Port 2222
 ```
 
-Then:
+Use your VPS hostname, SSH user, and SSH daemon port (omit `Port` for the
+default 22). Set `IdentityFile` if this host needs a nondefault key. Verify the
+server's host-key fingerprint through a trusted channel before accepting it in
+OpenSSH. Make sure your key is usable without a prompt, for example by loading a
+passphrase-protected key into your agent. Then run this from PowerShell:
 
-1. Open **Settings -> Connection**.
-2. Select **Managed**.
-3. Enter that OpenSSH host alias.
-4. Save.
-5. Restart Imp.
+```powershell
+ssh -S none -o BatchMode=yes imp-vps exit
+```
 
-Imp starts and supervises its own SSH local-forward child. Closing
-Imp terminates only the SSH process it started.
+This must succeed without a password, passphrase, or host-key prompt. If it
+fails, fix OpenSSH access before configuring Imp. Select **Managed** in the
+[connection manager](#configure-the-connection), enter `imp-vps` in **SSH
+target**, save, and restart Imp.
+
+Imp starts, supervises, and reconnects its own SSH forward from
+`127.0.0.1:8789` on Windows to `127.0.0.1:8787` on the server. It does not
+reuse an OpenSSH master. If a usable forward already owns the local port,
+Managed can use that endpoint without taking ownership; it starts its own
+forward when the port becomes free. Quitting Imp stops only the SSH child it
+started, not an existing forward or the server services.
 
 ## External SSH
 
-External mode leaves SSH lifecycle entirely to the operator.
+External mode expects an existing endpoint at `127.0.0.1:8789`. For SSH, you
+start, maintain, and stop the forward yourself. From PowerShell:
 
-Start the forward yourself:
-
-```text
-ssh -N -L 8789:127.0.0.1:8787 <user>@<vps>
+```powershell
+ssh -N -T -o ExitOnForwardFailure=yes -p 2222 -L 127.0.0.1:8789:127.0.0.1:8787 muduser@vps.example.com
 ```
 
-Then leave Imp in **External** connection mode. Imp connects to the
-forwarded node at `127.0.0.1:8789`.
+Replace `muduser@vps.example.com` with your SSH login. `2222` is the example SSH
+daemon port; use the server's actual port or omit `-p 2222` for port 22 or an
+alias whose `Port` is already configured. Keep the released desktop's local
+forward port at `8789` and the server relay's destination port at `8787`.
+Verify the server host key as for [Managed SSH](#managed-ssh), and keep this
+SSH session running. `ExitOnForwardFailure` makes SSH fail when it cannot set up
+the forward; it does not verify that the relay or game feed is live.
 
-SSH forwards the entire remote relay TCP port, not just the routes used by the
-HUD. The local listener is loopback-only, but local users and processes can
-reach every forwarded relay route.
+Use **External** in the [connection manager](#configure-the-connection) (no
+change is needed on a fresh install). Imp does not start or stop this forward.
+
+Both SSH modes forward the **entire remote relay TCP port** without filtering
+routes or adding relay authentication. Loopback prevents network clients from
+reaching the listeners directly, but every host-local user or process can
+reach them. Use SSH forwarding only where local users and processes on both
+machines are mutually trusted.
 
 ## Direct WSS
 
-Direct mode does not use SSH. On a supported Debian/Ubuntu Linux server, select
-**Direct WSS** during the release-bundle installation, or run:
+Direct mode does not use SSH. Follow the [server's Direct WSS setup](../deploy/README.md#connection-selection)
+to obtain a publicly trusted WSS endpoint and a one-time pairing token. In the
+automatic setup, Imp provisions its own restricted Caddy edge and gateway.
+Never capture or redirect the provisioning output. An existing credential is
+preserved, not rotated or redisplayed, and does not imply a freshly verified
+pairing.
 
-```bash
-./install.sh --connection direct --hostname imp.example.com
-```
-
-For a router/NAT deployment, use exactly one public IPv4 A record with no AAAA,
-forward router TCP 443 to the server, and add `--behind-nat`. Imp installs and
-owns a restricted Caddy edge, obtains publicly trusted TLS, and delegates
-authenticated WSS verification and the one-time token handoff to
-`imp-direct-wss`. Do not preinstall Caddy for this automatic workflow. Never
-capture or redirect the provisioning output.
-
-Fresh SSH and install-only installations leave Direct disabled; explicitly
-choosing Direct intentionally provisions it. Existing credentials and connection
-state are preserved on an ordinary reinstall/upgrade. An existing credential is
-not implicitly rotated or redisplayed, and does not constitute a newly verified
-authenticated handoff.
-
-In **Settings -> Connection -> Direct**:
-
-1. Select **Direct**.
-2. Enter the public `wss:` state endpoint, ending in `/state`.
-3. Enter the 43-character pairing token.
-4. Save.
-5. Restart Imp.
+In the [connection manager](#configure-the-connection), select **Direct**,
+enter the public endpoint ending in `/state` in **WSS state URL**, and paste the
+43-character credential into **Pairing token**, not the URL. Save and restart
+Imp.
 
 The saved token is never displayed. Leave the token field blank when saving
 Direct settings to keep it; after server-side rotation, paste the replacement
@@ -137,13 +151,16 @@ Imp provisions the Mudlet package at:
 %LOCALAPPDATA%\Imp\mudlet\Imp.mpackage
 ```
 
-For each Mudlet profile that should publish to Imp, use Mudlet's package
-manager to install that `Imp.mpackage` once. Imp deliberately does not modify
-Mudlet profiles automatically.
+Use Mudlet's Package Manager to install `Imp.mpackage` once in **each profile**
+that should publish to Imp. Imp deliberately does not modify Mudlet profiles
+automatically. Connect and log in with GMCP enabled, and bring the intended
+profile to the foreground.
 
-The desktop owns the shared helper/runtime. Mudlet and its helper communicate
-only with the same-host Imp node on `127.0.0.1:8787`; they do not own SSH, WSS,
-pairing credentials, or other remote transport.
+Imp provisions the shared helper/runtime; the package starts that helper for
+its profile. The helper talks only to the same-host Imp node on
+`127.0.0.1:8787`. Mudlet and its helper do not own SSH, WSS, or pairing
+credentials. See [Mudlet integration](../integrations/mudlet/README.md#install-on-windows)
+for package upgrades.
 
 The desktop transport ports have distinct roles:
 
@@ -153,23 +170,26 @@ The desktop transport ports have distinct roles:
 127.0.0.1:8789  SSH consumer endpoint used by Managed or External SSH
 ```
 
-This means a local Mudlet profile can remain connected to the local node while
-the same Imp HUD consumes a different remote node through Managed SSH.
-
 ## Verify the installation
 
-After restarting Imp:
+1. **Installed:** Settings shows the expected running Imp version. This does
+   not establish connectivity.
+2. **Connected:** In the expanded HUD, **Connected to relay** / **Waiting for
+   game data…** means the desktop reached the relay but has no character data
+   yet. A working SSH session or open forward alone does not prove this.
+3. **Live:** Log in with your GMCP-enabled MUD client and select the intended
+   Mudlet profile or TinyFugue world. Confirm the HUD shows that character and
+   updates as game state changes. Retained vitals are not proof of live data.
+   If verifying actions, send one harmless, operator-approved command and
+   confirm the expected response in the MUD client.
 
-- Settings should show the installed Imp version.
-- The HUD should receive live character state.
-- Saved actions should be able to send an operator-approved command through the
-  active connection.
-
-If Managed SSH does not connect, first verify that `ssh <alias>` works
-non-interactively outside Imp.
-
-If Direct WSS does not connect, verify the public gateway URL, TLS certificate,
-and pairing token against the deployment documentation.
+For Managed SSH failures, repeat the [BatchMode preflight](#managed-ssh). For
+External SSH, verify your forward is still running and owns `127.0.0.1:8789`.
+For Direct WSS, check the public gateway URL, TLS certificate, and pairing
+credential against the [deployment guide](../deploy/README.md#direct-wss-gateway-advanced).
+If connected but not live, check the selected MUD client and its GMCP setup;
+see [server verification](../deploy/README.md#verifying-the-deployment) for
+TinyFugue.
 
 ## Release support boundary
 

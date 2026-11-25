@@ -129,10 +129,16 @@ npm run relay -- --port 0
 
 ## Debugging the HUD over the tunnel
 
-Point the browser build at a separate local port forwarded to the VPS node:
+In one workstation terminal, forward a separate loopback port to the VPS node.
+Replace `imp-vps` with your SSH host alias and leave the forward running:
 
 ```bash
-ssh -N -L 8790:127.0.0.1:8787 <user>@<vps>
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8790:127.0.0.1:8787 imp-vps
+```
+
+From the checkout in a second terminal:
+
+```bash
 VITE_IMP_SOURCE=relay VITE_IMP_RELAY_URL=ws://127.0.0.1:8790/state npm run dev
 ```
 
@@ -140,10 +146,11 @@ Use a free local port such as `8790`, not `8787`, which the desktop-owned local
 node uses. `VITE_IMP_RELAY_URL` sets the browser relay state URL; the matching
 action URL is derived from it.
 
-If the HUD shows "no data" while connected, inspect the forwarded node with
-`curl http://127.0.0.1:8790/healthz`: check whether a producer is attached and a
-snapshot has arrived. Socket liveness and feed liveness are separate signals -
-see
+If the HUD shows no data, run
+`curl --fail --silent --show-error http://127.0.0.1:8790/healthz` on the
+workstation. Check `producer_count` and `has_snapshot`; `feed: "stale"` can
+mean an attached but idle producer. HTTP reachability, snapshot availability,
+and feed liveness are separate signals; see
 [`architecture/processes/connection-lifecycle.md`](architecture/processes/connection-lifecycle.md).
 
 ## Native runtime ownership checks

@@ -29,7 +29,7 @@ The relay binds `127.0.0.1` by default and is never exposed publicly. Remote
 access is an SSH port-forward that the operator already has to trust:
 
 ```
-ssh -N -L <local-port>:127.0.0.1:<relay-port> <user>@<vps>
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:<local-port>:127.0.0.1:<relay-port> <user>@<vps>
 ```
 
 The relay implements no per-user authentication of its own.
