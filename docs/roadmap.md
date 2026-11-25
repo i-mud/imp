@@ -1027,14 +1027,13 @@ their own fresh character state during ordinary play without developer help.
 
 1. **28.0 — Alpha readiness audit (complete).** The owner accepted the
    read-only assessment of discovery, setup, first use, and support.
-2. **28.1 — Documentation correctness and safe onboarding (current).**
-   Correct existing `v0.5.3` instructions for External SSH's loopback bind,
-   TinyFugue build and startup requirements, SSH mode selection, Local
-   Mudlet setup, and troubleshooting. No application or release changes.
+2. **28.1 — Documentation correctness and safe onboarding (complete).**
+   [PR #62](https://github.com/i-mud/imp/pull/62) corrected External SSH's
+   loopback bind, TinyFugue prerequisites, connection setup and troubleshooting.
 3. **28.2 — Player-facing documentation, discoverability, and feedback
-   (planned).** Make product fit, official downloads, the two priority setup
-   paths, first-use checkpoints, and help easier to find. Improve feedback
-   intake without asking players for secrets or raw game data.
+   (in review).** The README routes players from the official download to
+   setup, first use and help. The bug report and alpha feedback forms ask
+   where players got to without requesting credentials or raw game data.
 4. **28.3 — External alpha pilot and evidence collection (planned).** Start
    with a small screened group, then widen to about 5–10 players. Record
    independent attempts before offering help, including where players stop,

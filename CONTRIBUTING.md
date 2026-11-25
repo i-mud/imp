@@ -29,7 +29,7 @@ Install the development dependencies:
 
 ```bash
 npm install
-uv sync --project services/relay
+uv sync --locked --project services/relay --managed-python
 uv sync --project integrations/common
 uv sync --project integrations/mudlet
 uv sync --project integrations/tinyfugue

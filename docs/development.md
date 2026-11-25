@@ -1,8 +1,8 @@
 # Development
 
-Practical procedures. The commands themselves live in [`../README.md`](../README.md);
-the reasoning behind the platform split lives in
-[`architecture/boundaries/platform-and-build.md`](architecture/boundaries/platform-and-build.md).
+Start with [development setup](../CONTRIBUTING.md#development-setup) for
+prerequisites and dependencies. See the [platform and build boundary](architecture/boundaries/platform-and-build.md)
+for the reasoning behind the platform split.
 
 ## The two loops
 
