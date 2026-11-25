@@ -21,14 +21,24 @@ loopback port 8787 and the forwarded port 8789 returned the same fixture
 This checks the SSH bind and endpoint distinction, not native Windows
 behavior, Imp runtime acceptance, or live MUD state.
 
-**28.2 is ready for review.** The README now starts with the Windows download,
+**28.2 merged in [PR #63](https://github.com/i-mud/imp/pull/63).** The README now starts with the Windows download,
 local Mudlet and remote TinyFugue routes, and first-use checks. The HUD image
 shows the published v0.5.3 frontend rendered in Chromium with synthetic data,
 not an installed Windows session. Public issue forms accept Local reports and
 player feedback without requiring logs.
 
-No external pilot or independent first-use success has been recorded. See the
-[roadmap](roadmap.md#slice-28---external-alpha-readiness) for the 28.3 criteria.
+**28.3 pilot preparation is drafted, not started.** The owner-side checks below
+remain unperformed because no disposable Windows guest or approved test
+character was available. No tester has been contacted, and no independent
+onboarding or gameplay feedback has been recorded.
+
+| Route                                 | First-cohort decision             | Owner gate still required                                                                                                                                                          |
+| ------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64 + local Mudlet            | Offer first after gate            | Fresh v0.5.3 install and launch, package import, explicit **Local**, matching live AVATAR state, a natural vital alert, one approved harmless action, and relaunch without replay. |
+| Windows x64 + TinyFugue, Managed SSH  | Screened noninteractive SSH users | Same desktop checks, matching server bundle, actual running TF 5.2.4+ executable and startup file, alias preflight, live state, one approved action, and relaunch without replay.  |
+| Windows x64 + TinyFugue, External SSH | Offer after native listener check | Same remote checks plus native Windows `127.0.0.1:8789` listener and forward-loss recovery without action replay.                                                                  |
+
+Direct WSS remains optional and is not a first-cohort gate.
 
 ## Slice 25 published-artifact live acceptance
 

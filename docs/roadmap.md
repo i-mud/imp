@@ -1031,14 +1031,27 @@ their own fresh character state during ordinary play without developer help.
    [PR #62](https://github.com/i-mud/imp/pull/62) corrected External SSH's
    loopback bind, TinyFugue prerequisites, connection setup and troubleshooting.
 3. **28.2 — Player-facing documentation, discoverability, and feedback
-   (in review).** The README routes players from the official download to
-   setup, first use and help. The bug report and alpha feedback forms ask
-   where players got to without requesting credentials or raw game data.
-4. **28.3 — External alpha pilot and evidence collection (planned).** Start
-   with a small screened group, then widen to about 5–10 players. Record
-   independent attempts before offering help, including where players stop,
-   when they first see live state, and what helps them during normal play.
-   Direct WSS is optional for this pilot.
+   (complete).** [PR #63](https://github.com/i-mud/imp/pull/63) routes players
+   from the official download to setup, first use and help. The bug report and
+   alpha feedback forms ask where players got to without requesting
+   credentials or raw game data.
+4. **28.3 — External alpha pilot and evidence collection (preparation).**
+   Owner checks gate each offered route before recruitment. Invite two or three
+   AVATAR players first, prioritizing local Mudlet and one suitable remote
+   TinyFugue player; include someone new to Imp and, if available, a player who
+   previously struggled with setup. Give only the repository link and the goal:
+   get your own live vitals onto the desktop HUD during ordinary play. Record the
+   independent attempt before helping.
+
+   Keep an anonymized record: route and versions, furthest independent
+   checkpoint, time to live state, first confusion, help needed, final outcome
+   (independent success, assisted success, incomplete, abandoned, or
+   safety/correctness blocker), gameplay value, and voluntary reuse. Triage by
+   installation, discoverability, comprehension, usability, correctness, or
+   missing functionality. Pause an affected route for host exposure,
+   credential disclosure, wrong-context action, replay, or misleading retained
+   state. Repeated independent stops justify targeted fixes, not an automatic
+   setup-wizard project. Direct WSS remains optional.
 
 **Completion conditions:** Publish the corrected public paths and feedback
 guidance; use published artifacts for an owner check of each offered route;
