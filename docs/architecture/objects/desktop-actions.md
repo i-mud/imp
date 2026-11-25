@@ -16,8 +16,8 @@ or game-state model.
   the one pending UI invocation, result feedback, and calls the injected
   `ActionSink`.
 - `apps/desktop/src/components/ActionDialog.svelte` edits the local definitions.
-- `apps/desktop/src/components/ActionBar.svelte` renders the expanded action
-  strip; `ActionsMenu.svelte` renders the Actions shortcut in both display
+- `apps/desktop/src/components/ActionBar.svelte` renders the expanded Actions
+  footer; `ActionsMenu.svelte` renders the Actions shortcut in both display
   modes. `Hud.svelte` renders the contextual palette and coordinates manager
   navigation.
 - `apps/desktop/src/lib/action/types.ts` remains the outbound desktop boundary.
@@ -54,7 +54,7 @@ secrets.
 
 The normal expanded HUD lays out at 320 logical pixels wide without stretching
 to the viewport height. `Hud.svelte` observes the panel's intrinsic border box,
-so the titlebar, vitals, optional target, action strip, feedback, and frame
+so the titlebar, vitals, optional target, Actions footer, feedback, and frame
 contribute to the measured height. It rounds the height up to a whole
 logical pixel, coalesces resize requests in `requestAnimationFrame`, and skips
 unchanged sizes within that branch. Leaving the branch cancels any pending
@@ -73,9 +73,9 @@ its borders.
 
 The expanded Actions footer and both **Actions** palettes place the title
 and **Manage** (`Manage actions` to assistive technology) above a
-full-width wrapping list. Manage stays outside the scroller even when no
-actions are saved or an action is pending. Settings does not link to the
-manager.
+full-width wrapping list, separated from the content by a theme divider.
+Manage stays outside the scroller even when no actions are saved or an action
+is pending. Settings does not link to the manager.
 
 The footer displays up to three rows of single-line buttons at the current
 font size, then scrolls vertically. Long labels truncate visually but
@@ -87,7 +87,7 @@ use theme-matched scrollbar thumbs and tracks.
 The manager measures its own content height and uses the originating HUD
 width: 320 logical pixels in expanded mode, or the compact baseline captured
 before replacing the palette. **Close** or **Escape** restores the originating
-action strip or palette and focuses its Manage button. Closing the compact
+Actions footer or palette and focuses its Manage button. Closing the compact
 palette then measures the current HUD content instead of reusing the manager width.
 The management header remains draggable; its Close button, fields, buttons,
 list, and scrollbar remain non-drag regions.
@@ -127,16 +127,33 @@ exact-context recheck and a non-erroring `send(command, false)` call.
 Neither meaning proves that the MUD server received or executed the command.
 `unknown` explicitly reports uncertain delivery and that Imp did not retry.
 
+Pending feedback stays visible until the call resolves. The `forwarded`
+message is removed after three seconds, with a short fade before removal
+unless reduced motion is requested. `rejected` and `unknown` feedback,
+including diagnostics, stays until superseded. Older dismissal timers cannot
+clear newer feedback. Results still use live announcements, and removing
+successful feedback releases its space for native HUD sizing.
+
 Persisted action definitions are reusable command templates. They are not queued
 dispatches, retained action history, stored relay payloads, retries, or reconnect
 resends. The Slice 7 no-replay contract is unchanged.
 
 ## Verification
 
-Status: verified for action definitions and dispatch. See
-[Slice 27 status](../../status.md#slice-27-implementation--in-progress) for the
-expanded layout, navigation, and card acceptance. The older rendered UI
-evidence below documents earlier layouts, not the current cards.
+Action definitions and dispatch were verified separately from the
+[Slice 27 HUD](../../status.md#slice-27-implementation--in-progress)
+acceptance. The operator passed 27/27 checks on published v0.5.1 (PRs 1–3)
+and separately passed 17/17 on published v0.5.2 (PR 4) on their existing
+Windows installation, with no adverse observations on the latter pass. PR 4's
+checklist covered the three-row footer, scrolling and access to all actions,
+target transitions, Manage placement and return, and themed scrollbars. These
+passes remain valid for unchanged behavior; the dividers and feedback
+expiration are pending separate acceptance.
+
+The Slice 27 pixel measurements come from Chromium and isolated Windows
+WebView2 mocks, not the installed-release checklist. Higher and mixed
+native DPI remain unverified. Freshness design, fixed-origin desktop-edge
+placement, and remaining control and placeholder contrast are deferred.
 
 The canonical automated gate (`npm run check`) covers definition validation,
 create/edit/delete persistence, the 64-definition limit, storage-write failure,
@@ -145,12 +162,12 @@ single in-flight call, and the result wording for `forwarded`, `rejected`, and
 `unknown`. Those checks do not establish layout, focus, or rendered interaction
 behavior; see the Slice 27 evidence for component and runtime coverage.
 
-Manual browser mock acceptance, driven through the network-free mock sink,
-covered the rendered surfaces instead: create/edit/delete through the
+Earlier manual browser mock acceptance, driven through the network-free mock
+sink, covered the then-current rendered surfaces: create/edit/delete through the
 management dialog, bounded expanded and compact action lists, panel
 coordination, focus restoration, and invocation from both modes.
 
-Windows-native acceptance verified a clean non-maximizable Tauri launch;
+Earlier Windows-native acceptance verified a clean non-maximizable Tauri launch;
 expanded and compact Settings, Actions, and management sizing/restoration;
 width-preserving attached panels; originating-width management; management
 dragging; the bounded wrapped compact palette and icon trigger; keyboard

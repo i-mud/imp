@@ -60,6 +60,9 @@
   type Panel = 'settings' | 'actions' | 'alerts';
   type ManagerOrigin = 'footer-actions' | 'actions' | 'alerts';
 
+  const ACTION_SUCCESS_MS = 3000;
+  const ACTION_FADE_MS = 150;
+
   let {
     model,
     actionSink,
@@ -95,6 +98,7 @@
     pendingActionId: null,
     feedback: null,
   });
+  let fadingFeedback = $state.raw<ActionInvocationState['feedback']>(null);
   const vitalAlertMemory: { current: Map<string, VitalAlertState> } = {
     current: new Map(),
   };
@@ -282,6 +286,24 @@
     const context = model.context;
     void invokeAction(actionInvocation, actionSink, context, definition);
   }
+
+  $effect(() => {
+    const feedback = actionInvocation.feedback;
+    if (feedback?.status !== 'forwarded') return;
+
+    const fade = setTimeout(() => {
+      if (actionInvocation.feedback === feedback) fadingFeedback = feedback;
+    }, ACTION_SUCCESS_MS - ACTION_FADE_MS);
+    const dismiss = setTimeout(() => {
+      if (actionInvocation.feedback === feedback) actionInvocation.feedback = null;
+    }, ACTION_SUCCESS_MS);
+
+    return () => {
+      clearTimeout(fade);
+      clearTimeout(dismiss);
+      fadingFeedback = null;
+    };
+  });
 
   function dismissPanel(): void {
     const dismissedPanel = openPanel;
@@ -480,11 +502,31 @@
   >
 {/snippet}
 
+{#snippet actionFeedback()}
+  <div
+    class="action-feedback-region"
+    class:action-feedback={actionInvocation.feedback !== null}
+    class:fading={fadingFeedback !== null && fadingFeedback === actionInvocation.feedback}
+    style:--action-feedback-fade={`${ACTION_FADE_MS}ms`}
+    aria-live="polite"
+    aria-atomic="true"
+  >
+    {actionInvocation.feedback?.message ?? ''}
+  </div>
+{/snippet}
+
 {#snippet actionList()}
-  <h2>Actions</h2>
-  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => openManager('actions')}>
-    Manage
-  </button>
+  <div class="contextual-heading">
+    <h2>Actions</h2>
+    <button
+      class="manage-btn"
+      type="button"
+      aria-label="Manage actions"
+      onclick={() => openManager('actions')}
+    >
+      Manage
+    </button>
+  </div>
   <div class="compact-action-list contextual-items">
     {#if actions.length === 0}
       <span class="compact-action-empty">No actions defined.</span>
@@ -499,11 +541,7 @@
       {/each}
     {/if}
   </div>
-  {#if actionInvocation.feedback}
-    <div class="action-feedback" aria-live="polite">
-      {actionInvocation.feedback}
-    </div>
-  {/if}
+  {@render actionFeedback()}
 {/snippet}
 
 <main
@@ -710,7 +748,7 @@
             <ActionBar
               definitions={actions}
               pendingActionId={actionInvocation.pendingActionId}
-              feedback={actionInvocation.feedback}
+              feedback={actionFeedback}
               oninvoke={invokeDefinition}
               onmanage={() => openManager('footer-actions')}
             />
@@ -875,6 +913,17 @@
     /* Wrapped labels must not contribute max-content window width. */
     width: 0;
     min-width: 100%;
+  }
+
+  .action-feedback-region:not(.action-feedback) {
+    position: absolute;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .action-feedback-region.fading {
+      opacity: 0;
+      transition: opacity var(--action-feedback-fade) ease-out;
+    }
   }
 
   .compact-action-list button {

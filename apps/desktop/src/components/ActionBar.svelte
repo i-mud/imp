@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   import type { ActionDefinition } from '../lib/action/definitions.ts';
 
   let {
@@ -10,17 +12,19 @@
   }: {
     definitions: readonly ActionDefinition[];
     pendingActionId: string | null;
-    feedback: string | null;
+    feedback: Snippet;
     oninvoke: (definition: ActionDefinition) => void;
     onmanage: () => void;
   } = $props();
 </script>
 
 <section class="action-bar contextual-list" aria-label="Saved actions">
-  <h2>Actions</h2>
-  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => onmanage()}
-    >Manage</button
-  >
+  <div class="contextual-heading">
+    <h2>Actions</h2>
+    <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => onmanage()}
+      >Manage</button
+    >
+  </div>
   <div class="action-buttons contextual-items">
     {#each definitions as definition (definition.id)}
       <button
@@ -35,9 +39,7 @@
       </button>
     {/each}
   </div>
-  {#if feedback}
-    <div class="action-feedback" aria-live="polite">{feedback}</div>
-  {/if}
+  {@render feedback()}
 </section>
 
 <style>

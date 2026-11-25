@@ -122,12 +122,20 @@
 
 .contextual-list {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
 }
 
-.contextual-list h2 {
+.contextual-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--divider);
+}
+
+.contextual-heading h2 {
   margin: 0;
   color: var(--muted);
   font-size: var(--font-sm);
