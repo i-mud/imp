@@ -21,8 +21,10 @@ Authentication is the first WebSocket text frame and is consumed by the
 gateway before it opens the loopback relay connection. The gateway stores no
 snapshot/text state and performs no action retry or replay.
 
-`GET /healthz` on the relay returns feed/state health.
-`GET /healthz` on the gateway returns only `{"status":"ok"}`.
+On the node host, `GET http://127.0.0.1:8787/healthz` returns `feed`,
+`producer_count`, `has_snapshot`, and `seq`. A retained snapshot does not
+establish feed liveness. `GET http://127.0.0.1:8788/healthz` on the gateway
+returns only `{"status":"ok"}`; public gateway health is optional.
 
 ## Installed gateway provisioning
 
@@ -36,7 +38,10 @@ require interactive stdin/stdout before mutation and show a newly issued token
 only for intentional terminal handoff. Status does not write or reveal
 credentials.
 
-The normal installer leaves the gateway disabled; upgrades preserve
-enablement and restart it only if already active. The operator remains
-responsible for public hostname, DNS, TLS, and the reverse-proxy route allowlist.
-See the [deployment guide](../../deploy/README.md#direct-wss-gateway-advanced).
+Fresh SSH and install-only installations leave the gateway disabled.
+Selecting Direct explicitly can provision it and the supported Caddy edge;
+ordinary upgrades preserve gateway enablement and restart it only if already
+active. The operator remains responsible for public DNS and reachability, and
+for TLS and route configuration when using an operator-managed edge. See
+[server connection selection](../../deploy/README.md#connection-selection)
+and [manual gateway provisioning](../../deploy/README.md#direct-wss-gateway-advanced).

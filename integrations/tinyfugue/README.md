@@ -76,7 +76,7 @@ selection (including no selection). Readiness itself grants no authority. Only
 that live selection can restore the matching cached state through `select`,
 which remains `stale` until fresh authoritative GMCP is published.
 
-## Running (normal production path)
+## Prerequisites
 
 The supported baseline for Imp's TinyFugue integration is GMCP-capable
 TinyFugue **5.2.4 or later**, which contains the quote-readiness correction.
@@ -90,27 +90,51 @@ observed with TF `5.2.2-3-g4f0ff34` and `5.2.3-6-ge164a1d`.
 
 A version string alone does not prove that a custom or downstream-patched build
 contains the correction, and GMCP capability does not imply it; confirm that the
-build's source includes the upstream change. Run the
-[native restart regression](#native-restart-regression) against the exact
-binary, released or custom, before live acceptance. Updating Imp or reloading
-its capture hook does not repair an already-running unpatched TF executable;
-only a TF process started from a corrected binary has the fix. If an action
-makes TF freeze, action delivery is uncertain: do not retry the action, replace
-its button, or restart a live session without an agreed recovery procedure.
+build's source includes the upstream change. If your login scripts use
+`GMCP_LOGIN` to negotiate capabilities and send `Char.Login`, confirm the build
+provides that hook too. Imp does not provide GMCP negotiation.
 
-Copy the unchanged hook to `~/.config/imp/capture.tf`, then put this line first
-in the macro-format startup file used by the operator's actual TinyFugue
-invocation, before any connection/login commands:
+Before installing the Imp server bundle, check what your usual launcher
+actually executes. In the shell, `type -a tf` shows aliases, functions, and
+binaries that may shadow a newer install. Check any wrapper, service, or
+terminal multiplexer launch command as well. On Linux, `readlink "/proc/$tf_pid/exe"`
+(with `tf_pid` set to the actual process PID) reports the running executable;
+check the startup banner and run the [native restart regression](#native-restart-regression)
+against that exact binary before live acceptance.
+
+Updating Imp or reloading its capture hook does not repair an already-running
+unpatched executable. Start a new TinyFugue process from the corrected binary
+before using Imp actions. If an action makes TF freeze, action delivery is
+uncertain: do not retry the action, replace its button, or restart a live
+session without an agreed recovery procedure.
+
+Identify the existing startup file selected by the normal launch command.
+[TinyFugue takes `-fFILE` as one argument](https://github.com/ingwarsw/tinyfugue/blob/5.2.4/src/main.c#L88-L111),
+not `-f FILE`. For example, if you launch:
+
+```sh
+tf -f"$HOME/avatar/tf/.tfrc" -n
+```
+
+the selected file is `$HOME/avatar/tf/.tfrc`, not `~/.tfrc`. Keep any other
+options that your actual invocation needs. Pass that same file as
+`--tf-startup "$HOME/avatar/tf/.tfrc"` to Imp's installer. Without `-f`,
+TinyFugue checks `.tfrc` then `tfrc` in the home directory before checking
+those names in the working directory.
+Confirm the hook will load before the startup path connects or logs in.
+
+## Running (normal production path)
+
+Use the [server installation guide](../../deploy/README.md#install-from-a-release-bundle)
+to install the relay, feed, and capture hook. If setup requires manual
+insertion, put this line first in the actual macro-format startup file, before
+any connection/login commands:
 
 ```text
 /load ~/.config/imp/capture.tf
 ```
 
-TinyFugue's `-f FILE` option loads `FILE` instead of the normal personal
-config. For example, when starting from `~/avatar/tf` with
-`tf -f./.tfrc -n`, the load belongs in `~/avatar/tf/.tfrc`, not an assumed
-`~/.tfrc`. Confirm that your actual invocation loads it early. The hook is additive:
-it does not replace the operator's GMCP negotiation or connection macros and
+Confirm your actual invocation loads it early. The hook is additive:
 sends no GMCP of its own.
 
 The installer uses an existing `~/.tfrc` by default. If it is absent, interactive
@@ -130,22 +154,17 @@ ordering nor the runtime invocation is verified by installation. See
 [`../../deploy/README.md`](../../deploy/README.md#tinyfugue-startup-file)
 for startup selection and the VPS systemd setup.
 
-For any already-running TinyFugue, run `/load ~/.config/imp/capture.tf` once
-after installation, before testing restart recovery. Installing the file does
-not reload that process. No MUD reconnect is needed when the matching normalized
-checkpoint still contains previously captured identity.
+If TinyFugue is already running the corrected executable, run
+`/load ~/.config/imp/capture.tf` once after installation, before testing
+restart recovery. Installing the file does not reload that process. No MUD
+reconnect is needed when the matching normalized checkpoint still contains
+previously captured identity.
 
 The hook writes to the fixed path `~/.local/state/imp/spool`.
 `imp-feed` creates that path as a symlink into its private runtime
-directory and owns everything downstream:
-
-```sh
-# Terminal 1
-uv run --directory services/relay imp-relay
-
-# Terminal 2
-uv run --directory integrations/tinyfugue imp-feed
-```
+directory and owns everything downstream. On an installed VPS, run the relay
+and feed using `systemctl --user start imp-relay.service imp-feed.service`.
+The normal installer starts them for you.
 
 `imp-feed` acquires the single-producer lock, creates the private drained
 spool, parses versioned events, keeps normalization isolated per world, and
@@ -186,9 +205,9 @@ the live session identity and counters; exiting TinyFugue closes its helper pipe
 
 ## GMCP login and character identity
 
-The operator's login scripts use `GMCP_LOGIN` to negotiate GMCP capabilities
-and send `Char.Login`. Use a TinyFugue build that provides this hook; a version
-number alone does not establish that it is compiled in.
+If the operator's login scripts use `GMCP_LOGIN` to negotiate GMCP capabilities
+and send `Char.Login`, confirm that the actual launched executable provides
+this hook; a version number alone does not establish that it is compiled in.
 
 Imp gets character identity from `Char.Status.character_name`. Without a
 matching checkpoint, it waits for GMCP to supply identity. Imp does not send
@@ -275,8 +294,10 @@ changing operator login/GMCP macros:
    `stat -c '%a %n' ~/.local/state/imp/context`; it must be mode `600`.
    `cat ~/.local/state/imp/context` must show exactly one newline-terminated
    `IMPCTX 2` record.
-3. Record `curl -s http://127.0.0.1:8787/healthz` and the HUD identity/vitals.
-   Normal foreground GMCP should move the feed to `live`.
+3. Record `curl --fail --silent --show-error http://127.0.0.1:8787/healthz`
+   on the server and compare the HUD identity/vitals. Normal foreground GMCP
+   should produce `producer_count: 1`, `feed: "live"`, `has_snapshot: true`,
+   and a non-null `seq`. A retained idle snapshot can instead report `"stale"`.
 4. Switch to another already-connected world without disconnecting either one.
    The marker's foreground generation must increase and the HUD must show only
    the selected world's cached or subsequent state. Background activity must
@@ -334,9 +355,10 @@ retiring a quote cannot make TF wait for an unresponsive relay to finish closing
 
 ### Transient received-text acceptance
 
-Status: **live-verified** on the VPS with TinyFugue
+Historical live verification on the VPS used TinyFugue
 `5.2.2-3-g4f0ff34`, pinned to
-`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`.
+`4f0ff34145b7c3f23e6233874d45ee102d98d9e9`. This is evidence of received-text
+behavior, not a supported build recommendation.
 
 The recorded run established the transient received-text boundary:
 
@@ -367,11 +389,12 @@ consumer of the transient `SourceEvent` boundary.
 
 ### Connectionless outbound acceptance check
 
-Status: **live-verified** in a fresh operator process on TinyFugue
+Historical live verification in a fresh operator process used TinyFugue
 `5.2.2-3-g4f0ff34`, pinned to
 `4f0ff34145b7c3f23e6233874d45ee102d98d9e9`. The recorded run used only
 connectionless echo worlds: it verifies the local bridge, synchronous fences,
-and helper lifecycle, not real MUD-server execution.
+and helper lifecycle, not real MUD-server execution. To repeat the procedure,
+use a [supported, corrected executable](#prerequisites).
 
 This procedure uses only TinyFugue connectionless echo worlds. No world has a
 host or port, so no MUD can receive the test data. On the VPS, load the shipped
@@ -384,11 +407,11 @@ hook and create two local echo worlds:
 /world ImpA
 ```
 
-Start the normal relay, feed, SSH forward, and desktop development runtime with
-`VITE_IMP_SOURCE=relay`. In the desktop browser's developer console, construct
-the runtime clients through the same async factory used by application
-initialization, and use its returned action sink; do not construct an `/action`
-frame or open a WebSocket by hand:
+Start the normal relay and feed. Follow [Debugging the HUD over the tunnel](../../docs/development.md#debugging-the-hud-over-the-tunnel)
+for the loopback SSH forward and browser development runtime. In that browser's
+developer console, construct the runtime clients through the same async
+factory used by application initialization, and use its returned action sink;
+do not construct an `/action` frame or open a WebSocket by hand:
 
 ```js
 const { actionSink } = await import('/src/lib/config.ts').then(({ createRuntimeClients }) =>
@@ -591,12 +614,14 @@ duplicate invocation was observed. Deterministic tests cover `unknown` result
 semantics and its no-retry wording, and manual browser mock acceptance checked
 that presentation; no live `unknown` outcome was deliberately manufactured.
 
-## Verified TinyFugue boundary
+## Historical TinyFugue boundary evidence
 
 The base hook contract was established against TinyFugue
 5.1.6-4-ga15a165 with `+gmcp` and `+GMCP`. The earlier VPS build
 5.2.2-3-g4f0ff34 additionally provided the `GMCP_LOGIN` hook the operator's
 [login scripts use](#gmcp-login-and-character-identity).
+These older builds established specific behaviors, not the supported baseline;
+see [prerequisites](#prerequisites) for the current executable requirement.
 `GMCP`, `CONNECT`, and `WORLD` supply the package/world events used by the
 versioned hook. Imp does not treat `GMCP_LOGIN` as a connection-generation
 boundary. `fwrite(filename, data)` appends data and a newline to a fixed

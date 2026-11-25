@@ -23,7 +23,7 @@ untrusted multi-user hosts are unsupported.
 ## Install from a release bundle
 
 The normal server installation does **not** require an Imp source checkout,
-Node.js, npm, Rust, `uv`, or any host Python on the VPS.
+Node.js, npm, Rust, `uv`, or a host Python installation.
 
 Binary compatibility and installer support are separate policies.
 
@@ -34,13 +34,9 @@ The frozen server binary requires:
   musl and other loaders are unsupported. The release build enforces this with
   an ABI gate over every bundled ELF (loader, needed libraries, and required
   glibc/libstdc++/CXXABI/GCC symbol versions);
-- the self-contained runtime inside the bundle (the published v0.4.0 release
-  and installer need no host Python installation to install, run, or recover).
-  A retained pre-frozen virtual-environment release kept as a rollback target
-  may still need its original interpreter/runtime to execute that old release
-  until migration succeeds and no legacy rollback is needed. The bundle neither
-  installs nor manages that interpreter; migration of a real historical host
-  remains live acceptance evidence.
+- the self-contained runtime inside the bundle. A retained pre-frozen release
+  kept as a rollback target may still need its original Python runtime; the
+  bundle neither installs nor manages that interpreter.
 
 The normal automatic installer is supported on Debian 12+ or Ubuntu 24.04+ with
 `systemd --user`, `apt`, and `iproute2`. Automatic Direct installs Caddy from the
@@ -48,9 +44,12 @@ system apt repositories; do not preinstall Caddy for this path. It is not
 supported on arbitrary Linux distributions. The installer adds no OS version
 check; this is a support statement, not a runtime gate.
 
-TinyFugue is a separate operator prerequisite: Imp ships only the client
-adapter. TinyFugue must already be installed with the GMCP capabilities
-described below.
+Before running `install.sh`, install **GMCP-capable TinyFugue 5.2.4 or later**
+and confirm that your normal launcher runs that executable and uses a known,
+existing startup file. Imp ships only the client adapter. Follow the
+[TinyFugue prerequisites](../integrations/tinyfugue/README.md#prerequisites)
+to verify the quote-readiness fix, GMCP support (including `GMCP_LOGIN` where
+your login scripts use it), and the actual executable and startup path.
 
 Download both server assets from the matching Imp GitHub release:
 
@@ -132,8 +131,9 @@ interactive terminal, select the existing file explicitly:
 ```
 
 `--tf-startup` is deterministic: an invalid or nonexistent file fails early,
-without falling back to another file. For `tf -f FILE`, select that actual
-`FILE`, not an assumed `~/.tfrc`.
+without falling back to another file. For `tf -f"$HOME/path/to/.tfrc"`, select
+that actual file, not an assumed `~/.tfrc`; TinyFugue takes `-f` and its path as
+one argument, whereas `--tf-startup` and its path are separate arguments.
 
 Always confirm that your actual TinyFugue invocation loads the selected file
 before any world connects or logs in. Installer success does not verify runtime
@@ -174,9 +174,11 @@ that old release directory in place; a failed activation restores the prior
 units, links, and `current` selection, so rollback returns to the old release
 with its historical runtime prerequisites.
 
-For any already-running TinyFugue, run `/load ~/.config/imp/capture.tf` once
-after installing this update, before testing live restart recovery. Installing
-the hook file does not reload TF.
+If TinyFugue is already running the corrected executable, run
+`/load ~/.config/imp/capture.tf` once after installing this update, before
+testing live restart recovery. Installing the hook file does not reload TF.
+If the running process is unpatched, start a new session with the corrected
+executable before using Imp actions; reloading the hook cannot fix the client.
 The updated hook owns one reload-safe `imp-feed-watch` quote job, using the
 stable CLI link above (packaged role `imp-server feed-watch`); it checks the
 private readiness marker once per second with bounded reads and exits when
@@ -201,7 +203,7 @@ Configuration and state directories are kept private to the user.
 ```
 
 - **ssh** installs the loopback relay/feed configuration shared by desktop
-  **Managed SSH** and **External SSH**. It creates no public edge. When services
+  **Managed** and **External** modes. It creates no public edge. When services
   are being started, explicit SSH stops/disables the gateway but retains
   `gateway.env`; it disables only an unchanged Imp-owned Caddy listener.
   Operator-owned web configuration is never disabled or modified. With
@@ -226,8 +228,21 @@ Configuration and state directories are kept private to the user.
   was enabled or active. `--no-start` uses that original snapshot while preserving
   existing connection services rather than applying an SSH transition.
 
-Managed/External SSH and Direct/Local remain desktop choices, not four server
-installation modes.
+For **Managed**, first confirm `ssh -o BatchMode=yes imp-vps true` succeeds
+from the workstation, replacing `imp-vps` with your OpenSSH `Host` alias.
+Open **Settings → Connection → Manage**, select **Managed**, and put the
+alias in **SSH target**. For **External**, select **External** instead and
+keep this manual forward running in a separate workstation terminal:
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8789:127.0.0.1:8787 imp-vps
+```
+
+Replace `imp-vps` with your SSH host alias. Desktop port `8789` forwards to
+server port `8787`; do not use desktop port `8787`, which belongs to the
+desktop-owned local node. In either desktop mode, select **Save**, then use
+**Quit Imp** in the tray and reopen Imp. **Managed**, **External**, **Direct**,
+and **Local** are desktop choices, not four server installation modes.
 
 ### Automatic Direct public edge
 
@@ -779,7 +794,7 @@ port `8788`; do not provision infrastructure or change Caddy, DNS, or TLS.
 6. Confirm setup completed its local minimal-health check and authenticated `/state` protocol-v2 hello; record `~/.local/bin/imp-direct-wss status`.
 7. Run the bounded verifier against the existing public `wss:` `/state` URL and confirm trusted TLS plus authenticated state access.
 8. Confirm the verifier receives 404 for privileged/unknown HTTP and WebSocket routes without an `Origin` header.
-9. Configure the existing desktop's Direct pairing through Settings with the public `/state` URL and the new token; save and restart.
+9. Configure the public `/state` URL and new token using [Direct desktop configuration](#direct-desktop-configuration).
 10. Confirm live MUD state arrives over Direct WSS.
 11. Send only the separately approved action through the desktop UI and independently observe its execution; do not synthesize an action in a probe.
 12. While the gateway is active, run `~/.local/bin/imp-direct-wss rotate`; receive the replacement token only by terminal handoff and confirm the service remains active.
@@ -791,17 +806,17 @@ port `8788`; do not provision infrastructure or change Caddy, DNS, or TLS.
 
 ### Direct desktop configuration
 
-On the workstation, open Imp and use **Settings -> Connection -> Direct**.
-
-Enter the public `wss:` state endpoint (for example `wss://imp.example/state`)
-and the 43-character pairing token displayed by `imp-direct-wss setup` or
-`rotate`. Save and restart Imp. The URL must use `wss:`, contain no
+On the workstation, open **Settings → Connection → Manage** and select
+**Direct**. Set **WSS state URL** to the public endpoint (for example
+`wss://imp.example.com/state`) and **Pairing token** to the 43-character token
+shown by Direct provisioning or deliberate rotation. Select **Save**, then use
+**Quit Imp** in the tray and reopen Imp. The URL must use `wss:`, contain no
 credentials, query, or fragment, and end in `/state`.
 
 The pairing token is persisted by the native application. Imp's settings-read
-path does not return the stored plaintext token merely to populate the form;
-an existing Direct token can therefore remain unchanged when editing other
-Direct settings.
+path does not return the stored plaintext token merely to populate the form.
+Leave the token field blank when editing Direct settings to keep the stored
+token, or enter the replacement after a deliberate rotation.
 
 Do not put the token in a URL, reverse-proxy configuration, `VITE_*`
 environment value, or WebView `localStorage`.
@@ -832,7 +847,7 @@ negotiation or connection macros. Repeated loads replace the named Imp
 definitions rather than duplicating them.
 The Imp `GMCP`, `CONNECT`, and `WORLD` hooks are defined at priority 2
 with fall-through (`-Fp2`) so they observe without consuming operator events.
-The operator's login scripts use `GMCP_LOGIN`; Imp does not hook it.
+Imp does not hook `GMCP_LOGIN`.
 Imp runs ahead of default priority-1 handlers such as `received-gmcp`; the
 `-F` flag lets those handlers run afterward. Two same-priority
 non-fall-through GMCP hooks previously lost whole events intermittently. Do
@@ -851,24 +866,17 @@ changes when the feed restarts. See
 [`integrations/tinyfugue/README.md`](../integrations/tinyfugue/README.md) for
 why this is a plain drained file rather than a FIFO.
 
-## TinyFugue GMCP login prerequisite
+## TinyFugue GMCP login and identity
 
-The operator's login scripts use `GMCP_LOGIN` to negotiate GMCP capabilities
-and send `Char.Login`. Use a TinyFugue build that exposes this hook. The
-verified build was `5.2.2-3-g4f0ff34`, but a version number does not establish
-that the hook is compiled in.
-
-Verify that the relay's `/healthz` reports `feed: live`, `has_snapshot: true`,
-and a non-null `seq`. Confirm the HUD shows the character currently connected
-in TinyFugue's selected world. A retained snapshot can have a non-null `seq`
-even when the feed is stale or down.
-
-The build, the upgrade and the login scripts are operator-owned; Imp
-never modifies them and sends no GMCP itself.
+Imp neither modifies the operator's login scripts nor sends GMCP. If those
+scripts negotiate capabilities and send `Char.Login` from `GMCP_LOGIN`, verify
+the hook works in the exact TinyFugue build and startup used for the session.
+The relay can't publish a new character snapshot until GMCP supplies identity;
+see [GMCP login and character identity](../integrations/tinyfugue/README.md#gmcp-login-and-character-identity).
 
 ## Verifying the deployment
 
-For the normal Managed/External SSH installation:
+On the server, verify the relay and feed in any connection mode:
 
 ```bash
 # Required services are active.
@@ -892,7 +900,7 @@ readlink ~/.local/share/imp/current
 readlink ~/.local/bin/imp-action-consumer
 
 # Relay process/state health.
-curl -s http://127.0.0.1:8787/healthz
+curl --fail --silent --show-error http://127.0.0.1:8787/healthz
 
 # The feed created the runtime spool and private context marker.
 ls -l ~/.local/state/imp/spool
@@ -905,6 +913,19 @@ journalctl --user \
   -n 50
 ```
 
+During foreground GMCP activity, expect `producer_count: 1`, `feed: "live"`,
+`has_snapshot: true`, and a non-null `seq`. Confirm the HUD shows the character
+in TinyFugue's selected world. After 10 seconds without a publish, `feed` may
+read `"stale"` while idle; a retained snapshot and sequence do not prove a
+live feed. `"down"` means no producer is attached.
+
+For **Managed** or **External**, run the equivalent probe on the workstation
+after starting the forward (use `curl.exe` in Windows PowerShell):
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8789/healthz
+```
+
 When Direct WSS is deliberately configured, additionally verify:
 
 ```bash
@@ -913,27 +934,32 @@ systemctl --user is-active imp-gateway.service
 ss -ltnp | grep -E ':8788[[:space:]]'
 # expect 127.0.0.1:8788, never a public bind
 
-curl -s http://127.0.0.1:8788/healthz
+curl --fail --silent --show-error http://127.0.0.1:8788/healthz
 # expect: {"status":"ok"}
+```
 
-# Verify the public TLS edge independently:
-# curl -s https://<public-host>/healthz
-# curl -s -o /dev/null -w '%{http_code}\n' https://<public-host>/ingest
-# the second command must report 404
+From a machine that can reach the public address (outside the NAT if it does
+not support hairpinning), replace `imp.example.com` with your hostname:
+
+```bash
+curl --silent --show-error --include https://imp.example.com/healthz
+curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' https://imp.example.com/ingest
+# /healthz: 200 with {"status":"ok"}, or 404 if intentionally not exposed
+# /ingest must return 404
 ```
 
 ## Common failure diagnostics
 
-| Symptom                                                        | Check                                                                                                                                                                                                                                           |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                         |
-| Relay reachable but no HUD data                                | In SSH mode, check `curl http://127.0.0.1:8787/healthz` through the forward. In Direct mode, check both local gateway health and the public TLS `/healthz`; then confirm a relay producer is attached and inspect `imp-feed.service`.           |
-| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging. |
-| Direct WSS path is unsafe or unit policy unsupported           | `imp-direct-wss status` names the directory and reason. For a shared group-writable or world-writable ancestor, remove that write access or give the directory the user's private group; do not loosen `~/.config/imp` or `gateway.env`.        |
-| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                              |
-| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                           |
-| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                  |
-| Feed consuming GMCP but relay reports `has_snapshot: false`    | Confirm `imp_capture_gmcp` is loaded and use [bounded diagnostic capture](#diagnostic-raw-capture-opt-in-vps) to check for character identity and vitals.                                                                                       |
+| Symptom                                                        | Check                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `imp-feed` exits immediately with "another Imp feed holds ..." | A duplicate instance is running - manual invocation while the service is active, or a second service instance. `systemctl --user status imp-feed.service`, then stop the extra process.                                                                    |
+| Relay reachable but no HUD data                                | Check the server relay's `/healthz` on `8787` for a producer and snapshot. In SSH modes, also check workstation `127.0.0.1:8789/healthz`. In Direct mode, check the gateway on `8788` and use the [bounded public verifier](#bounded-public-verification). |
+| Direct WSS repeatedly reconnects                               | Confirm the public certificate is trusted/current, the reverse proxy forwards `/state` and `/action` to `127.0.0.1:8788`, and the desktop pairing token matches the digest in `gateway.env`. Never move the token into the URL while debugging.            |
+| Direct WSS path is unsafe or unit policy unsupported           | `imp-direct-wss status` names the directory and reason. For a shared group-writable or world-writable ancestor, remove that write access or give the directory the user's private group; do not loosen `~/.config/imp` or `gateway.env`.                   |
+| TinyFugue shows an `fwrite` error line                         | The feed is down or the hook symlink target directory is missing. TinyFugue is not blocked by this - it is the intended fail-open behaviour - but no HUD update reaches the relay until the feed is running again.                                         |
+| Services do not survive a reboot                               | Confirm `loginctl show-user "$USER" -p Linger` reports `Linger=yes`; without it, user units never start without an interactive login.                                                                                                                      |
+| Relay bound to more than loopback                              | The current relay refuses every non-loopback host and has no override. Restore the shipped unit and executable if this occurs.                                                                                                                             |
+| Feed consuming GMCP but relay reports `has_snapshot: false`    | Confirm `imp_capture_gmcp` is loaded and use [bounded diagnostic capture](#diagnostic-raw-capture-opt-in-vps) to check for character identity and vitals.                                                                                                  |
 
 ## Diagnostic raw capture (opt-in, VPS)
 
@@ -956,8 +982,9 @@ ExecStart=%h/.local/share/imp/current/bin/imp-server feed --diagnostic-capture
 Then `systemctl --user daemon-reload && systemctl --user restart
 imp-feed.service`. Files land privately under
 `~/.local/state/imp/diagnostics/`, rotate at 1 MiB, and keep at most 5
-files. Remove the override (`systemctl --user revert imp-feed.service`)
-when done; this is a debugging aid, not a default.
+files. When done, remove the diagnostic override without discarding any
+unrelated drop-ins, then reload and restart the feed again. The override is
+a debugging aid, not a default.
 
 ## Development checkout deployment
 

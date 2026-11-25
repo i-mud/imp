@@ -1,7 +1,7 @@
 # Roadmap
 
-Tracks completed implementation slices, the current selection point, and
-provisional work queued behind it.
+Tracks completed implementation slices, the active slice, and provisional
+work queued behind it.
 
 - What exists today, and the evidence behind it, lives in
   [`status.md`](status.md). If a claim appears in both files, `status.md` wins.
@@ -14,38 +14,39 @@ claims belong in `status.md` and the relevant architecture documents.
 
 ## Progress
 
-| Work                                                  | Status      | Historical marker                             |
-| ----------------------------------------------------- | ----------- | --------------------------------------------- |
-| Slice 1 - Bootstrap baseline                          | ✅ Complete | `bootstrap-baseline`                          |
-| Slice 2 - Real GMCP end to end                        | ✅ Complete | `real-gmcp-e2e`                               |
-| Post-Slice 2 - Managed runtime implementation         | ✅ Complete | `managed-runtime`                             |
-| Slice 3 - CI baseline                                 | ✅ Complete | `ci-baseline`                                 |
-| Slice 4 - Managed runtime verification                | ✅ Complete | `managed-runtime-e2e`                         |
-| Slice 5 - HUD UI refinement                           | ✅ Complete | `hud-ui-refinement`                           |
-| Slice 6 - Alerts and window polish                    | ✅ Complete | `alerts-window-polish`                        |
-| Slice 7 - Trusted outbound actions                    | ✅ Complete | `trusted-outbound-actions`                    |
-| Slice 8 - Configurable action UI                      | ✅ Complete | `configurable-action-ui`                      |
-| Slice 9 - Managed tunnel takeover                     | ✅ Complete | `managed-tunnel-takeover`                     |
-| Post-Slice 9 - Desktop polish and runtime hardening   | ✅ Complete | `desktop-polish`; later work untagged         |
-| Slice 10 - Configurable notification triggers         | ✅ Complete | `configurable-notification-triggers`          |
-| Slice 11 - Authenticated WSS transport                | ✅ Complete | `authenticated-wss-transport`                 |
-| Slice 12 - Native connection settings                 | ✅ Complete | `native-connection-settings`                  |
-| Slice 13 - First release readiness                    | ✅ Complete | `first-release-readiness`                     |
-| Slice 14 - Imp rename                                 | ✅ Complete | `imp-rename`                                  |
-| Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`                    |
-| Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged                 |
-| Slice 16 - Mudlet and local client integration        | ✅ Complete | Untagged; slug below                          |
-| Slice 17 - Input boundary correctness                 | Complete    | `input-boundary-correctness`                  |
-| Slice 18 - Freshness correctness                      | Complete    | `freshness-correctness`                       |
-| Slice 19 - Subscriber isolation                       | Complete    | `subscriber-isolation`                        |
-| Slice 20 - Diagnostic hardening                       | Complete    | `diagnostic-hardening`                        |
-| Slice 21 - Native runtime ownership                   | Complete    | `native-runtime-ownership`                    |
-| Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`                      |
-| Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`             |
-| Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2`         |
-| Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1`         |
-| Slice 26 - Installation reliability and onboarding    | Complete    | No slice marker; accepted in `v0.4.6`         |
-| Slice 27 - HUD layout and usability polish            | Complete    | No slice marker; final acceptance in `v0.5.3` |
+| Work                                                                        | Status      | Historical marker                             |
+| --------------------------------------------------------------------------- | ----------- | --------------------------------------------- |
+| Slice 1 - Bootstrap baseline                                                | ✅ Complete | `bootstrap-baseline`                          |
+| Slice 2 - Real GMCP end to end                                              | ✅ Complete | `real-gmcp-e2e`                               |
+| Post-Slice 2 - Managed runtime implementation                               | ✅ Complete | `managed-runtime`                             |
+| Slice 3 - CI baseline                                                       | ✅ Complete | `ci-baseline`                                 |
+| Slice 4 - Managed runtime verification                                      | ✅ Complete | `managed-runtime-e2e`                         |
+| Slice 5 - HUD UI refinement                                                 | ✅ Complete | `hud-ui-refinement`                           |
+| Slice 6 - Alerts and window polish                                          | ✅ Complete | `alerts-window-polish`                        |
+| Slice 7 - Trusted outbound actions                                          | ✅ Complete | `trusted-outbound-actions`                    |
+| Slice 8 - Configurable action UI                                            | ✅ Complete | `configurable-action-ui`                      |
+| Slice 9 - Managed tunnel takeover                                           | ✅ Complete | `managed-tunnel-takeover`                     |
+| Post-Slice 9 - Desktop polish and runtime hardening                         | ✅ Complete | `desktop-polish`; later work untagged         |
+| Slice 10 - Configurable notification triggers                               | ✅ Complete | `configurable-notification-triggers`          |
+| Slice 11 - Authenticated WSS transport                                      | ✅ Complete | `authenticated-wss-transport`                 |
+| Slice 12 - Native connection settings                                       | ✅ Complete | `native-connection-settings`                  |
+| Slice 13 - First release readiness                                          | ✅ Complete | `first-release-readiness`                     |
+| Slice 14 - Imp rename                                                       | ✅ Complete | `imp-rename`                                  |
+| Slice 15 - Server installation / bootstrap                                  | ✅ Complete | `server-install-bootstrap`                    |
+| Post-Slice 15 - Public release and release automation                       | ✅ Complete | `v0.1.0`; later work untagged                 |
+| Slice 16 - Mudlet and local client integration                              | ✅ Complete | Untagged; slug below                          |
+| Slice 17 - Input boundary correctness                                       | Complete    | `input-boundary-correctness`                  |
+| Slice 18 - Freshness correctness                                            | Complete    | `freshness-correctness`                       |
+| Slice 19 - Subscriber isolation                                             | Complete    | `subscriber-isolation`                        |
+| Slice 20 - Diagnostic hardening                                             | Complete    | `diagnostic-hardening`                        |
+| Slice 21 - Native runtime ownership                                         | Complete    | `native-runtime-ownership`                    |
+| Slice 22 - Client-neutral UI and docs polish                                | Complete    | `client-neutral-ui-docs`                      |
+| Slice 23 - ActionBroker timeout validation                                  | Complete    | `actionbroker-timeout-validation`             |
+| Slice 24 - Direct WSS provisioning and onboarding                           | Complete    | No slice marker; accepted in `v0.3.2`         |
+| Slice 25 - Connection-oriented server installation                          | Complete    | No slice marker; accepted in `v0.4.1`         |
+| Slice 26 - Installation reliability and onboarding                          | Complete    | No slice marker; accepted in `v0.4.6`         |
+| Slice 27 - HUD layout and usability polish                                  | Complete    | No slice marker; final acceptance in `v0.5.3` |
+| [Slice 28 - External Alpha Readiness](#slice-28---external-alpha-readiness) | In progress | No slice marker                               |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -59,7 +60,7 @@ in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
 `v0.4.1`, plus retained follow-ups. Slice 26 is complete: published `v0.4.6`
 was accepted with TinyFugue 5.2.4. Slice 27 is complete with three separate
 installed Windows acceptance passes on published `v0.5.1`, `v0.5.2`, and
-`v0.5.3`. No next slice has been selected; candidates remain provisional.
+`v0.5.3`. Slice 28 is active; later candidates remain provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -1016,6 +1017,42 @@ existing Windows installation:
 
 The earlier passes remain valid for unchanged behavior. The four HUD
 follow-ups below remain provisional and do not block closure.
+
+## Slice 28 - External Alpha Readiness
+
+Prepare for a targeted alpha with AVATAR players using local Mudlet on
+Windows or TinyFugue on remote Linux with a Windows desktop. The goal is for
+players unfamiliar with Imp to find it, choose the right setup, and see
+their own fresh character state during ordinary play without developer help.
+
+1. **28.0 — Alpha readiness audit (complete).** The owner accepted the
+   read-only assessment of discovery, setup, first use, and support.
+2. **28.1 — Documentation correctness and safe onboarding (current).**
+   Correct existing `v0.5.3` instructions for External SSH's loopback bind,
+   TinyFugue build and startup requirements, SSH mode selection, Local
+   Mudlet setup, and troubleshooting. No application or release changes.
+3. **28.2 — Player-facing documentation, discoverability, and feedback
+   (planned).** Make product fit, official downloads, the two priority setup
+   paths, first-use checkpoints, and help easier to find. Improve feedback
+   intake without asking players for secrets or raw game data.
+4. **28.3 — External alpha pilot and evidence collection (planned).** Start
+   with a small screened group, then widen to about 5–10 players. Record
+   independent attempts before offering help, including where players stop,
+   when they first see live state, and what helps them during normal play.
+   Direct WSS is optional for this pilot.
+
+**Completion conditions:** Publish the corrected public paths and feedback
+guidance; use published artifacts for an owner check of each offered route;
+and document pilot outcomes, including at least one previously unfamiliar
+player on each priority path who reaches matching, freshly updated
+character state without assistance. An installer launch, a reachable node,
+or a retained snapshot is not a live success. Pause any route with unsafe
+setup or repeated independent blockers rather than counting assisted
+success as an independent pass. Use pilot feedback to prioritize follow-up
+work, not to pre-commit to a first-run redesign.
+
+See [implementation status](status.md#slice-28--external-alpha-readiness)
+for observed evidence and what remains unverified.
 
 ## Candidate work
 

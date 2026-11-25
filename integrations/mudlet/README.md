@@ -21,10 +21,22 @@ stable path:
 Use Mudlet's package manager to install that file once in each profile that
 should publish to Imp. Imp does not modify Mudlet profiles automatically.
 
+To show the same-host Mudlet session in the desktop HUD, open **Settings →
+Connection → Manage**, choose **Local**, and select **Save**. Use **Quit Imp**
+in the tray, then reopen Imp. No server bundle, SSH forward, or Direct pairing
+is needed for this setup.
+
 The package starts the desktop-provisioned helper from Imp's versioned local
 runtime. The helper always talks to the same-host Imp node on
 `127.0.0.1:8787`; the Mudlet package never owns SSH, TLS, pairing credentials,
 or other remote transport.
+
+The local node runs in every connection mode. If the HUD is set to a remote
+connection, Mudlet still publishes to the local node; the HUD shows its
+selected remote source instead. On the Windows machine,
+`curl.exe --fail --silent --show-error http://127.0.0.1:8787/healthz` checks
+the local node. A foreground profile that has received character state should
+attach a producer and publish a snapshot; `"stale"` can be normal while idle.
 
 When a later Imp version carries an updated `Imp.mpackage`, launching that
 desktop version refreshes the stable package file above. Reinstall that file in
