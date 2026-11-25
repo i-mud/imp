@@ -82,7 +82,6 @@ reuse an OpenSSH master. If a usable forward already owns the local port,
 Managed can use that endpoint without taking ownership; it starts its own
 forward when the port becomes free. Quitting Imp stops only the SSH child it
 started, not an existing forward or the server services.
-Imp terminates only the SSH process it started.
 
 ## External SSH
 

@@ -228,8 +228,8 @@ Configuration and state directories are kept private to the user.
   was enabled or active. `--no-start` uses that original snapshot while preserving
   existing connection services rather than applying an SSH transition.
 
-For **Managed**, first confirm `ssh -o BatchMode=yes imp-vps true` succeeds
-from the workstation, replacing `imp-vps` with your OpenSSH `Host` alias.
+For **Managed**, run the [Windows OpenSSH alias preflight](../docs/install-windows.md#managed-ssh)
+from the workstation before configuring Imp.
 Open **Settings → Connection → Manage**, select **Managed**, and put the
 alias in **SSH target**. For **External**, select **External** instead and
 keep this manual forward running in a separate workstation terminal:
