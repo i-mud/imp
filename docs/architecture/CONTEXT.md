@@ -50,8 +50,9 @@ interpretation is shared rather than duplicated between them.
 | TinyFugue integration                   | `integrations/tinyfugue/`   |
 | VPS systemd units, install              | `deploy/`                   |
 | Cross-component e2e check               | `tests/e2e/`                |
-| Commands, prerequisites                 | `README.md`                 |
-| Platform/build strategy                 | `docs/development.md`       |
+| Player downloads, setup and first use   | `README.md`                 |
+| Development prerequisites and setup     | `CONTRIBUTING.md`           |
+| Development commands and platforms      | `docs/development.md`       |
 | Current implementation and verification | `docs/status.md`            |
 | Planned slices and deferred future work | `docs/roadmap.md`           |
 | Historical repository audits            | `docs/audits.md`            |

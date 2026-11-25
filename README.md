@@ -21,6 +21,10 @@ and macOS desktops are source-build targets. The **Linux x86_64 server bundle**
 is for the host running TinyFugue; it does not include TinyFugue. Use matching
 release versions for remote setup. Neither route needs development tools.
 
+For every connection mode, use Imp only on computers where you trust the other
+users and programs. Imp's local service does not ask them to sign in. This applies
+to your Windows PC and any Linux host running Imp, even with SSH or Direct WSS.
+
 Choose the route based on where your MUD client runs:
 [same-PC Mudlet](#local-mudlet-on-windows) or [remote TinyFugue](#remote-tinyfugue-on-linux).
 
@@ -55,7 +59,6 @@ then log in with GMCP enabled and select your TinyFugue world.
   and keep the forward running. If SSH needs a password or passphrase, enter
   it in your terminal, not in Imp.
 
-For SSH, both hosts must have mutually trusted local users and processes.
 **Direct** skips SSH: follow the [Direct WSS server setup](deploy/README.md#connection-selection)
 and [Windows pairing guide](docs/install-windows.md#direct-wss) for a publicly
 trusted WSS endpoint and private pairing token. Don't expose the relay itself.
@@ -72,6 +75,13 @@ actions footer. Use Expanded to check setup:
    reached the relay but hasn't received character data.
 3. **Live:** The HUD shows your intended character and updates as vitals change
    during play. An open SSH session or retained vitals is not proof of live data.
+
+In either layout, hover over the status dot beside the character name to read
+its label. **Connecting to relay** or **Reconnecting to relay** means Imp is
+trying to connect. **Waiting for game data** means it is connected but waiting;
+**No game feed** means no client is feeding the node. **Game data live** means
+updates are fresh. **Game feed stalled** means no recent update: this can be
+normal while idle, even though the last values remain visible.
 
 - **Alert:** Open **Alerts** (bell) → **Manage**. Label it `Low health`,
   choose **Vitals**, set **Health** to a `50` percent threshold, choose
