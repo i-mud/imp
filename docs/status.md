@@ -585,7 +585,7 @@ Retained limitations, none blocking:
 - Arbitrary nested-include detection, real-runtime CI and live native SSH
   connectivity remain open follow-ups.
 
-## Slice 27 implementation — in progress
+## Slice 27 implementation — complete
 
 ### PR 1 — Expanded HUD layout (27-01)
 
@@ -808,7 +808,10 @@ The separate v0.5.1 and v0.5.2 installed-release passes remain valid evidence
 for unchanged behavior. The pixel measurements above come from Chromium and
 isolated native runs, not the operator's checklists.
 
-### Final polish — pending acceptance
+### PR 5 — Header dividers and transient success feedback
+
+[PR #60](https://github.com/i-mud/imp/pull/60) merged in `690c7b4`.
+The operator approved the final polish in the browser preview before merge.
 
 A subtle divider using the existing theme token separates the title and Manage
 row from the content in the Actions and Alerts cards in both display modes,
@@ -824,10 +827,28 @@ dismissal cannot clear the new message. Live announcements remain in place;
 removal frees the feedback space so the HUD can shrink naturally. This changes
 presentation only, not invocation, delivery, retries, or persistence.
 
-Slice 27 remains in progress until this patch is accepted. Verify expiration,
-overlapping feedback lifecycles, and failure retention; check the affected
-layouts in both themes and display modes, including native shrink after
-dismissal. The complete Slice 27 acceptance matrix need not be repeated.
+**Automated and Chromium evidence.** All 68 focused action-invocation and
+HUD-management tests passed, including expiration, overlapping lifecycles
+and failure retention; `npm run check` passed. Chromium covered 80 layout
+cases and 24 feedback-expiry cases, including reduced motion.
+
+**Isolated native evidence.** Six Windows/Tauri cases at 100% scale tested
+three views in each theme. Widths stayed fixed; both themes produced the
+same heights. Successful feedback expired after 3,001–3,016 ms.
+
+| View             | Width (px) | Height before → shown → expired (px) |
+| ---------------- | ---------: | ------------------------------------ |
+| Expanded footer  |        320 | 205 → 227 → 205                      |
+| Expanded Actions |        320 | 101 → 123 → 101                      |
+| Compact Actions  |        387 | 97 → 119 → 97                        |
+
+**Installed-release operator evidence.** The final smoke test on published
+[v0.5.3](https://github.com/i-mud/imp/releases/tag/v0.5.3) passed **4/4**
+with no adverse observations. Imp launched and Settings displayed v0.5.3;
+the Actions and Alerts dividers looked correct; successful feedback faded
+and disappeared after three seconds; and the HUD returned to its original
+height. This completes Slice 27 alongside the separate v0.5.1 (27/27) and
+v0.5.2 (17/17) installed-release passes recorded above.
 
 **Deferred.** The contrast pass also found misses on Manage text in some
 states, light inactive option hovers, and dark Connection placeholders.

@@ -140,15 +140,16 @@ resends. The Slice 7 no-replay contract is unchanged.
 
 ## Verification
 
-Action definitions and dispatch were verified separately from the
-[Slice 27 HUD](../../status.md#slice-27-implementation--in-progress)
-acceptance. The operator passed 27/27 checks on published v0.5.1 (PRs 1–3)
-and separately passed 17/17 on published v0.5.2 (PR 4) on their existing
-Windows installation, with no adverse observations on the latter pass. PR 4's
+Action definitions and dispatch were verified separately from the completed
+[Slice 27 HUD](../../status.md#slice-27-implementation--complete) acceptance.
+On their existing Windows installation, the operator passed 27/27 checks on
+published v0.5.1 (PRs 1–3), 17/17 on v0.5.2 (PR 4), and 4/4 on v0.5.3
+(PR 5), with no adverse observations on the latter two passes. PR 4's
 checklist covered the three-row footer, scrolling and access to all actions,
-target transitions, Manage placement and return, and themed scrollbars. These
-passes remain valid for unchanged behavior; the dividers and feedback
-expiration are pending separate acceptance.
+target transitions, Manage placement and return, and themed scrollbars.
+The final v0.5.3 smoke verified the card dividers, successful feedback
+disappearing after three seconds, and the HUD returning to its original
+height. The earlier passes remain valid for unchanged behavior.
 
 The Slice 27 pixel measurements come from Chromium and isolated Windows
 WebView2 mocks, not the installed-release checklist. Higher and mixed
