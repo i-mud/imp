@@ -21,14 +21,39 @@ loopback port 8787 and the forwarded port 8789 returned the same fixture
 This checks the SSH bind and endpoint distinction, not native Windows
 behavior, Imp runtime acceptance, or live MUD state.
 
-**28.2 is ready for review.** The README now starts with the Windows download,
+**28.2 merged in [PR #63](https://github.com/i-mud/imp/pull/63).** The README now starts with the Windows download,
 local Mudlet and remote TinyFugue routes, and first-use checks. The HUD image
 shows the published v0.5.3 frontend rendered in Chromium with synthetic data,
 not an installed Windows session. Public issue forms accept Local reports and
 player feedback without requiring logs.
 
-No external pilot or independent first-use success has been recorded. See the
-[roadmap](roadmap.md#slice-28---external-alpha-readiness) for the 28.3 criteria.
+**28.3: the screened local Mudlet cohort may start; recruitment has not begun.**
+Prior live integration and published-release acceptance support this limited
+pilot, not a claim of independent clean-install success. Stage A needs neither
+a new disposable Windows guest nor another owner acceptance pass. No tester
+has been contacted and no independent onboarding or gameplay feedback recorded.
+
+The alpha feedback form (`.github/ISSUE_TEMPLATE/alpha_feedback.yml`) exists
+on `main`. Its rendering in the signed-in issue chooser remains unverified;
+players can give feedback directly to the owner. Neither that check nor the
+pending owner decision on `SECURITY.md` blocks Stage A.
+
+For [Stage B and broader recruitment](roadmap.md#slice-28---external-alpha-readiness),
+keep these verification requirements distinct:
+
+- **Managed SSH:** Before offering the route, establish host trust, the actual
+  running TF 5.2.4+ build with the readiness fix, the actual startup file loading
+  capture before connection, and a successful noninteractive alias preflight.
+- **External SSH:** Establish the remote TF prerequisites and verify the native
+  Windows listener is only `127.0.0.1:8789`. Direct WSS is optional, not an
+  initial recruitment route.
+- **Stage C:** Published v0.5.3 owner checks remain unperformed: fresh Windows
+  install and launch, Mudlet per-profile import and explicit **Local**, or the
+  matching remote server bundle and intended SSH mode; matching fresh character
+  state, a natural vital alert, one approved harmless action, and relaunch
+  without replay. For External SSH also check forward-loss recovery without
+  replay. No disposable guest or approved test character was available.
+  Independent onboarding evidence on each priority path is still required.
 
 ## Slice 25 published-artifact live acceptance
 

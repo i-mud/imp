@@ -1031,14 +1031,38 @@ their own fresh character state during ordinary play without developer help.
    [PR #62](https://github.com/i-mud/imp/pull/62) corrected External SSH's
    loopback bind, TinyFugue prerequisites, connection setup and troubleshooting.
 3. **28.2 — Player-facing documentation, discoverability, and feedback
-   (in review).** The README routes players from the official download to
-   setup, first use and help. The bug report and alpha feedback forms ask
-   where players got to without requesting credentials or raw game data.
-4. **28.3 — External alpha pilot and evidence collection (planned).** Start
-   with a small screened group, then widen to about 5–10 players. Record
-   independent attempts before offering help, including where players stop,
-   when they first see live state, and what helps them during normal play.
-   Direct WSS is optional for this pilot.
+   (complete).** [PR #63](https://github.com/i-mud/imp/pull/63) routes players
+   from the official download to setup, first use and help. The bug report and
+   alpha feedback forms ask where players got to without requesting
+   credentials or raw game data.
+4. **28.3 — External alpha pilot and evidence collection.**
+   - **A — Screened early alpha:** Invite two or three Windows x64 local Mudlet
+     players from AVATAR, including someone new to Imp and, if available, someone
+     who previously struggled with setup. Explain that the installer is unsigned,
+     the software is alpha, all users and programs on the host must be trusted,
+     and independent clean-install onboarding is unverified. Participation is
+     voluntary; unsuccessful setup is useful evidence. Give the repository link
+     and the goal: see your own freshly updated vitals during ordinary play.
+     Record the independent attempt before helping. Alerts and actions are
+     optional later exercises, not entry requirements.
+   - **B — Additional routes:** Screen experienced Managed SSH/TinyFugue users
+     for a trusted host, corrected running executable, capture hook loaded by
+     the actual startup file before login, and noninteractive SSH access.
+     Before offering External SSH, verify its native Windows listener binds only
+     to `127.0.0.1:8789`. Direct WSS is outside initial recruitment.
+   - **C — Broader recruitment:** Widen only after the published-artifact owner
+     checks and independent onboarding evidence in the completion conditions
+     below. Neither is a prerequisite for Stage A.
+
+   Keep an anonymized record: route and versions, furthest independent
+   checkpoint, time to live state, first confusion, help needed, final outcome
+   (independent success, assisted success, incomplete, abandoned, or
+   safety/correctness blocker), gameplay value, and voluntary reuse. Triage by
+   installation, discoverability, comprehension, usability, correctness, or
+   missing functionality. Pause an affected route for host exposure,
+   credential disclosure, wrong-context action, replay, or misleading retained
+   state. Repeated independent stops justify targeted fixes, not an automatic
+   setup-wizard project. Direct WSS remains optional.
 
 **Completion conditions:** Publish the corrected public paths and feedback
 guidance; use published artifacts for an owner check of each offered route;
