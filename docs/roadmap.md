@@ -14,38 +14,38 @@ claims belong in `status.md` and the relevant architecture documents.
 
 ## Progress
 
-| Work                                                  | Status      | Historical marker                     |
-| ----------------------------------------------------- | ----------- | ------------------------------------- |
-| Slice 1 - Bootstrap baseline                          | ✅ Complete | `bootstrap-baseline`                  |
-| Slice 2 - Real GMCP end to end                        | ✅ Complete | `real-gmcp-e2e`                       |
-| Post-Slice 2 - Managed runtime implementation         | ✅ Complete | `managed-runtime`                     |
-| Slice 3 - CI baseline                                 | ✅ Complete | `ci-baseline`                         |
-| Slice 4 - Managed runtime verification                | ✅ Complete | `managed-runtime-e2e`                 |
-| Slice 5 - HUD UI refinement                           | ✅ Complete | `hud-ui-refinement`                   |
-| Slice 6 - Alerts and window polish                    | ✅ Complete | `alerts-window-polish`                |
-| Slice 7 - Trusted outbound actions                    | ✅ Complete | `trusted-outbound-actions`            |
-| Slice 8 - Configurable action UI                      | ✅ Complete | `configurable-action-ui`              |
-| Slice 9 - Managed tunnel takeover                     | ✅ Complete | `managed-tunnel-takeover`             |
-| Post-Slice 9 - Desktop polish and runtime hardening   | ✅ Complete | `desktop-polish`; later work untagged |
-| Slice 10 - Configurable notification triggers         | ✅ Complete | `configurable-notification-triggers`  |
-| Slice 11 - Authenticated WSS transport                | ✅ Complete | `authenticated-wss-transport`         |
-| Slice 12 - Native connection settings                 | ✅ Complete | `native-connection-settings`          |
-| Slice 13 - First release readiness                    | ✅ Complete | `first-release-readiness`             |
-| Slice 14 - Imp rename                                 | ✅ Complete | `imp-rename`                          |
-| Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`            |
-| Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged         |
-| Slice 16 - Mudlet and local client integration        | ✅ Complete | Untagged; slug below                  |
-| Slice 17 - Input boundary correctness                 | Complete    | `input-boundary-correctness`          |
-| Slice 18 - Freshness correctness                      | Complete    | `freshness-correctness`               |
-| Slice 19 - Subscriber isolation                       | Complete    | `subscriber-isolation`                |
-| Slice 20 - Diagnostic hardening                       | Complete    | `diagnostic-hardening`                |
-| Slice 21 - Native runtime ownership                   | Complete    | `native-runtime-ownership`            |
-| Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`              |
-| Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`     |
-| Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2` |
-| Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1` |
-| Slice 26 - Installation reliability and onboarding    | Complete    | No slice marker; accepted in `v0.4.6` |
-| Slice 27 - HUD layout and usability polish            | In progress | No slice marker                       |
+| Work                                                  | Status      | Historical marker                                |
+| ----------------------------------------------------- | ----------- | ------------------------------------------------ |
+| Slice 1 - Bootstrap baseline                          | ✅ Complete | `bootstrap-baseline`                             |
+| Slice 2 - Real GMCP end to end                        | ✅ Complete | `real-gmcp-e2e`                                  |
+| Post-Slice 2 - Managed runtime implementation         | ✅ Complete | `managed-runtime`                                |
+| Slice 3 - CI baseline                                 | ✅ Complete | `ci-baseline`                                    |
+| Slice 4 - Managed runtime verification                | ✅ Complete | `managed-runtime-e2e`                            |
+| Slice 5 - HUD UI refinement                           | ✅ Complete | `hud-ui-refinement`                              |
+| Slice 6 - Alerts and window polish                    | ✅ Complete | `alerts-window-polish`                           |
+| Slice 7 - Trusted outbound actions                    | ✅ Complete | `trusted-outbound-actions`                       |
+| Slice 8 - Configurable action UI                      | ✅ Complete | `configurable-action-ui`                         |
+| Slice 9 - Managed tunnel takeover                     | ✅ Complete | `managed-tunnel-takeover`                        |
+| Post-Slice 9 - Desktop polish and runtime hardening   | ✅ Complete | `desktop-polish`; later work untagged            |
+| Slice 10 - Configurable notification triggers         | ✅ Complete | `configurable-notification-triggers`             |
+| Slice 11 - Authenticated WSS transport                | ✅ Complete | `authenticated-wss-transport`                    |
+| Slice 12 - Native connection settings                 | ✅ Complete | `native-connection-settings`                     |
+| Slice 13 - First release readiness                    | ✅ Complete | `first-release-readiness`                        |
+| Slice 14 - Imp rename                                 | ✅ Complete | `imp-rename`                                     |
+| Slice 15 - Server installation / bootstrap            | ✅ Complete | `server-install-bootstrap`                       |
+| Post-Slice 15 - Public release and release automation | ✅ Complete | `v0.1.0`; later work untagged                    |
+| Slice 16 - Mudlet and local client integration        | ✅ Complete | Untagged; slug below                             |
+| Slice 17 - Input boundary correctness                 | Complete    | `input-boundary-correctness`                     |
+| Slice 18 - Freshness correctness                      | Complete    | `freshness-correctness`                          |
+| Slice 19 - Subscriber isolation                       | Complete    | `subscriber-isolation`                           |
+| Slice 20 - Diagnostic hardening                       | Complete    | `diagnostic-hardening`                           |
+| Slice 21 - Native runtime ownership                   | Complete    | `native-runtime-ownership`                       |
+| Slice 22 - Client-neutral UI and docs polish          | Complete    | `client-neutral-ui-docs`                         |
+| Slice 23 - ActionBroker timeout validation            | Complete    | `actionbroker-timeout-validation`                |
+| Slice 24 - Direct WSS provisioning and onboarding     | Complete    | No slice marker; accepted in `v0.3.2`            |
+| Slice 25 - Connection-oriented server installation    | Complete    | No slice marker; accepted in `v0.4.1`            |
+| Slice 26 - Installation reliability and onboarding    | Complete    | No slice marker; accepted in `v0.4.6`            |
+| Slice 27 - HUD layout and usability polish            | In progress | No slice marker; final polish pending acceptance |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -57,8 +57,10 @@ PR identities, verification, and retained limitations. Slice 24 is complete
 with non-blocking follow-ups. Slice 25 is complete: its implementation shipped
 in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
 `v0.4.1`, plus retained follow-ups. Slice 26 is complete: published `v0.4.6`
-was accepted with TinyFugue 5.2.4. Slice 27 is in progress. Other candidates
-remain provisional.
+was accepted with TinyFugue 5.2.4. Slice 27 remains in progress pending
+acceptance of the final HUD polish. The separate Windows acceptance passes on
+published `v0.5.1` and `v0.5.2` remain valid for unchanged behavior. No next
+slice has been selected; candidates remain provisional.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -957,14 +959,14 @@ requirement and strengthens the restart test. See the
 Constructed-fixture legacy recovery, root TLS archive evidence, nested includes
 and real-runtime CI remain retained limitations or follow-ups.
 
-## Active work
+## In progress
 
 ### Slice 27 - HUD layout and usability polish
 
-In progress. The initial HUD audit identified three bounded PRs; a fourth
-refines the Actions and Alerts cards. See the
+Three merged PRs addressed the HUD audit findings, and a fourth delivered
+operator refinements. Final polish is pending acceptance. See the
 [implementation status](status.md#slice-27-implementation--in-progress) for
-verification and limitations.
+verification and retained limitations.
 
 1. **Expanded HUD layout correctness (mandatory, 27-01).** Merged as
    [PR #56](https://github.com/i-mud/imp/pull/56) (`2de4eb6`). Chromium and
@@ -980,21 +982,39 @@ verification and limitations.
    current panel. Merged in `488a172` and released in
    [v0.5.0](https://github.com/i-mud/imp/releases/tag/v0.5.0).
 3. **Targeted visual and accessibility polish (27-04 through 27-06).**
-   PR 3 covers long action feedback, status and error text contrast, and
-   keyboard traversal in the three managers. Merged as
-   [PR #58](https://github.com/i-mud/imp/pull/58) and shipped in
-   [v0.5.1](https://github.com/i-mud/imp/releases/tag/v0.5.1). The user's
-   published v0.5.1 Windows acceptance passed all 27 checks for PRs 1–3.
-4. **Actions and Alerts cards and themed scrollbars.** The expanded Actions
-   footer wraps to three rows before scrolling. Both display modes keep
-   titles and Manage above the full-width lists, and HUD and manager
-   scrollbars follow the theme. Slice 27 remains in progress pending
-   final published-artifact acceptance of PR 4.
+   [PR #58](https://github.com/i-mud/imp/pull/58) added wrapping and bounded
+   scrolling for long action feedback (27-04), improved status and error text
+   contrast (27-05), and verified keyboard traversal in all three managers
+   (27-06). It fixed focus loss after Connection saves without adding a general
+   focus trap. Merged and shipped in
+   [v0.5.1](https://github.com/i-mud/imp/releases/tag/v0.5.1).
+4. **Operator refinements to Actions and Alerts cards and scrollbars.**
+   [PR #59](https://github.com/i-mud/imp/pull/59) merged in `1a6d259` and shipped
+   in [v0.5.2](https://github.com/i-mud/imp/releases/tag/v0.5.2). The expanded
+   Actions footer wraps to three rows before scrolling. Both display modes
+   keep titles and Manage above the full-width lists, and HUD and manager
+   scrollbars follow the theme.
+
+Published-artifact acceptance on the operator's existing Windows installation
+passed **27/27** checks on `v0.5.1` for PRs 1–3 and, separately, **17/17** checks
+on `v0.5.2` for PR 4, with no adverse observations.
+These passes remain valid for unchanged behavior; neither covers the final
+card dividers or automatic dismissal of successful action feedback. The final
+patch needs focused checks in both themes and display modes, including native
+resize after feedback disappears, not a repeat of either release checklist.
 
 ## Candidate work
 
 Unordered, deliberately without slice numbers, and provisional. Live evidence
 that exposes a more urgent defect can reorder this work.
+
+### HUD follow-ups
+
+- Freshness presentation design.
+- Desktop-edge placement when a fixed-origin HUD resize extends past the work area.
+- Contrast for Manage text in some states, light inactive option hovers, and
+  dark Connection placeholders, separate from the status and error text fix.
+- Native verification at higher DPI and across mixed-scale displays.
 
 ### Extensibility
 

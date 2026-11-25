@@ -24,8 +24,9 @@ describe('action invocation state', () => {
 
     expect(send).not.toHaveBeenCalled();
     expect(state.pendingActionId).toBeNull();
-    expect(state.feedback).toMatch(/no current .*context/i);
-    expect(state.feedback).not.toMatch(/TinyFugue|Mudlet/);
+    expect(state.feedback?.status).toBe('rejected');
+    expect(state.feedback?.message).toMatch(/no current .*context/i);
+    expect(state.feedback?.message).not.toMatch(/TinyFugue|Mudlet/);
   });
 
   it('forwards the captured context and exact command once, then clears pending state', async () => {
@@ -40,7 +41,10 @@ describe('action invocation state', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith(context, '  look  ');
     expect(state.pendingActionId).toBeNull();
-    expect(state.feedback).toBe('Action was not forwarded because the game context changed.');
+    expect(state.feedback).toEqual({
+      status: 'rejected',
+      message: 'Action was not forwarded because the game context changed.',
+    });
   });
 
   it('does not dispatch a second action while the first promise is pending', async () => {
@@ -56,11 +60,13 @@ describe('action invocation state', () => {
     });
 
     expect(state.pendingActionId).toBe(action.id);
+    expect(state.feedback?.status).toBe('pending');
     expect(send).toHaveBeenCalledOnce();
 
     pending.resolve({ status: 'forwarded', detail: null });
     await first;
     expect(state.pendingActionId).toBeNull();
+    expect(state.feedback?.status).toBe('forwarded');
   });
 
   it('contains a rejected promise as unknown feedback without retrying', async () => {
@@ -71,7 +77,10 @@ describe('action invocation state', () => {
 
     expect(send).toHaveBeenCalledOnce();
     expect(state.pendingActionId).toBeNull();
-    expect(state.feedback).toBe('Delivery uncertain. Imp did not retry. Detail: Action request failed.');
+    expect(state.feedback).toEqual({
+      status: 'unknown',
+      message: 'Delivery uncertain. Imp did not retry. Detail: Action request failed.',
+    });
   });
 
   it('contains a synchronous sink failure as unknown feedback without retrying', async () => {
@@ -84,6 +93,9 @@ describe('action invocation state', () => {
 
     expect(send).toHaveBeenCalledOnce();
     expect(state.pendingActionId).toBeNull();
-    expect(state.feedback).toBe('Delivery uncertain. Imp did not retry. Detail: Action request failed.');
+    expect(state.feedback).toEqual({
+      status: 'unknown',
+      message: 'Delivery uncertain. Imp did not retry. Detail: Action request failed.',
+    });
   });
 });

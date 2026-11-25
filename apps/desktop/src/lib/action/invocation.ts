@@ -2,11 +2,11 @@ import type { StateContext } from '@imp/protocol';
 
 import type { ActionDefinition } from './definitions.ts';
 import { describeActionResult, LOCAL_ACTION_UNAVAILABLE } from './presentation.ts';
-import type { ActionSink } from './types.ts';
+import type { ActionResult, ActionSink } from './types.ts';
 
 export interface ActionInvocationState {
   pendingActionId: string | null;
-  feedback: string | null;
+  feedback: { status: ActionResult['status'] | 'pending'; message: string } | null;
 }
 
 export async function invokeAction(
@@ -18,19 +18,20 @@ export async function invokeAction(
   if (state.pendingActionId !== null) return;
 
   if (context === null) {
-    state.feedback = LOCAL_ACTION_UNAVAILABLE;
+    state.feedback = { status: 'rejected', message: LOCAL_ACTION_UNAVAILABLE };
     return;
   }
 
   state.pendingActionId = definition.id;
-  state.feedback = `Forwarding “${definition.label}”…`;
+  state.feedback = { status: 'pending', message: `Forwarding “${definition.label}”…` };
   try {
-    state.feedback = describeActionResult(await sink.send(context, definition.command));
+    const result = await sink.send(context, definition.command);
+    state.feedback = { status: result.status, message: describeActionResult(result) };
   } catch {
-    state.feedback = describeActionResult({
+    state.feedback = {
       status: 'unknown',
-      detail: 'Action request failed',
-    });
+      message: describeActionResult({ status: 'unknown', detail: 'Action request failed' }),
+    };
   } finally {
     state.pendingActionId = null;
   }

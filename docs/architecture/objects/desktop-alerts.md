@@ -92,9 +92,10 @@ saved, that store takes precedence, including an intentionally empty list.
 
 Open **Alerts** (bell icon) in either display mode and choose **Manage**
 (`Manage alerts` to assistive technology). The heading and Manage share a
-row above the full-width quick-toggle list. Alert toggle pills wrap and
-scroll vertically when needed; Manage stays outside that list and remains
-available when no alerts are saved. Save errors appear below the list.
+row above the full-width quick-toggle list, separated from the content by a
+theme divider. Alert toggle pills wrap and scroll vertically when needed;
+Manage stays outside that list and remains available when no alerts are saved.
+Save errors appear below the list and do not auto-dismiss.
 The quick-toggle and manager saved lists use theme-matched scrollbars.
 
 The manager creates, edits, and deletes vital-threshold and received-text
@@ -253,7 +254,7 @@ Deterministic desktop tests cover:
 - persisted quick enable/disable behavior; and
 - stable alert ids with configured-label-only text notification bodies.
 
-Native/live acceptance additionally verified creation and editing of a
+Earlier native/live acceptance additionally verified creation and editing of a
 received-text alert, persistence after reopening the manager, repeated
 identical matches, sound and notification delivery, and that the notification
 body contains only the configured label rather than raw received MUD text.
@@ -271,6 +272,16 @@ Status: verified for configurable vital and received-text alerts
 Verified against: desktop unit tests, strict Svelte/TypeScript checking, and
 Windows-native live text-alert acceptance.
 
-See [Slice 27 status](../../status.md#slice-27-implementation--in-progress)
-for current navigation and card acceptance; the rendered UI evidence
-above records the older Slice 10 navigation, not the current HUD behavior.
+The operator separately passed 27/27 checks on published v0.5.1 (PRs 1–3)
+and 17/17 on published v0.5.2 (PR 4) on their existing Windows installation,
+with no adverse observations on the latter pass. PR 4's checklist covered both
+Alerts cards, including Manage access while scrolling, return from the manager,
+and themed scrollbars. This is valid evidence for unchanged behavior; the
+[Slice 27 HUD](../../status.md#slice-27-implementation--in-progress) remains
+in progress pending final polish acceptance. The earlier live text-alert
+checks above verify alert behavior, not the current card layout.
+
+The Slice 27 pixel measurements come from Chromium and isolated Windows
+WebView2 mocks, not the installed-release checklist. Higher and mixed
+native DPI remain unverified. Freshness design, fixed-origin desktop-edge
+placement, and remaining control and placeholder contrast are deferred.

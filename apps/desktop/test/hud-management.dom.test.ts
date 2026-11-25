@@ -38,6 +38,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (hud) await unmount(hud);
   hud = undefined;
+  vi.useRealTimers();
   document.body.replaceChildren();
   localStorage.clear();
   send.mockReset();
@@ -570,6 +571,7 @@ it.each(['expanded', 'compact'] as const)('keeps invocation pending across %s ma
   const pending = Promise.withResolvers<{ status: 'forwarded'; detail: null }>();
   send.mockReturnValue(pending.promise);
   mountHud(mode, true);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   if (mode === 'compact') click(control('button[aria-label="Actions"]'));
   click(control('.action-btn'));
   expect(send).toHaveBeenCalledExactlyOnceWith(context, action.command);
@@ -579,6 +581,8 @@ it.each(['expanded', 'compact'] as const)('keeps invocation pending across %s ma
   click(control('button[aria-label="Manage actions"]'));
   click(control('button[aria-label="Close action manager"]'));
   const returnedAction = control<HTMLButtonElement>('.action-btn');
+  flushSync(() => vi.advanceTimersByTime(3000));
+  expect(control('[aria-live="polite"]').textContent).toContain('Forwarding');
   expect(returnedAction.disabled).toBe(true);
   click(returnedAction);
   expect(send).toHaveBeenCalledTimes(1);
@@ -588,6 +592,90 @@ it.each(['expanded', 'compact'] as const)('keeps invocation pending across %s ma
   await tick();
   expect(returnedAction.disabled).toBe(false);
   expect(control('[aria-live="polite"]').textContent).toContain('Forwarded to the game client.');
+});
+
+it.each(['expanded', 'compact'] as const)('expires success in the %s action list', async (mode) => {
+  send.mockResolvedValue({ status: 'forwarded', detail: null });
+  mountHud(mode, true);
+  if (mode === 'compact') click(shortcut('Actions'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+  const region = control('[aria-live="polite"]');
+  expect(region.textContent).toBe('');
+  click(control('.action-btn'));
+  await tick();
+
+  expect(region.textContent).toContain('Forwarded to the game client.');
+  expect(region.getAttribute('aria-atomic')).toBe('true');
+  flushSync(() => vi.advanceTimersByTime(2849));
+  expect(region.classList.contains('fading')).toBe(false);
+  flushSync(() => vi.advanceTimersByTime(1));
+  expect(region.classList.contains('fading')).toBe(true);
+  flushSync(() => vi.advanceTimersByTime(149));
+  expect(region.textContent).toContain('Final MUD delivery is not confirmed.');
+  flushSync(() => vi.advanceTimersByTime(1));
+  expect(control('[aria-live="polite"]')).toBe(region);
+  expect(region.textContent).toBe('');
+  expect(document.querySelector('.action-feedback')).toBeNull();
+});
+
+it('gives a newer success its own three seconds after replacing a fading success', async () => {
+  send.mockResolvedValue({ status: 'forwarded', detail: null });
+  mountHud('expanded', true);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+  const region = control('[aria-live="polite"]');
+  click(control('.action-btn'));
+  await tick();
+  flushSync(() => vi.advanceTimersByTime(2900));
+  expect(region.classList.contains('fading')).toBe(true);
+
+  click(control('.action-btn'));
+  expect(region.textContent).toContain('Forwarding');
+  await tick();
+  expect(region.classList.contains('fading')).toBe(false);
+  flushSync(() => vi.advanceTimersByTime(2999));
+  expect(region.textContent).toContain('Forwarded to the game client.');
+  flushSync(() => vi.advanceTimersByTime(1));
+  expect(region.textContent).toBe('');
+  expect(send).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  ['rejected', 'Action was not forwarded: fixture detail'],
+  ['unknown', 'Delivery uncertain. Imp did not retry. Detail: fixture detail.'],
+] as const)('retains %s feedback past an older success deadline', async (status, message) => {
+  send
+    .mockResolvedValueOnce({ status: 'forwarded', detail: null })
+    .mockResolvedValueOnce({ status, detail: 'fixture detail' });
+  mountHud('expanded', true);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  click(control('.action-btn'));
+  await tick();
+  flushSync(() => vi.advanceTimersByTime(1000));
+
+  click(control('.action-btn'));
+  await tick();
+  flushSync(() => vi.advanceTimersByTime(10_000));
+  const region = control('.action-feedback');
+  expect(region.textContent).toBe(message);
+  expect(region.classList.contains('fading')).toBe(false);
+  expect(control<HTMLButtonElement>('.action-btn').disabled).toBe(false);
+});
+
+it('cancels the success timers when the HUD unmounts', async () => {
+  send.mockResolvedValue({ status: 'forwarded', detail: null });
+  mountHud('expanded', true);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const before = vi.getTimerCount();
+
+  click(control('.action-btn'));
+  await tick();
+  expect(control('.action-feedback').textContent).toContain('Forwarded to the game client.');
+  expect(vi.getTimerCount()).toBeGreaterThan(before);
+  await unmount(hud!);
+  hud = undefined;
+  expect(vi.getTimerCount()).toBe(before);
 });
 
 it('dismisses a compact panel from outside, not from its controls', () => {

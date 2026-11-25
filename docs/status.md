@@ -655,7 +655,8 @@ preserved window size. The shortest compact fixture measured 280 × 32 at
 normal font size and 348 × 32 at enlarged font size; the active × had at
 least 5.2:1 contrast in the tested profiles.
 
-Final acceptance used disposable mocks, not the installed HUD or a live MUD.
+PR 2's pre-release verification used disposable mocks, not the installed HUD
+or a live MUD. Installed-release acceptance for PRs 1–3 is recorded below.
 
 Earlier contextual-management evidence predates final shortcut and exit behavior:
 `npm run check` passed 199 desktop tests (44 targeted, 30 new); Chromium
@@ -739,6 +740,10 @@ interaction. It does not cover PR 4.
 
 ### PR 4 — Actions and Alerts cards and themed scrollbars
 
+[PR #59](https://github.com/i-mud/imp/pull/59) merged in `1a6d259` and shipped
+in [v0.5.2](https://github.com/i-mud/imp/releases/tag/v0.5.2). It addressed
+the operator's additional requests after the v0.5.1 acceptance pass.
+
 The expanded Actions footer wraps buttons across the full width below the
 title and Manage. It grows to three rows, then scrolls vertically without
 widening the HUD. This exposes more actions without the previous horizontal
@@ -784,11 +789,51 @@ never exceeded 560 logical pixels in the width-cap checks. These were
 disposable mocks, not the installed HUD or a live MUD session. Enlarged
 font metrics do not establish higher or mixed native DPI behavior.
 
+**Published-artifact acceptance for PR 4.** The operator passed **17/17**
+checks on their existing Windows installation, with no adverse observations:
+
+- The upgrade succeeded, Settings reported v0.5.2, and the existing
+  connection, actions, alerts, and preferences were retained.
+- Expanded actions wrapped naturally through three visible rows, then
+  scrolled vertically. Every action remained accessible, long labels did
+  not widen the HUD, and removing temporary actions restored the footer height.
+- The target appeared and disappeared without overlap or retained height.
+- In both display modes, contextual cards showed the title on the left and
+  Manage on the right, with full-width items below. Manage remained accessible
+  while scrolling, and managers returned to their originating surfaces.
+- Scrollbars matched both themes. Neither scrolling nor inline exit
+  confirmation resized the HUD.
+
+The separate v0.5.1 and v0.5.2 installed-release passes remain valid evidence
+for unchanged behavior. The pixel measurements above come from Chromium and
+isolated native runs, not the operator's checklists.
+
+### Final polish — pending acceptance
+
+A subtle divider using the existing theme token separates the title and Manage
+row from the content in the Actions and Alerts cards in both display modes,
+including the expanded Actions footer. The lists still use the full width and
+the cards keep their compact spacing and native sizing behavior.
+
+Pending action feedback stays visible until the action resolves. Successful
+local handoff (`forwarded`) feedback is removed after three seconds, with a
+short fade before removal. Reduced motion skips the fade, not the timeout.
+Rejections and uncertain delivery (`unknown`), including their diagnostics,
+do not expire. A newer invocation supersedes prior feedback, and an old
+dismissal cannot clear the new message. Live announcements remain in place;
+removal frees the feedback space so the HUD can shrink naturally. This changes
+presentation only, not invocation, delivery, retries, or persistence.
+
+Slice 27 remains in progress until this patch is accepted. Verify expiration,
+overlapping feedback lifecycles, and failure retention; check the affected
+layouts in both themes and display modes, including native shrink after
+dismissal. The complete Slice 27 acceptance matrix need not be repeated.
+
 **Deferred.** The contrast pass also found misses on Manage text in some
 states, light inactive option hovers, and dark Connection placeholders.
 These control/hint findings are separate from status text. Freshness design
-and fixed-origin desktop-edge placement remain deferred. Slice 27 remains
-in progress pending final published-artifact acceptance of PR 4.
+and fixed-origin desktop-edge placement remain deferred. Higher and mixed
+native DPI remain unverified.
 
 ## Working end to end
 

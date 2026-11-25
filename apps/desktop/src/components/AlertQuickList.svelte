@@ -15,10 +15,12 @@
 </script>
 
 <div class="alert-quick-list contextual-list">
-  <h2>Alerts</h2>
-  <button class="manage-btn" type="button" aria-label="Manage alerts" onclick={() => onmanage()}
-    >Manage</button
-  >
+  <div class="contextual-heading">
+    <h2>Alerts</h2>
+    <button class="manage-btn" type="button" aria-label="Manage alerts" onclick={() => onmanage()}
+      >Manage</button
+    >
+  </div>
   <div class="alert-toggle-list contextual-items">
     {#if definitions.length === 0}
       <span class="empty">No alerts defined.</span>
