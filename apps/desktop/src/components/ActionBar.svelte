@@ -16,8 +16,12 @@
   } = $props();
 </script>
 
-<section class="action-bar" aria-label="Saved actions">
-  <div class="action-buttons">
+<section class="action-bar contextual-list" aria-label="Saved actions">
+  <h2>Actions</h2>
+  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => onmanage()}
+    >Manage</button
+  >
+  <div class="action-buttons contextual-items">
     {#each definitions as definition (definition.id)}
       <button
         class="action-btn"
@@ -31,9 +35,6 @@
       </button>
     {/each}
   </div>
-  <button class="manage-btn" type="button" aria-label="Manage actions" onclick={() => onmanage()}
-    >Manage</button
-  >
   {#if feedback}
     <div class="action-feedback" aria-live="polite">{feedback}</div>
   {/if}
@@ -41,29 +42,21 @@
 
 <style>
   .action-bar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    min-width: 0;
-    gap: var(--space-6);
     padding: var(--section-pad);
     border-top: 1px solid var(--divider);
   }
 
   .action-buttons {
-    display: flex;
-    /* The strip has a min-height; without this the buttons stretch to fill it
-       and stop matching the compact panel's buttons. */
-    align-items: center;
-    min-width: 0;
-    gap: var(--space-3);
-    overflow-x: auto;
+    /* Three single-line buttons, including padding, borders and two row gaps. */
+    font-size: var(--font-xs);
+    line-height: 1.25;
+    max-height: round(up, 3lh + 6 * var(--space-1) + 6px + 2 * var(--space-3), 1px);
     scrollbar-width: thin;
   }
 
   .action-buttons button {
-    flex: 0 0 auto;
-    max-width: 9rem;
+    line-height: inherit;
+    max-width: min(9rem, 100%);
     min-width: 3rem;
     overflow: hidden;
   }
@@ -73,9 +66,5 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .action-feedback {
-    grid-column: 1 / -1;
   }
 </style>

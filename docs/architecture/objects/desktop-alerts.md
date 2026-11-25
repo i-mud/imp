@@ -90,13 +90,17 @@ If the generalized store does not yet exist, Imp reads the previous
 the default `low-health` vital definition. Once generalized definitions are
 saved, that store takes precedence, including an intentionally empty list.
 
-Open **Alerts** (bell icon) in either display mode and choose **Manage
-alerts** below the quick-toggle list. The management control remains
-available when no alerts are saved. The manager creates, edits, and deletes
-vital-threshold and received-text alerts and configures their independent
-sound and desktop-notification effects. Enabled state is a persisted quick
-toggle rather than part of the edit form; the manager and both Alerts panels
-show the same enabled state.
+Open **Alerts** (bell icon) in either display mode and choose **Manage**
+(`Manage alerts` to assistive technology). The heading and Manage share a
+row above the full-width quick-toggle list. Alert toggle pills wrap and
+scroll vertically when needed; Manage stays outside that list and remains
+available when no alerts are saved. Save errors appear below the list.
+The quick-toggle and manager saved lists use theme-matched scrollbars.
+
+The manager creates, edits, and deletes vital-threshold and received-text
+alerts and configures their independent sound and desktop-notification
+effects. Enabled state is a persisted quick toggle rather than part of the
+edit form; the manager and both Alerts panels show the same enabled state.
 
 Opening Alerts by keyboard focuses its Manage button. **Close** or **Escape**
 in the manager restores the originating Alerts panel and focuses **Manage
@@ -268,5 +272,5 @@ Verified against: desktop unit tests, strict Svelte/TypeScript checking, and
 Windows-native live text-alert acceptance.
 
 See [Slice 27 status](../../status.md#slice-27-implementation--in-progress)
-for current navigation acceptance; the rendered UI evidence above records the
-older Slice 10 navigation, not the current HUD behavior.
+for current navigation and card acceptance; the rendered UI evidence
+above records the older Slice 10 navigation, not the current HUD behavior.

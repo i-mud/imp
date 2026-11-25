@@ -672,6 +672,8 @@ limitation: a resize does not move the window back onto the work area.
 
 ### PR 3 — Targeted visual and accessibility polish
 
+[PR #58](https://github.com/i-mud/imp/pull/58) shipped in v0.5.1.
+
 **27-04 — Feedback clipping.** A valid 64-character unbroken action label
 overflowed both live regions. At 16px in Chromium the pending text needed
 627px in a 294px expanded feedback area. Both regions now wrap at the
@@ -728,11 +730,65 @@ button. A separate process took and returned focus on a private Windows
 desktop; completing a save while that process was active did not raise Imp.
 No visible-desktop Alt+Tab, installed HUD, or live MUD session was used.
 
-**Out of scope.** The contrast pass also found misses on Manage text in some
+**Published-artifact acceptance for PRs 1–3.** The user confirmed that all 27
+manual checklist items passed with published
+[Imp v0.5.1](https://github.com/i-mud/imp/releases/tag/v0.5.1) on their existing
+Windows installation. This covered upgrade, connection, persistence, sizing,
+navigation, management, exit confirmation, feedback wrapping, and keyboard
+interaction. It does not cover PR 4.
+
+### PR 4 — Actions and Alerts cards and themed scrollbars
+
+The expanded Actions footer wraps buttons across the full width below the
+title and Manage. It grows to three rows, then scrolls vertically without
+widening the HUD. This exposes more actions without the previous horizontal
+strip; long labels still fit on one line with an ellipsis. When empty, only
+the title and Manage remain. The Actions palette and Alerts panel use the
+same title-left, Manage-right header in both display modes. Their lists
+wrap across the full width; Manage stays in a predictable position even
+when the list is empty or scrolled. Action feedback and alert save errors
+sit beneath their lists.
+
+The contextual lists, action feedback, manager saved lists, and action
+command textarea use theme-matched scrollbar thumbs and tracks. The layout
+and scrollbar changes do not change action dispatch, alert persistence,
+window placement, shortcut behavior, or focus restoration.
+
+**Verification.** All 72 tests passed across the focused HUD management,
+HUD resizing, action invocation, and action presentation suites.
+
+Chromium captured 100 scenarios per revision across both themes and font
+sizes. The expanded footer stayed 320 CSS px wide and showed three complete
+rows before scrolling, in a list 65 CSS px tall at 16px and 80 CSS px at
+20px. In the candidate, keyboard traversal reached the last item in all
+80 nonempty cases, the wheel exposed it in all 20 overflowing cases, and
+Manage stayed reachable in all 100 cases. The
+[Chromium before/after comparison](audits/slice-27-hud-cards.png)
+shows the expanded footer, compact Actions palette, and expanded Alerts panel.
+Eight interaction profiles preserved shortcut and Escape focus, kept
+Manage available during a pending action, wrapped long feedback, and kept
+the HUD size unchanged during inline exit confirmation.
+With Chromium's forced-colors emulation enabled, all five contextual list
+surfaces and expanded footer feedback computed `scrollbar-color: auto`.
+
+Isolated Windows/Tauri WebView2 passed 100 layout cases at 100% scale.
+At 320 logical pixels wide and normal font size, the expanded HUD's
+height grew from 174 logical pixels with no actions to 201 with one row,
+224 with two, and 247 with overflow and three visible rows. An appearing
+target increased that last height from 247 to 294. Clearing the target
+restored the height to 247. With enlarged font metrics the same
+overflowing HUD measured 305 → 363 → 305, matching in both themes.
+In both themes, the normal compact HUD returned to 280 × 32 after
+closing an overflowing Actions or Alerts panel, and the compact width
+never exceeded 560 logical pixels in the width-cap checks. These were
+disposable mocks, not the installed HUD or a live MUD session. Enlarged
+font metrics do not establish higher or mixed native DPI behavior.
+
+**Deferred.** The contrast pass also found misses on Manage text in some
 states, light inactive option hovers, and dark Connection placeholders.
 These control/hint findings are separate from status text. Freshness design
 and fixed-origin desktop-edge placement remain deferred. Slice 27 remains
-in progress pending independent review and published-artifact acceptance.
+in progress pending final published-artifact acceptance of PR 4.
 
 ## Working end to end
 

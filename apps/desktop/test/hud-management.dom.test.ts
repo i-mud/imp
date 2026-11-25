@@ -136,7 +136,7 @@ describe.each(surfaces)('$mode $kind management', ({ mode, kind, trigger }) => {
       expect(surface.textContent).toContain(`No ${kind}s defined.`);
     }
     const entry = control<HTMLButtonElement>(manage, surface);
-    expect(entry.textContent?.trim()).toBe(kind === 'action' ? 'Manage' : 'Manage alerts');
+    expect(entry.textContent?.trim()).toBe('Manage');
     expect(entry.disabled).toBe(false);
     if (trigger !== null) await expectFocus(entry);
     keyboardActivate(entry);

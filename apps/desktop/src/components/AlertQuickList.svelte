@@ -14,8 +14,12 @@
   } = $props();
 </script>
 
-<div class="alert-quick-list">
-  <div class="alert-toggle-list">
+<div class="alert-quick-list contextual-list">
+  <h2>Alerts</h2>
+  <button class="manage-btn" type="button" aria-label="Manage alerts" onclick={() => onmanage()}
+    >Manage</button
+  >
+  <div class="alert-toggle-list contextual-items">
     {#if definitions.length === 0}
       <span class="empty">No alerts defined.</span>
     {:else}
@@ -38,34 +42,9 @@
   {#if saveError !== null}
     <div class="save-error" role="alert">{saveError}</div>
   {/if}
-  <button class="manage-btn" type="button" aria-label="Manage alerts" onclick={() => onmanage()}
-    >Manage alerts</button
-  >
 </div>
 
 <style>
-  .alert-quick-list {
-    display: grid;
-    min-width: 0;
-    gap: var(--space-4);
-  }
-
-  .manage-btn {
-    justify-self: end;
-  }
-
-  .alert-toggle-list {
-    display: flex;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    max-height: 12rem;
-    min-height: 0;
-    gap: var(--space-3);
-    overflow-x: hidden;
-    overflow-y: auto;
-    padding-right: var(--space-1);
-  }
-
   .alert-toggle-pill {
     display: inline-flex;
     flex: 0 1 auto;
@@ -102,6 +81,7 @@
   }
 
   .save-error {
+    grid-column: 1 / -1;
     color: var(--bad-text);
   }
 </style>
