@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.5.3] - 2026-11-25
+
+### Bug Fixes
+
+- separate HUD card headers and dismiss successful action feedback ([34a2238](https://github.com/i-mud/imp/commit/34a223865afde109794d5e97bd96926b4682c6da))
+
 ## [0.5.2] - 2026-11-25
 
 ### Bug Fixes
