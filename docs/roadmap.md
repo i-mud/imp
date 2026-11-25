@@ -1035,13 +1035,24 @@ their own fresh character state during ordinary play without developer help.
    from the official download to setup, first use and help. The bug report and
    alpha feedback forms ask where players got to without requesting
    credentials or raw game data.
-4. **28.3 — External alpha pilot and evidence collection (preparation).**
-   Owner checks gate each offered route before recruitment. Invite two or three
-   AVATAR players first, prioritizing local Mudlet and one suitable remote
-   TinyFugue player; include someone new to Imp and, if available, a player who
-   previously struggled with setup. Give only the repository link and the goal:
-   get your own live vitals onto the desktop HUD during ordinary play. Record the
-   independent attempt before helping.
+4. **28.3 — External alpha pilot and evidence collection.**
+   - **A — Screened early alpha:** Invite two or three Windows x64 local Mudlet
+     players from AVATAR, including someone new to Imp and, if available, someone
+     who previously struggled with setup. Explain that the installer is unsigned,
+     the software is alpha, all users and programs on the host must be trusted,
+     and independent clean-install onboarding is unverified. Participation is
+     voluntary; unsuccessful setup is useful evidence. Give the repository link
+     and the goal: see your own freshly updated vitals during ordinary play.
+     Record the independent attempt before helping. Alerts and actions are
+     optional later exercises, not entry requirements.
+   - **B — Additional routes:** Screen experienced Managed SSH/TinyFugue users
+     for a trusted host, corrected running executable, capture hook loaded by
+     the actual startup file before login, and noninteractive SSH access.
+     Before offering External SSH, verify its native Windows listener binds only
+     to `127.0.0.1:8789`. Direct WSS is outside initial recruitment.
+   - **C — Broader recruitment:** Widen only after the published-artifact owner
+     checks and independent onboarding evidence in the completion conditions
+     below. Neither is a prerequisite for Stage A.
 
    Keep an anonymized record: route and versions, furthest independent
    checkpoint, time to live state, first confusion, help needed, final outcome
