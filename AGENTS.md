@@ -13,10 +13,11 @@ Source, tests and runtime are the authority on what exists and what executes.
 | -------------------------------------- | ---------------------------------- |
 | architecture, change impact, decisions | `docs/architecture/CONTEXT.md`     |
 | the wire format                        | `packages/protocol/SPEC.md`        |
-| commands, prerequisites, how to run it | `README.md`                        |
+| player downloads, setup and first use  | `README.md`                        |
+| development prerequisites and setup    | `CONTRIBUTING.md`                  |
 | what is built and verified             | `docs/status.md`                   |
 | planned and deferred work              | `docs/roadmap.md`                  |
-| platform/build constraints             | `docs/development.md`              |
+| development commands and platforms     | `docs/development.md`              |
 | release/versioning rules and procedure | `docs/releases.md`                 |
 | what still needs a real MUD session    | `integrations/tinyfugue/README.md` |
 | historical repository audits           | `docs/audits.md`                   |

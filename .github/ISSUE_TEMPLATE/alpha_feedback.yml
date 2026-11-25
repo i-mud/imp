@@ -1,0 +1,44 @@
+name: Alpha feedback
+description: Tell us how setup or ordinary play went, even if you never got connected.
+title: '[Alpha]: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This feedback is public. Do not post credentials (including passwords), pairing tokens, SSH keys, raw GMCP data, private game text, or unredacted configuration files.
+
+        Report suspected security vulnerabilities privately using the [security policy](https://github.com/i-mud/imp/security/policy), not this form.
+
+  - type: input
+    id: setup
+    attributes:
+      label: What setup did you try?
+      description: If known, include your Imp version, MUD, client, and connection mode (Local, Managed SSH, External SSH, or Direct WSS).
+      placeholder: v0.5.3 / AVATAR / Mudlet / Local
+
+  - type: dropdown
+    id: checkpoint
+    attributes:
+      label: Last successful setup checkpoint
+      description: Pick the furthest you got. A connected HUD or an old snapshot alone is not live state.
+      options:
+        - I did not reach a checkpoint
+        - Found and downloaded the installer
+        - Installed and opened Imp
+        - Set up the Mudlet package or TinyFugue integration
+        - Connected to the intended Imp node
+        - Saw my own character state update during play
+        - Not sure or not applicable
+
+  - type: textarea
+    id: feedback
+    attributes:
+      label: How did it go?
+      description: |
+        Answer any of these in your own words. No logs, screenshots, technical diagnosis, or proposed fix needed.
+
+        - Where did setup get difficult? What did you need help with, if anything?
+        - What, if anything, was useful during normal play?
+        - If you stopped, when and why? What would make you keep using Imp or try it again?
+    validations:
+      required: true

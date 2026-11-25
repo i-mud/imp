@@ -11,7 +11,7 @@ instructions, and prior evidence without installing Imp or contacting
 testers. The separate [Slice 27 acceptance](#slice-27-implementation--complete)
 covers the operator's installed Windows checks, not independent onboarding.
 
-**28.1 is documentation only.** The External SSH example's omitted local
+**28.1 merged in [PR #62](https://github.com/i-mud/imp/pull/62).** The External SSH example's omitted local
 bind address was a conditional hazard with nondefault OpenSSH client
 `GatewayPorts`, not an observed exposure. In an isolated Linux OpenSSH
 client/server check with `GatewayPorts=yes` and SSH on port 2222, the
@@ -21,10 +21,14 @@ loopback port 8787 and the forwarded port 8789 returned the same fixture
 This checks the SSH bind and endpoint distinction, not native Windows
 behavior, Imp runtime acceptance, or live MUD state.
 
-No independent first-use success or external pilot outcomes have been
-recorded. Player-facing discovery and feedback work, the pilot, and its
-completion conditions are tracked in the
-[roadmap](roadmap.md#slice-28---external-alpha-readiness).
+**28.2 is ready for review.** The README now starts with the Windows download,
+local Mudlet and remote TinyFugue routes, and first-use checks. The HUD image
+shows the published v0.5.3 frontend rendered in Chromium with synthetic data,
+not an installed Windows session. Public issue forms accept Local reports and
+player feedback without requiring logs.
+
+No external pilot or independent first-use success has been recorded. See the
+[roadmap](roadmap.md#slice-28---external-alpha-readiness) for the 28.3 criteria.
 
 ## Slice 25 published-artifact live acceptance
 

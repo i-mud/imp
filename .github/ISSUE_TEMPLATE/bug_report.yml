@@ -1,29 +1,20 @@
 name: Bug report
-description: Report reproducible incorrect behavior in Imp.
+description: Report something that failed or behaved unexpectedly in Imp.
 title: '[Bug]: '
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a problem. Do not include passwords, private keys,
-        pairing tokens, or other secrets.
+        This report is public. Do not post credentials (including passwords), pairing tokens, SSH keys, raw GMCP data, private game text, or unredacted configuration files. Redact sensitive details from any excerpts or images.
 
-        For security vulnerabilities, use the private reporting instructions in SECURITY.md instead.
+        Report suspected security vulnerabilities privately using the [security policy](https://github.com/i-mud/imp/security/policy), not this form.
 
   - type: input
     id: version
     attributes:
-      label: Imp version
-      description: Release version or commit SHA.
-      placeholder: v0.1.0
-    validations:
-      required: true
-
-  - type: input
-    id: platform
-    attributes:
-      label: Desktop platform
-      placeholder: Windows 11 x64
+      label: Installed Imp version
+      description: Enter the installed release version, or write “Unknown” if you could not install or check it.
+      placeholder: v0.5.3
     validations:
       required: true
 
@@ -32,55 +23,46 @@ body:
     attributes:
       label: Connection mode
       options:
+        - Local
         - Managed SSH
         - External SSH
         - Direct WSS
-        - Not applicable
-    validations:
-      required: true
+        - Not sure or not applicable
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Fresh install or upgrade?
+      options:
+        - Fresh install
+        - Upgrade
+        - Not sure or not applicable
 
   - type: input
     id: integration
     attributes:
-      label: MUD client / MUD
-      description: Include TinyFugue build and MUD when relevant.
-      placeholder: TinyFugue 5.2.x / AVATAR
+      label: MUD, client, and desktop OS
+      description: Include the client version if known. Omit anything private.
+      placeholder: AVATAR / Mudlet / Windows 11 x64
 
-  - type: textarea
-    id: reproduce
+  - type: dropdown
+    id: checkpoint
     attributes:
-      label: Steps to reproduce
-      description: Give the smallest reliable sequence that triggers the problem.
-    validations:
-      required: true
-
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behavior
-    validations:
-      required: true
-
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual behavior
-    validations:
-      required: true
-
-  - type: textarea
-    id: logs
-    attributes:
-      label: Relevant logs or diagnostics
-      description: Remove credentials, pairing tokens, private keys, and unrelated personal information.
-      render: text
-
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Checks
+      label: Last successful setup checkpoint
+      description: Pick the furthest you got. A connected HUD or an old snapshot alone is not live state.
       options:
-        - label: I searched existing issues for the same problem.
-          required: true
-        - label: I removed secrets and credentials from the report.
-          required: true
+        - I did not reach a checkpoint
+        - Found and downloaded the installer
+        - Installed and opened Imp
+        - Set up the Mudlet package or TinyFugue integration
+        - Connected to the intended Imp node
+        - Saw my own character state update during play
+        - Not sure or not applicable
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What did you expect, and what happened instead?
+      description: Include what you were doing when it happened and steps to reproduce it if you know them. A short, redacted error message can help; no logs or screenshots are required.
+    validations:
+      required: true
