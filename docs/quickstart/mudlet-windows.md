@@ -25,3 +25,6 @@ If no data arrives, confirm you reopened Imp after selecting **Local**, then
 check the Mudlet profile, package and GMCP setting. See
 [Windows troubleshooting](../install-windows.md#verify-the-installation) or
 [Mudlet package updates](../../integrations/mudlet/README.md#install-on-windows).
+
+Once you see live vitals, see the [first-use guide](../first-use.md) for HUD
+layouts and optional alerts and actions.

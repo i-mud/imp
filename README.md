@@ -34,6 +34,7 @@ The remote quick start lists the supported server and client prerequisites.
 Imp is working when it shows your intended character and the vitals visibly
 update as you play. A connection indicator or old values alone isn't enough.
 See [installation checks and troubleshooting](docs/install-windows.md#verify-the-installation).
+The [first-use guide](docs/first-use.md) explains the HUD and optional alerts and actions.
 
 ## Help, bugs, and alpha feedback
 

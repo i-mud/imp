@@ -61,3 +61,6 @@ If your server operator has already configured Direct WSS, see
 see [public and NAT requirements](../../deploy/README.md#automatic-direct-public-edge)
 and [credential recovery](../../deploy/README.md#existing-direct-credentials-and-recovery).
 Direct WSS is outside initial alpha recruitment.
+
+Once you see live vitals, see the [first-use guide](../first-use.md) for HUD
+layouts and optional alerts and actions.

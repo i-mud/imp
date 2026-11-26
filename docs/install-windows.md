@@ -141,9 +141,10 @@ confirm or save. Connection changes still take effect only after restarting Imp.
 
 See [server connection selection](../deploy/README.md#connection-selection) for
 automatic-path requirements. DNS/DDNS, router forwarding, and firewalls remain
-A successful [local NAT check](../deploy/README.md#bounded-public-verification)
+operator-owned. A successful [local NAT check](../deploy/README.md#bounded-public-verification)
 does not prove the desktop can connect from outside the network.
-operator-owned. Existing operator public edges and unsupported environments
+
+Existing operator public edges and unsupported environments
 require [advanced/manual gateway and TLS provisioning](../deploy/README.md#direct-wss-gateway-advanced);
 that section also covers status, safe public verification, and deliberate rotation.
 
