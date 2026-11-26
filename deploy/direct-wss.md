@@ -73,8 +73,10 @@ in an approved password manager), and paste it only into Imp for the intended
 server. Never put the token in a URL, shell argument, environment variable,
 server file, proxy configuration, log, screenshot, or support message.
 
-1. On the workstation, open **Settings → Connection → Manage** and select
-   **Direct**.
+1. On the workstation, select **Set up connection** or open **Settings →
+   Connection → Manage**. Choose **On another computer or server → Use
+   remote Imp credentials**. In [v0.5.4](../docs/install-windows.md#published-v054),
+   open the manager via Settings and select **Direct** instead.
 2. Enter `wss://imp.example.com/state` (with your hostname) in **WSS state URL**.
    The URL must use `wss://`, end in `/state`, and have no user info, query, or
    fragment. Paste the 43-character token separately into **Pairing token**.
@@ -117,8 +119,8 @@ server file, proxy configuration, log, screenshot, or support message.
   and treat it as a containment issue before retrying. See the
   [operator rotation and verification details](operator-reference.md#direct-wss-gateway-advanced).
 
-- To remove Direct credentials **from this desktop**, choose **Local**,
-  **Managed**, or **External** and select **Save**, then **Remove credentials and
+- To remove Direct credentials **from this desktop**, choose a different route
+  in the Connection dialog and select **Save**, then **Remove credentials and
   save**. **Cancel** at that confirmation keeps the saved Direct configuration.
   The switch takes effect when you quit and reopen Imp. This removes the saved
   URL and token on this desktop only; it does not revoke the token or stop the

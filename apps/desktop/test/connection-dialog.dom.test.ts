@@ -3,7 +3,11 @@ import { fromStore, writable } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import ConnectionDialog from '../src/components/ConnectionDialog.svelte';
-import type { ConnectionSettings, ConnectionSettingsUpdate } from '../src/lib/tunnel.ts';
+import type {
+  ConnectionSettings,
+  ConnectionSettingsState,
+  ConnectionSettingsUpdate,
+} from '../src/lib/tunnel.ts';
 
 const DIRECT: ConnectionSettings = {
   mode: 'direct',
@@ -11,6 +15,18 @@ const DIRECT: ConnectionSettings = {
   remoteUrl: 'wss://fixture.invalid/state',
   hasPairingToken: true,
 };
+const LOCAL: ConnectionSettings = {
+  mode: 'local',
+  sshTarget: '',
+  remoteUrl: '',
+  hasPairingToken: false,
+};
+const TOKEN = 'x'.repeat(42) + 'A';
+
+function connectionState(saved: ConnectionSettings | null): ConnectionSettingsState {
+  return { running: saved, saved, pendingRestart: false };
+}
+
 const mounted: object[] = [];
 afterEach(async () => {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -20,12 +36,13 @@ afterEach(async () => {
 });
 
 async function setup(
-  settings = DIRECT,
+  settings: ConnectionSettings | null = DIRECT,
   onsave = vi.fn<ComponentProps<typeof ConnectionDialog>['onsave']>().mockResolvedValue(true),
+  loadError: string | null = null,
 ) {
   // JSDOM ties document focus to element focus instead of tracking an active window.
   vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-  const settingsStore = writable(settings);
+  const settingsStore = writable(connectionState(settings));
   const errorStore = writable<string | null>(null);
   const currentSettings = fromStore(settingsStore);
   const currentError = fromStore(errorStore);
@@ -43,7 +60,7 @@ async function setup(
           get saveError() {
             return currentError.current;
           },
-          loadError: null,
+          loadError,
           onsave,
           onclose,
         },
@@ -51,7 +68,11 @@ async function setup(
     );
   });
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  expect(document.activeElement).toBe(target.querySelector('input[name="connection-mode"]:checked'));
+  const locations = target.querySelectorAll<HTMLInputElement>('input[name="client-location"]');
+  const expected = loadError
+    ? target.querySelector<HTMLButtonElement>('[aria-label="Close connection settings"]')
+    : ([...locations].find((radio) => radio.checked) ?? locations[0]);
+  expect(document.activeElement).toBe(expected);
   return { onsave, onclose, settingsStore, errorStore };
 }
 
@@ -72,8 +93,16 @@ async function click(element: HTMLElement): Promise<void> {
 }
 
 async function choose(mode: string): Promise<void> {
-  const radio = document.querySelector<HTMLInputElement>(`input[name="connection-mode"][value="${mode}"]`);
-  if (!radio) throw new Error(`Missing mode: ${mode}`);
+  if (mode !== 'local') {
+    const remote = document.querySelector<HTMLInputElement>('input[name="client-location"][value="remote"]')!;
+    if (!remote.checked) await click(remote);
+  }
+  if (mode === 'external') {
+    const advanced = document.querySelector<HTMLDetailsElement>('details')!;
+    if (!advanced.open) await click(advanced.querySelector('summary')!);
+  }
+  const radio = document.querySelector<HTMLInputElement>(`input[type="radio"][value="${mode}"]`);
+  if (!radio) throw new Error(`Missing route: ${mode}`);
   await click(radio);
 }
 
@@ -97,6 +126,135 @@ async function submit(): Promise<void> {
 function warning(): HTMLElement | null {
   return document.querySelector('#discard-direct-warning');
 }
+
+describe('ConnectionDialog route editor', () => {
+  it('opens without an implicit route and saves Local without remote fields', async () => {
+    const { onsave } = await setup(null);
+    expect(document.querySelector('legend')?.textContent).toBe('Where does your MUD client run?');
+    expect(document.querySelector('dd')?.textContent).toContain('No connection configured');
+    expect(document.querySelector('input:checked')).toBeNull();
+    expect(document.querySelector('input[name="remote-method"]')).toBeNull();
+    expect(button('Save').disabled).toBe(true);
+    await submit();
+    expect(onsave).not.toHaveBeenCalled();
+
+    await choose('local');
+    expect(document.querySelector('input:not([type="radio"])')).toBeNull();
+    await submit();
+    expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'local' });
+  });
+
+  it('reveals only the selected remote form and keeps manual forwarding under Advanced', async () => {
+    const { onsave } = await setup(null);
+    await click(document.querySelector<HTMLInputElement>('input[name="client-location"][value="remote"]')!);
+    expect(document.querySelector('fieldset:nth-of-type(2) legend')?.textContent).toBe(
+      'How should Imp connect?',
+    );
+    expect(document.querySelector('input[name="remote-method"]:checked')).toBeNull();
+    expect(document.querySelector('details')?.open).toBe(false);
+    expect(document.querySelector('details summary')?.textContent).toBe('Advanced');
+    expect(button('Save').disabled).toBe(true);
+
+    await choose('managed');
+    const ssh = document.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(ssh?.labels?.[0]?.textContent).toContain('SSH target');
+    expect(document.querySelector('input[type="url"], input[type="password"]')).toBeNull();
+    await input('text', '   ');
+    await submit();
+    expect(document.activeElement).toBe(ssh);
+    expect(ssh?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe('Enter your SSH target.');
+    expect(onsave).not.toHaveBeenCalled();
+
+    await input('text', ' office-host ');
+    await submit();
+    expect(onsave).toHaveBeenNthCalledWith(1, { mode: 'managed', sshTarget: 'office-host' });
+
+    await choose('external');
+    expect(document.querySelector('details')?.open).toBe(true);
+    expect(document.querySelector('details input:checked + span')?.textContent).toContain(
+      'Use my own SSH tunnel',
+    );
+    expect(document.querySelector('details input:checked + span small')?.textContent).toBe('External SSH');
+    expect(document.querySelector('input:not([type="radio"])')).toBeNull();
+    await submit();
+    expect(onsave).toHaveBeenNthCalledWith(2, { mode: 'external' });
+  });
+
+  it('reopens a saved route on its own location and method without further navigation', async () => {
+    const tunnel = { ...LOCAL, mode: 'external' as const };
+    const { onsave } = await setup(tunnel);
+    expect(document.querySelector<HTMLInputElement>('input[name="client-location"]:checked')?.value).toBe(
+      'remote',
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="remote-method"]:checked')?.value).toBe(
+      'external',
+    );
+    expect(document.querySelector('details')?.open).toBe(true);
+    expect(document.activeElement).toBe(document.querySelector('input[name="client-location"]:checked'));
+    expect(button('Save').disabled).toBe(false);
+    const labels = [...document.querySelectorAll('.choice small')].map((item) => item.textContent);
+    expect(labels).toEqual(['Managed SSH', 'Direct WSS', 'External SSH']);
+    await submit();
+    expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'external' });
+  });
+
+  it('reopens Local and Direct with their fields visible and no technical names on Local', async () => {
+    await setup(LOCAL);
+    expect(document.querySelector<HTMLInputElement>('input[name="client-location"]:checked')?.value).toBe(
+      'local',
+    );
+    expect(document.querySelector('small')).toBeNull();
+    expect(document.querySelector('input[name="remote-method"]')).toBeNull();
+    await unmount(mounted.pop()!);
+    document.body.replaceChildren();
+    await setup(DIRECT);
+    expect(document.querySelector<HTMLInputElement>('input[name="remote-method"]:checked')?.value).toBe(
+      'direct',
+    );
+    expect(document.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(DIRECT.remoteUrl);
+  });
+
+  it('keeps user edits when only the save error changes', async () => {
+    const { errorStore } = await setup({ ...DIRECT, mode: 'managed', sshTarget: 'saved-host' });
+    await input('text', 'typed-host');
+    flushSync(() => errorStore.set('Could not save native connection settings.'));
+    expect(document.querySelector<HTMLInputElement>('input[type="text"]')?.value).toBe('typed-host');
+  });
+
+  it('shows the running route separately from the saved pending route', async () => {
+    const { settingsStore } = await setup(DIRECT);
+    expect(document.querySelector('dl')?.textContent).toContain('In use');
+    expect(document.querySelector('dl')?.textContent).not.toContain('Saved for next launch');
+    flushSync(() => settingsStore.set({ running: DIRECT, saved: LOCAL, pendingRestart: true }));
+    const summaries = [...document.querySelectorAll('dl > div')].map((row) => row.textContent);
+    expect(summaries[0]).toContain(DIRECT.remoteUrl);
+    expect(summaries[1]).toContain('Saved for next launch');
+    expect(summaries[1]).toContain('This computer');
+
+    flushSync(() => settingsStore.set({ running: DIRECT, saved: DIRECT, pendingRestart: true }));
+    expect(document.querySelector('dl')?.textContent).toContain('A different pairing token is saved.');
+  });
+
+  it('shows the settings-read error and does not offer an editor or a save', async () => {
+    const message = 'Restore the saved connection file, then restart Imp.';
+    const { onsave } = await setup(null, undefined, message);
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(message);
+    expect(document.querySelector('form')).toBeNull();
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('wraps keyboard focus inside the modal at both tab boundaries', async () => {
+    await setup();
+    const titleClose = document.querySelector<HTMLButtonElement>('[aria-label="Close connection settings"]')!;
+    const footerClose = button('Close');
+    footerClose.focus();
+    footerClose.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(titleClose);
+    titleClose.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    expect(document.activeElement).toBe(footerClose);
+  });
+});
 
 describe('ConnectionDialog credential-discard interactions', () => {
   it.each(['local', 'external', 'managed'])('requires explicit approval for Direct → %s', async (mode) => {
@@ -122,7 +280,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
       mode === 'managed' ? { mode, sshTarget: 'reviewed-host' } : { mode },
     );
     expect(warning()).toBeNull();
-    expect(document.querySelector('[role="status"]')?.textContent).toContain('Restart Imp');
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Connection settings saved.');
     await vi.waitFor(() => {
       flushSync();
       expect(document.activeElement).toBe(button('Save'));
@@ -131,7 +289,8 @@ describe('ConnectionDialog credential-discard interactions', () => {
 
   it('Cancel keeps pending edits and the saved settings without saving', async () => {
     const { onsave } = await setup();
-    const pendingToken = 'p'.repeat(43);
+    const pendingToken = TOKEN;
+    await choose('direct');
     await input('url', 'wss://pending.fixture.invalid/state');
     await input('password', pendingToken);
     await choose('managed');
@@ -173,9 +332,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
     await submit();
     expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: 'reviewed-host' });
     expect(
-      [...document.querySelectorAll('button, input')].every(
-        (element) => (element as HTMLInputElement).disabled,
-      ),
+      [...document.querySelectorAll('button, input')].every((element) => element.matches(':disabled')),
     ).toBe(true);
     await click(button('Saving…'));
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -192,12 +349,13 @@ describe('ConnectionDialog credential-discard interactions', () => {
     await submit();
     const staleConfirm = button('Remove credentials and save');
     flushSync(() => {
-      document.querySelector<HTMLInputElement>('input[value="external"]')!.click();
+      document.querySelector<HTMLInputElement>('input[name="client-location"][value="remote"]')!.click();
       staleConfirm.click();
     });
     await settle();
     expect(warning()).toBeNull();
     expect(onsave).not.toHaveBeenCalled();
+    await choose('external');
     await submit();
     expect(onsave).not.toHaveBeenCalled();
     await click(button('Remove credentials and save'));
@@ -270,7 +428,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
     await choose('managed');
     await input('text', 'pending-host');
     await submit();
-    flushSync(() => settingsStore.set({ ...DIRECT, sshTarget: 'refreshed-host' }));
+    flushSync(() => settingsStore.set(connectionState({ ...DIRECT, sshTarget: 'refreshed-host' })));
     expect(warning()).toBeNull();
     expect(document.querySelector<HTMLInputElement>('input[value="direct"]')?.checked).toBe(true);
     expect(onsave).not.toHaveBeenCalled();
@@ -282,47 +440,77 @@ describe('ConnectionDialog credential-discard interactions', () => {
     expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: 'refreshed-host' });
   });
 
-  it('guides token reuse only for the saved URL, without blocking native validation', async () => {
+  it('reuses only the saved endpoint and requires a replacement token for a new endpoint', async () => {
     const { onsave } = await setup();
+    await choose('direct');
     const keep = 'Leave the token blank to keep your saved credential.';
-    const enter = 'Enter the pairing token for this endpoint.';
     const equivalentUrl = 'wss://FIXTURE.invalid:443/state';
     const replacementUrl = 'wss://replacement.invalid/state';
-    expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+    const token = document.querySelector<HTMLInputElement>('input[type="password"]')!;
+    expect(token.value).toBe('');
     expect(document.body.textContent).toContain(keep);
 
     await input('url', equivalentUrl);
-    expect(document.body.textContent).toContain(enter);
-    expect(document.body.textContent).not.toContain(keep);
-    await click(button('Save'));
+    expect(document.body.textContent).toContain(keep);
+    await submit();
     expect(onsave).toHaveBeenNthCalledWith(1, { mode: 'direct', remoteUrl: equivalentUrl });
 
-    await input('url', DIRECT.remoteUrl);
-    expect(document.body.textContent).toContain(keep);
-    await click(button('Save'));
-    expect(onsave).toHaveBeenNthCalledWith(2, { mode: 'direct', remoteUrl: DIRECT.remoteUrl });
-
     await input('url', replacementUrl);
-    expect(document.body.textContent).toContain(enter);
-    await click(button('Save'));
-    expect(onsave).toHaveBeenNthCalledWith(3, { mode: 'direct', remoteUrl: replacementUrl });
+    expect(document.body.textContent).not.toContain(keep);
+    await submit();
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(token.getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(token);
 
-    const replacement = 'x'.repeat(43);
-    await input('password', replacement);
-    await click(button('Save'));
-    expect(onsave).toHaveBeenNthCalledWith(4, {
+    await input('password', TOKEN);
+    await input('url', 'wss://other.invalid/state');
+    expect(token.value).toBe('');
+    await input('url', replacementUrl);
+    await input('password', TOKEN);
+    await submit();
+    expect(onsave).toHaveBeenNthCalledWith(2, {
       mode: 'direct',
       remoteUrl: replacementUrl,
-      pairingToken: replacement,
+      pairingToken: TOKEN,
     });
+    expect(token.value).toBe('');
     expect(warning()).toBeNull();
   });
 
-  it('asks for a token when no Direct credential is saved', async () => {
-    await setup({ ...DIRECT, hasPairingToken: false });
-    expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
-    expect(document.body.textContent).toContain('Enter the pairing token for this endpoint.');
-    expect(document.body.textContent).not.toContain('Leave the token blank');
+  it.each([
+    'https://fixture.invalid/state',
+    'wss://me:secret@fixture.invalid/state',
+    'wss://fixture.invalid/state?token=secret',
+    'wss://fixture.invalid/state#',
+    'wss://fixture.invalid/other',
+  ])('blocks an unsafe or invalid Direct URL', async (url) => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    await input('url', url);
+    await input('password', TOKEN);
+    await submit();
+    const field = document.querySelector('input[type="url"]');
+    expect(field?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(field);
+    expect(document.querySelector('[role="alert"]')?.textContent).not.toContain('secret');
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('requires a canonical token when no Direct credential is saved', async () => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    await input('url', DIRECT.remoteUrl);
+    await input('password', 'x'.repeat(43));
+    await submit();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Enter a valid 43-character');
+    expect(onsave).not.toHaveBeenCalled();
+    await input('password', TOKEN);
+    await submit();
+    expect(onsave).toHaveBeenCalledExactlyOnceWith({
+      mode: 'direct',
+      remoteUrl: DIRECT.remoteUrl,
+      pairingToken: TOKEN,
+    });
   });
 
   it.each([
@@ -349,6 +537,7 @@ describe('ConnectionDialog save focus', () => {
   ])('handles $focus focus after an ordinary save (success: $success)', async ({ success, focus }) => {
     const deferred = Promise.withResolvers<boolean>();
     await setup({ ...DIRECT, mode: 'external' }, vi.fn().mockReturnValue(deferred.promise));
+    await choose('external');
     const save = button('Save');
     save.focus();
     await click(save);

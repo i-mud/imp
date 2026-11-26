@@ -16,8 +16,8 @@ use gateway::{GatewayStatus, GatewaySupervisor};
 use node::{NodeStatus, NodeSupervisor};
 use tunnel::{TunnelStatus, TunnelSupervisor, NODE_PORT, SSH_FORWARD_PORT};
 use tunnel_config::{
-    ConnectionConfigStore, ConnectionSettings, ConnectionSettingsUpdate, RuntimeConnectionConfig,
-    TunnelMode,
+    ConnectionConfigStore, ConnectionSettingsStatus, ConnectionSettingsUpdate, LoadedConfig,
+    RuntimeConnectionConfig, TunnelMode,
 };
 
 /// The desktop connection controller's exposure point for transport
@@ -46,7 +46,9 @@ fn connection_config(config: tauri::State<'_, RuntimeConnectionConfig>) -> Runti
 }
 
 #[tauri::command]
-fn connection_settings(store: tauri::State<'_, ConnectionConfigStore>) -> ConnectionSettings {
+fn connection_settings(
+    store: tauri::State<'_, ConnectionConfigStore>,
+) -> Result<ConnectionSettingsStatus, String> {
     store.settings()
 }
 
@@ -54,7 +56,7 @@ fn connection_settings(store: tauri::State<'_, ConnectionConfigStore>) -> Connec
 fn save_connection_settings(
     store: tauri::State<'_, ConnectionConfigStore>,
     update: ConnectionSettingsUpdate,
-) -> Result<ConnectionSettings, String> {
+) -> Result<ConnectionSettingsStatus, String> {
     store.save(update)
 }
 
@@ -116,20 +118,25 @@ pub fn run() {
             let config_path = config_dir.join("tunnel.json");
             let remote_access_path = config_dir.join("remote-access.json");
 
-            let config = tunnel_config::load_or_init(&config_path);
+            let config = tunnel_config::load(&config_path);
             let remote_access = remote_access::load_or_init(&remote_access_path);
             let runtime_connection = config.runtime_connection_config();
-            let config_store = ConnectionConfigStore::new(config_path, config.clone());
-            let tunnel_supervisor = match config.mode {
-                TunnelMode::External => TunnelSupervisor::external(),
-                TunnelMode::Local => TunnelSupervisor::inactive(),
-                TunnelMode::Managed => TunnelSupervisor::managed(
-                    config.ssh_target,
-                    SSH_FORWARD_PORT,
-                    Arc::clone(&runtime_owner),
-                ),
-                TunnelMode::Direct => TunnelSupervisor::direct(),
+            let tunnel_supervisor = match &config {
+                LoadedConfig::Configured(config) => match config.mode {
+                    TunnelMode::External => TunnelSupervisor::external(),
+                    TunnelMode::Local => TunnelSupervisor::inactive(),
+                    TunnelMode::Managed => TunnelSupervisor::managed(
+                        config.ssh_target.clone(),
+                        SSH_FORWARD_PORT,
+                        Arc::clone(&runtime_owner),
+                    ),
+                    TunnelMode::Direct => TunnelSupervisor::direct(),
+                },
+                LoadedConfig::Unconfigured | LoadedConfig::Unavailable => {
+                    TunnelSupervisor::inactive()
+                }
             };
+            let config_store = ConnectionConfigStore::new(config_path, config);
             let node_supervisor =
                 NodeSupervisor::local(app.handle().clone(), NODE_PORT, Arc::clone(&runtime_owner));
             let gateway_supervisor = if remote_access.wss_enabled {

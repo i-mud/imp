@@ -8,6 +8,11 @@ actions footer. Use **Expanded** to check your setup.
 
 1. **Installed:** The bottom of **Settings** shows the running Imp version.
    Check that it matches the version you installed.
+   In source builds with the new Connection dialog, **Connection not set up**
+   means no route has been saved. Select **Set up connection**, or choose
+   **Not now** and return via **Settings → Connection → Manage**. See the
+   [Windows connection guide](install-windows.md#configure-the-connection)
+   for the routes and the v0.5.4 instructions.
 2. **Connected:** **Connected to relay** / **Waiting for game data…** means Imp
    reached the relay but is still waiting for character data. An open SSH
    session alone does not prove Imp reached the relay.
@@ -17,6 +22,11 @@ actions footer. Use **Expanded** to check your setup.
 
 In either layout, hover over the status dot beside the character name:
 
+- **Connection saved** with a restart prompt: Quit Imp from the tray and
+  reopen it to use the saved connection.
+- **Connection settings unavailable:** Select **Review connection settings**.
+  If Imp cannot read the configuration, see
+  [configuration recovery](troubleshooting.md#connection-settings-are-unavailable).
 - **Connecting to relay** / **Reconnecting to relay:** Imp is trying to connect.
 - **Relay unavailable:** Imp isn't connected.
 - **Waiting for game data** / **No game feed:** Imp is connected but doesn't

@@ -225,6 +225,16 @@ stay alive and to provision `%LOCALAPPDATA%\Imp\mudlet\versions\<version>`,
 including the helper, runtime, and `Imp.mpackage`, from the separately
 installed `mudlet-bundle` resource.
 
+With `-CheckConnectionUi` (used by Windows CI) it also launches the installed
+desktop with a temporary WebView2 profile and a loopback-only debugger, after
+verifying that listener's owner. Synthetic phases cover first-use deferral,
+saving Local for restart, seeded Managed/External/Direct routes, Direct
+credential-removal confirmation, and an unreadable `tunnel.json` that must not
+be overwritten. Managed and Direct targets are a reserved loopback port with no
+listener, and the run refuses SSH config routing directives; no live data is
+asserted. It always expects the desktop-owned local node on 8787 and refuses
+occupied 8787-8789.
+
 The installed desktop runs under the real application identifier from
 `tauri.conf.json`, so it would load that identifier's settings (Direct URL and
 pairing token, SSH target) and WebView data. The script therefore requires a

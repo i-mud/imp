@@ -37,21 +37,24 @@ Implemented by:
 
 Selected by:
 
-- `createRuntimeClients()` in `config.ts`. An explicit `VITE_IMP_SOURCE`
-  is authoritative. Without it, browser/development builds default to `mock`,
-  while a Tauri build identified by `TAURI_ENV_PLATFORM` defaults to `relay`.
-- In relay mode, `connection_config` supplies the native runtime transport
-  tuple. Local mode uses the desktop-owned node on `127.0.0.1:8787`.
-  External and Managed SSH use the separate consumer endpoint on
-  `127.0.0.1:8789`. Direct WSS supplies its `wss:` state URL and transient
-  renderer authentication token from native application configuration.
+- `createRuntimeClients()` in `config.ts` selects the source and action sink.
+  Browser development defaults to `mock` and can choose a source with
+  `VITE_IMP_SOURCE`. The native desktop always uses the startup transport
+  selection supplied by `connection_config`; it cannot opt into mock.
+  An absent or unavailable runtime configuration disables the state and
+  action consumers; it does not fall back to a loopback relay. Local mode
+  uses the desktop-owned node on `127.0.0.1:8787`. External and Managed SSH
+  use the separate consumer endpoint on `127.0.0.1:8789`. Direct WSS supplies
+  its `wss:` state URL and transient renderer authentication token from native
+  application configuration.
 - `VITE_IMP_RELAY_URL` remains a local/custom relay override. Direct WSS
   never reads a pairing token or remote URL from a build-time `VITE_*` value.
 
 - Native connection settings use separate `connection_settings` and
-  `save_connection_settings` Tauri commands. They persist configuration for a
-  future application start and do not mutate the `RuntimeConnectionConfig`
-  already selected for the running source/action clients.
+  `save_connection_settings` Tauri commands. They expose safe summaries and
+  a pending-restart flag, not the credential-bearing runtime tuple. They
+  persist configuration for a future application start and do not mutate the
+  `RuntimeConnectionConfig` selected for the running source/action clients.
 
 Consumed by:
 
@@ -71,9 +74,10 @@ Two requirements land on it:
 
 Both hold because the UI's only contract is `SourceEvent`. Native setup
 establishes the local-node supervisor and, when configured, the SSH and gateway
-supervisors. Renderer startup then loads the native connection tuple before
-mounting the application, and `config.ts` constructs the matching source and
-action sink.
+supervisors. Renderer startup then loads the native startup selection and
+`config.ts` constructs the matching source and action sink only when a relay
+transport was selected. In a native relay build, opting out of first-use
+setup leaves the HUD usable for Settings but does not synthesize game data.
 
 The Settings UI is intentionally outside that runtime selection seam. It may
 edit what the next process will select, but it does not hot-swap a

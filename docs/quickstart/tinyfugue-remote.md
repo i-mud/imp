@@ -24,12 +24,18 @@ commands. If the installer cannot establish load order, follow the
 From the same [official release](https://github.com/i-mud/imp/releases) as the
 Linux bundle, download `Imp_<version>_x64-setup.exe` under **Assets**. Run it
 and open Imp. The alpha installer is unsigned; Windows may show a SmartScreen
-warning. Then choose who runs the SSH connection:
+warning. Select **Set up connection**, or open **Settings → Connection →
+Manage** if you dismissed the prompt. Choose **On another computer or server**.
+Then choose who runs the SSH connection:
 
-- **Let Imp maintain it:** Follow [Managed SSH](../../deploy/ssh.md#managed-ssh)
+- **Use my server login:** Follow [Managed SSH](../../deploy/ssh.md#managed-ssh)
   if your verified OpenSSH login works without prompts.
-- **Keep it open in a terminal:** Follow [External SSH](../../deploy/ssh.md#external-ssh)
-  if you need authentication prompts or prefer manual control.
+- **Advanced → Use my own SSH tunnel:** Follow
+  [External SSH](../../deploy/ssh.md#external-ssh) if you need authentication
+  prompts or prefer manual control.
+
+If you installed [v0.5.4](../install-windows.md#published-v054), follow the
+release-specific steps in the matching SSH section instead.
 
 An open SSH session alone doesn't prove Imp can reach the server's relay.
 

@@ -90,6 +90,7 @@ describe('desktop runtime configuration', () => {
     expect('__TAURI_INTERNALS__' in globalThis).toBe(false);
 
     const runtime = await createRuntimeClients();
+    if (runtime.setupState !== undefined) throw new Error('Expected a running mock consumer.');
 
     expect(runtime.source.id).toBe('mock');
     expect(runtime.actionSink.id).toBe('mock');

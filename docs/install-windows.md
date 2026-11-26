@@ -25,33 +25,64 @@ That confirms the desktop build, not that it is connected or receiving state.
 
 ## Configure the connection
 
-In either HUD layout, open **Settings** (gear icon), then select **Manage** in
-the **Connection** section. Select your mode below. When **Save** shows
-**Saved. Restart Imp to use this connection.**, choose **Quit Imp** in the
-tray, then reopen Imp. Closing the manager does not save or restart Imp.
+These steps apply to source builds with the new Connection dialog. For
+the published v0.5.4 release, see [Published v0.5.4](#published-v054).
 
-The manager shows **saved settings**, not necessarily the running connection.
-If you saved changes but haven't reopened Imp, restart without saving again.
-If you already applied the intended settings, there's nothing to repeat.
-An unchanged fresh install uses **External**. If you are
-switching away from Direct, read [what happens to the saved Direct credential](../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
+On a fresh launch, select **Set up connection**. **Not now** dismisses the
+prompt without choosing or saving a connection. You can return to setup or
+change an existing connection from **Settings → Connection → Manage** in
+either HUD layout. Existing valid configurations don't need setup again.
+
+A fresh installation opens **Connection** with no choice selected: choose
+where your MUD client runs and follow the matching route below. If a
+connection is already saved, the dialog opens on that route (including
+**Advanced** for External), so you only change it if you want a different
+one. Select **Save**, choose **Quit Imp** in the tray, then reopen Imp to
+apply a change. Closing the dialog does not save or restart Imp.
+
+**In use** shows which connection is active in this Imp session, not whether
+the connection is healthy. **Saved for next launch** appears only when
+the saved connection differs. If the intended connection is already saved
+for next launch, restart without saving again. If it's already in use,
+there's nothing to repeat.
+
+If switching away from Direct, read
+[what happens to the saved Direct credential](../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
 before saving.
 
+### Published v0.5.4
+
+This release doesn't show **Set up connection** on first launch. A fresh
+installation uses **External** by default. Open **Settings → Connection →
+Manage** and choose **Local**, **Managed**, **External**, or **Direct**
+directly. This release shows the saved selection, not the running connection.
+Save any change, then use **Quit Imp** in the tray and reopen it. A fresh
+v0.5.4 installation already using External doesn't need a save or restart
+to use your own SSH tunnel.
+
 ## Local
+
+Choose **On this computer**. There are no connection fields to fill in.
 
 Use [Local for Mudlet on this Windows PC](quickstart/mudlet-windows.md).
 
 ## Managed SSH
+
+Choose **On another computer or server → Use my server login**.
 
 Follow [Managed SSH](../deploy/ssh.md#managed-ssh) to verify your OpenSSH login,
 run the noninteractive preflight, and let Imp maintain the connection.
 
 ## External SSH
 
+Choose **On another computer or server → Advanced → Use my own SSH tunnel**.
+
 Follow [External SSH](../deploy/ssh.md#external-ssh) to start the loopback
 forward in a terminal and keep it running yourself.
 
 ## Direct WSS
+
+Choose **On another computer or server → Use remote Imp credentials**.
 
 Use [Direct desktop configuration](../deploy/direct-wss.md#direct-desktop-configuration)
 to pair for the first time. If you're [changing a saved endpoint](../deploy/direct-wss.md#changing-a-saved-endpoint),

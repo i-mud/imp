@@ -22,6 +22,11 @@ known values but must mark them as not fresh.
 
 ## Flow
 
+An unconfigured or unavailable native consumer starts no connection
+lifecycle. The HUD can open connection settings without polling a relay or
+dispatching actions. Saving a route leaves the consumer unchanged until the
+next application launch. See [native configuration](managed-runtime.md#desktop-tunnel-boundary).
+
 ```
 idle
  |  start()

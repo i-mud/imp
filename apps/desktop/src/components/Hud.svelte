@@ -36,7 +36,7 @@
   import {
     loadConnectionSettings,
     saveConnectionSettings,
-    type ConnectionSettings,
+    type ConnectionSettingsState,
     type ConnectionSettingsUpdate,
   } from '../lib/tunnel.ts';
   import {
@@ -59,19 +59,30 @@
 
   type Panel = 'settings' | 'actions' | 'alerts';
   type ManagerOrigin = 'footer-actions' | 'actions' | 'alerts';
+  type HudProps =
+    | {
+        setupState?: undefined;
+        model: HudModel;
+        actionSink: ActionSink;
+        subscribeText: (listener: TextSourceListener) => () => void;
+      }
+    | {
+        setupState: 'unconfigured' | 'unavailable';
+        model?: never;
+        actionSink?: never;
+        subscribeText?: never;
+      };
 
   const ACTION_SUCCESS_MS = 3000;
   const ACTION_FADE_MS = 150;
+  const SETUP_DISMISSED_STORAGE_KEY = 'imp.connection-setup-dismissed';
+  const CONNECTION_FILE_UNREADABLE =
+    'Imp could not read tunnel.json. Restore a valid file or move it aside, then restart Imp.';
+  const CONNECTION_FILE_CHANGED = 'Connection settings changed on disk. Restart Imp before saving again.';
 
-  let {
-    model,
-    actionSink,
-    subscribeText,
-  }: {
-    model: HudModel;
-    actionSink: ActionSink;
-    subscribeText: (listener: TextSourceListener) => () => void;
-  } = $props();
+  let { model, actionSink, subscribeText, setupState }: HudProps = $props();
+  let setupDismissed = $state(loadSetupDismissed());
+  let setupPendingRestart = $state(false);
   let displayMode = $state(loadDisplayMode());
   let theme = $state(loadTheme());
   let alertDefinitions = $state<AlertDefinition[]>(loadAlertDefinitions());
@@ -90,7 +101,7 @@
   let actionDialogWidth = $state<number>(EXPANDED_WINDOW_WIDTH);
   let actionSaveError = $state<string | null>(null);
   let alertSaveError = $state<string | null>(null);
-  let connectionSettings = $state<ConnectionSettings | null>(null);
+  let connectionSettings = $state<ConnectionSettingsState | null>(null);
   let connectionLoadError = $state<string | null>(null);
   let connectionSaveError = $state<string | null>(null);
   let connectionDialogInvoker: HTMLButtonElement | null = null;
@@ -104,7 +115,7 @@
   };
 
   onMount(() =>
-    subscribeText((event) => {
+    subscribeText?.((event) => {
       for (const trigger of evaluateTextAlerts(alertDefinitions, event.text)) {
         void dispatchAlert(textAlertEvent(trigger.definition), trigger.definition, DESKTOP_ALERT_EFFECTS);
       }
@@ -127,14 +138,32 @@
     };
   });
 
-  const freshness = $derived(freshnessOf(model));
-  const isFresh = $derived(freshness === 'fresh' && model.hasData);
-  const status = $derived(statusIndicatorOf(model));
-  const statusLabel = $derived(statusLabelOf(model));
-  const character = $derived(model.state.character);
-  const target = $derived(model.state.target);
+  const isFresh = $derived(model !== undefined && freshnessOf(model) === 'fresh' && model.hasData);
+  const status = $derived(model === undefined ? 'down' : statusIndicatorOf(model));
+  const statusLabel = $derived(model === undefined ? '' : statusLabelOf(model));
+  const character = $derived(model?.state.character ?? null);
+  const target = $derived(model?.state.target ?? null);
   const characterName = $derived(character?.name ?? 'Imp');
   const showMana = $derived(character?.mana?.max !== 0);
+  const showSetupPrompt = $derived(setupState === 'unconfigured' && !setupDismissed && !setupPendingRestart);
+
+  function loadSetupDismissed(): boolean {
+    try {
+      return globalThis.localStorage?.getItem(SETUP_DISMISSED_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  function dismissSetup(): void {
+    setupDismissed = true;
+    try {
+      globalThis.localStorage?.setItem(SETUP_DISMISSED_STORAGE_KEY, 'true');
+    } catch {
+      // Local UI preferences must not interfere with HUD rendering.
+    }
+    void focusPanelControl('[aria-label="Settings"]');
+  }
 
   function setDisplayMode(mode: DisplayMode, keyboard: boolean): void {
     openPanel = keyboard ? 'settings' : null;
@@ -255,19 +284,30 @@
       }
 
       connectionSettings = loaded;
-    } catch {
+      setupPendingRestart = loaded.pendingRestart;
+    } catch (error) {
       if (connectionDialogInvoker === invoker) {
-        connectionLoadError = 'Could not load native connection settings.';
+        connectionLoadError =
+          error === CONNECTION_FILE_UNREADABLE
+            ? error
+            : 'Could not load native connection settings. Restart Imp and try again.';
       }
     }
   }
 
   function closeConnectionDialog(): void {
+    const enteredFromSettings = connectionDialogInvoker?.hasAttribute('data-connection-manager-trigger');
     connectionDialogInvoker = null;
     connectionDialogOpen = false;
-    openPanel = 'settings';
+    openPanel = enteredFromSettings ? 'settings' : null;
 
-    void focusPanelControl('[data-connection-manager-trigger]');
+    void focusPanelControl(
+      enteredFromSettings
+        ? '[data-connection-manager-trigger]'
+        : showSetupPrompt || setupState === 'unavailable'
+          ? '[data-connection-setup-trigger]'
+          : '[aria-label="Settings"]',
+    );
   }
 
   async function setConnectionSettings(update: ConnectionSettingsUpdate): Promise<boolean> {
@@ -275,9 +315,14 @@
 
     try {
       connectionSettings = await saveConnectionSettings(update);
+      setupPendingRestart = connectionSettings.pendingRestart;
       return true;
     } catch (error) {
       switch (error) {
+        case CONNECTION_FILE_UNREADABLE:
+        case CONNECTION_FILE_CHANGED:
+          connectionSaveError = error;
+          break;
         case 'managed mode requires a non-empty sshTarget':
           connectionSaveError = 'Enter your SSH target.';
           break;
@@ -306,6 +351,7 @@
   }
 
   function invokeDefinition(definition: ActionDefinition): void {
+    if (model === undefined || actionSink === undefined) return;
     const context = model.context;
     void invokeAction(actionInvocation, actionSink, context, definition);
   }
@@ -525,6 +571,43 @@
   >
 {/snippet}
 
+{#snippet connectionSetup()}
+  <section class="empty-state" inert={exitInvoker !== null}>
+    {#if setupState === 'unavailable'}
+      <strong>Connection settings unavailable</strong>
+      <span>Review your settings to find out how to recover your connection.</span>
+      <div class="setup-controls">
+        <button
+          class="action-btn"
+          type="button"
+          data-connection-setup-trigger
+          onclick={(event) => void openConnectionDialog(event.currentTarget)}
+          >Review connection settings</button
+        >
+      </div>
+    {:else if setupPendingRestart}
+      <strong>Connection saved</strong>
+      <span>Restart Imp to use the saved connection.</span>
+    {:else}
+      <strong>Connection not set up</strong>
+      {#if showSetupPrompt}
+        <span>Set up a connection to see your character’s vitals.</span>
+        <div class="setup-controls">
+          <button
+            class="action-btn"
+            type="button"
+            data-connection-setup-trigger
+            onclick={(event) => void openConnectionDialog(event.currentTarget)}>Set up connection</button
+          >
+          <button class="manage-btn" type="button" onclick={dismissSetup}>Not now</button>
+        </div>
+      {:else}
+        <span>Open Settings → Connection → Manage to set up a connection.</span>
+      {/if}
+    {/if}
+  </section>
+{/snippet}
+
 {#snippet actionFeedback()}
   <div
     class="action-feedback-region"
@@ -603,23 +686,30 @@
       class="panel"
     >
       {#if displayMode === 'compact'}
-        <section bind:this={compactRow} class="compact-row">
+        <section bind:this={compactRow} class="compact-row" class:setup-row={setupState !== undefined}>
           <div class="row-controls" inert={exitInvoker !== null}>
-            <div class="compact-primary">
-              <StatusIndicator {status} label={statusLabel} />
-              <span class="compact-name">{characterName}</span>
-              <CompactVital label="HP" vital={character?.hp ?? null} color="var(--hp)" />
-              {#if showMana}
-                <CompactVital label="MN" vital={character?.mana ?? null} color="var(--mana)" />
-              {/if}
-              <CompactVital label="MV" vital={character?.moves ?? null} color="var(--moves)" />
-            </div>
+            {#if setupState === undefined}
+              <div class="compact-primary">
+                <StatusIndicator {status} label={statusLabel} />
+                <span class="compact-name">{characterName}</span>
+                <CompactVital label="HP" vital={character?.hp ?? null} color="var(--hp)" />
+                {#if showMana}
+                  <CompactVital label="MN" vital={character?.mana ?? null} color="var(--mana)" />
+                {/if}
+                <CompactVital label="MV" vital={character?.moves ?? null} color="var(--moves)" />
+              </div>
+            {:else}
+              <span class="compact-name">Imp</span>
+            {/if}
             <div bind:this={compactControls} class="compact-controls">
               {@render panelControls()}
             </div>
           </div>
           {#if exitInvoker !== null}
             <ExitConfirmation invoker={exitInvoker} onclose={() => (exitInvoker = null)} />
+          {/if}
+          {#if setupState !== undefined && openPanel === null}
+            {@render connectionSetup()}
           {/if}
         </section>
         {#if openPanel === 'settings'}
@@ -674,7 +764,9 @@
         <header class="titlebar">
           <div class="row-controls" inert={exitInvoker !== null}>
             <div class="identity" data-tauri-drag-region>
-              <StatusIndicator {status} label={statusLabel} />
+              {#if setupState === undefined}
+                <StatusIndicator {status} label={statusLabel} />
+              {/if}
               <span>{characterName}</span>
             </div>
             {@render panelControls()}
@@ -728,6 +820,8 @@
               onmanage={() => openManager('alerts')}
             />
           </div>
+        {:else if setupState !== undefined}
+          {@render connectionSetup()}
         {:else if isFresh && character !== null}
           <section class="content" inert={exitInvoker !== null}>
             <div class="vitals">
@@ -754,19 +848,20 @@
               <TargetPanel {target} />
             {/if}
           </section>
-        {:else if model.phase === 'connected'}
+        {:else if model?.phase === 'connected'}
           <section class="empty-state" inert={exitInvoker !== null}>
             <strong>Connected to relay</strong>
             <span>Waiting for game data…</span>
           </section>
         {:else}
           <section class="empty-state" inert={exitInvoker !== null}>
-            <strong>{model.phase === 'reconnecting' ? 'Reconnecting to relay…' : 'Relay unavailable'}</strong>
-            <span>{model.detail ?? 'Start the relay, then connect your MUD client.'}</span>
+            <strong>{model?.phase === 'reconnecting' ? 'Reconnecting to relay…' : 'Relay unavailable'}</strong
+            >
+            <span>{model?.detail ?? 'Start the relay, then connect your MUD client.'}</span>
           </section>
         {/if}
 
-        {#if openPanel === null}
+        {#if openPanel === null && setupState === undefined}
           <div class="action-footer" inert={exitInvoker !== null}>
             <ActionBar
               definitions={actions}
@@ -892,6 +987,12 @@
     line-height: 1.35;
   }
 
+  .setup-controls {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-4);
+  }
+
   .action-footer {
     display: grid;
     min-width: 0;
@@ -919,6 +1020,11 @@
     max-width: calc(560px - 2px);
     min-height: 30px;
     padding: 0 var(--space-7);
+  }
+
+  .compact-row.setup-row {
+    width: calc(var(--expanded-width) - 2px);
+    grid-template-rows: minmax(30px, auto) auto;
   }
 
   .has-compact-panel .compact-row {

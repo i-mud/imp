@@ -96,18 +96,18 @@ describe('native connection settings', () => {
   it('loads the renderer-safe settings projection from Tauri', async () => {
     setTauriRuntime(true);
 
-    invoke.mockResolvedValueOnce({
+    const settings = {
       mode: 'direct',
       sshTarget: '',
       remoteUrl: 'wss://imp.example/state',
       hasPairingToken: true,
-    });
+    };
+    invoke.mockResolvedValueOnce({ running: settings, saved: settings, pendingRestart: false });
 
     await expect(loadConnectionSettings()).resolves.toEqual({
-      mode: 'direct',
-      sshTarget: '',
-      remoteUrl: 'wss://imp.example/state',
-      hasPairingToken: true,
+      running: settings,
+      saved: settings,
+      pendingRestart: false,
     });
 
     expect(invoke).toHaveBeenCalledWith('connection_settings');
@@ -116,12 +116,13 @@ describe('native connection settings', () => {
   it('passes the update as one named Tauri command argument', async () => {
     setTauriRuntime(true);
 
-    invoke.mockResolvedValueOnce({
+    const saved = {
       mode: 'managed',
       sshTarget: 'avatar',
       remoteUrl: '',
       hasPairingToken: false,
-    });
+    };
+    invoke.mockResolvedValueOnce({ running: null, saved, pendingRestart: true });
 
     await expect(
       saveConnectionSettings({
@@ -129,10 +130,9 @@ describe('native connection settings', () => {
         sshTarget: 'avatar',
       }),
     ).resolves.toEqual({
-      mode: 'managed',
-      sshTarget: 'avatar',
-      remoteUrl: '',
-      hasPairingToken: false,
+      running: null,
+      saved,
+      pendingRestart: true,
     });
 
     expect(invoke).toHaveBeenCalledWith('save_connection_settings', {
@@ -147,10 +147,14 @@ describe('native connection settings', () => {
     setTauriRuntime(true);
 
     invoke.mockResolvedValueOnce({
-      mode: 'direct',
-      sshTarget: '',
-      remoteUrl: 'wss://new.example/state',
-      hasPairingToken: true,
+      running: null,
+      saved: {
+        mode: 'direct',
+        sshTarget: '',
+        remoteUrl: 'wss://new.example/state',
+        hasPairingToken: true,
+      },
+      pendingRestart: true,
     });
 
     await saveConnectionSettings({
