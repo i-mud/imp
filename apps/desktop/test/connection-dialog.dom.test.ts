@@ -282,24 +282,47 @@ describe('ConnectionDialog credential-discard interactions', () => {
     expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: 'refreshed-host' });
   });
 
-  it('Direct → Direct omits an empty token and passes an explicit replacement unchanged', async () => {
+  it('guides token reuse only for the saved URL, without blocking native validation', async () => {
     const { onsave } = await setup();
-    await input('url', 'wss://replacement.invalid/state');
-    await submit();
-    expect(warning()).toBeNull();
-    expect(onsave).toHaveBeenNthCalledWith(1, {
-      mode: 'direct',
-      remoteUrl: 'wss://replacement.invalid/state',
-    });
+    const keep = 'Leave the token blank to keep your saved credential.';
+    const enter = 'Enter the pairing token for this endpoint.';
+    const equivalentUrl = 'wss://FIXTURE.invalid:443/state';
+    const replacementUrl = 'wss://replacement.invalid/state';
+    expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+    expect(document.body.textContent).toContain(keep);
+
+    await input('url', equivalentUrl);
+    expect(document.body.textContent).toContain(enter);
+    expect(document.body.textContent).not.toContain(keep);
+    await click(button('Save'));
+    expect(onsave).toHaveBeenNthCalledWith(1, { mode: 'direct', remoteUrl: equivalentUrl });
+
+    await input('url', DIRECT.remoteUrl);
+    expect(document.body.textContent).toContain(keep);
+    await click(button('Save'));
+    expect(onsave).toHaveBeenNthCalledWith(2, { mode: 'direct', remoteUrl: DIRECT.remoteUrl });
+
+    await input('url', replacementUrl);
+    expect(document.body.textContent).toContain(enter);
+    await click(button('Save'));
+    expect(onsave).toHaveBeenNthCalledWith(3, { mode: 'direct', remoteUrl: replacementUrl });
+
     const replacement = 'x'.repeat(43);
     await input('password', replacement);
-    await submit();
-    expect(onsave).toHaveBeenNthCalledWith(2, {
+    await click(button('Save'));
+    expect(onsave).toHaveBeenNthCalledWith(4, {
       mode: 'direct',
-      remoteUrl: 'wss://replacement.invalid/state',
+      remoteUrl: replacementUrl,
       pairingToken: replacement,
     });
     expect(warning()).toBeNull();
+  });
+
+  it('asks for a token when no Direct credential is saved', async () => {
+    await setup({ ...DIRECT, hasPairingToken: false });
+    expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+    expect(document.body.textContent).toContain('Enter the pairing token for this endpoint.');
+    expect(document.body.textContent).not.toContain('Leave the token blank');
   });
 
   it.each([

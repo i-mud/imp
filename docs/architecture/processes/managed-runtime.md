@@ -279,8 +279,17 @@ configuration and pending edits without submitting; Close and Escape never
 confirm. Changing the destination mode or SSH target, or a failed save, requires
 fresh confirmation. Returning to Direct requires the URL and token again;
 if the token is unavailable, deliberate server-side rotation obtains a new one.
-This renderer warning does not change native validation or canonical deletion,
-and saving Direct with a blank token still preserves the stored credential.
+This renderer warning does not change native validation or canonical deletion.
+
+Omitting the token in a Direct save retains the stored token only for the same
+validated WSS state URL, including the host, effective port, and full path.
+Identical URL strings match. Different spellings may match by parsed URL
+equality only when both use ASCII letters or digits and `:/.-_[]` (for example,
+host case differences or an explicit `:443`). Otherwise the spelling must
+match exactly. No DNS or redirects are used to decide identity, and the
+configured URL is stored as supplied. A different endpoint needs an explicit
+token. A supplied token is always validated as a replacement; saving on the
+desktop does not rotate the server credential.
 
 Configuration persistence stages a complete replacement before replacing
 `tunnel.json`; failed validation or persistence leaves the previous usable

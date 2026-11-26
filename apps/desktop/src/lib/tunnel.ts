@@ -52,9 +52,8 @@ export interface ConnectionSettingsUpdate {
   readonly sshTarget?: string;
   readonly remoteUrl?: string;
   /**
-   * Omit to preserve an existing Direct-WSS token. Supplying a string,
-   * including an empty string, explicitly replaces it and is validated by
-   * the native boundary.
+   * Omit to keep the saved Direct token for the same state endpoint.
+   * Any supplied string, including an empty one, is validated as a replacement.
    */
   readonly pairingToken?: string;
 }

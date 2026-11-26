@@ -41,6 +41,24 @@ describe('desktop runtime configuration', () => {
     });
   });
 
+  it.each([
+    ['WSS://IMP.example/imp/state', 'wss://imp.example/imp/state'],
+    ['wss://imp.example:443/imp/state', 'wss://imp.example/imp/state'],
+    ['wss://imp.example/imp/extra/../state', 'wss://imp.example/imp/state'],
+    ['wss://127.1/imp/state', 'wss://127.0.0.1/imp/state'],
+    ['wss://[0:0:0:0:0:0:0:1]/imp/state', 'wss://[::1]/imp/state'],
+  ])('uses the same authenticated transport endpoint for %s and %s', (spelling, canonical) => {
+    const options = {
+      mode: 'direct' as const,
+      authenticationToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    };
+    const canonicalConnection = relayConnectionFromNative({ ...options, stateUrl: canonical });
+    const connection = relayConnectionFromNative({ ...options, stateUrl: spelling });
+    expect(canonicalConnection.stateUrl).toBe(canonical);
+    expect(connection).toEqual(canonicalConnection);
+    expect(actionUrlForStateUrl(connection.stateUrl)).toBe(canonical.replace(/\/state$/, '/action'));
+  });
+
   it('does not consult the local relay URL in Direct-WSS mode', () => {
     expect(
       relayConnectionFromNative(

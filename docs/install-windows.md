@@ -115,8 +115,9 @@ machines are mutually trusted.
 ## Direct WSS
 
 Direct mode does not use SSH. Follow the [server's Direct WSS setup](../deploy/README.md#connection-selection)
-to obtain a publicly trusted WSS endpoint and a reusable pairing token displayed
-once. In the automatic setup, Imp provisions its own restricted Caddy edge and gateway.
+to obtain a publicly trusted WSS endpoint and its pairing token. The token is
+reusable, but provisioning displays it only once. In the automatic setup, Imp
+provisions its own restricted Caddy edge and gateway.
 Never capture or redirect the provisioning output. An existing credential is
 preserved, not rotated or redisplayed, and does not imply a freshly verified
 pairing.
@@ -126,9 +127,17 @@ enter the public endpoint ending in `/state` in **WSS state URL**, and paste the
 43-character credential into **Pairing token**, not the URL. Save and restart
 Imp.
 
-The saved token is never displayed. Leave the token field blank when saving
-Direct settings to keep it; after server-side rotation, paste the replacement
-token, save, and restart Imp.
+The saved token is never displayed. Leave **Pairing token** blank to keep it
+only when saving the same validated WSS state endpoint, including its host,
+effective port, and full path. Common equivalent spellings such as an explicit
+`:443` can still count as the same endpoint; for unusual spellings, keep the
+saved URL exactly as written to retain the token.
+
+If the endpoint changes, explicitly enter the pairing token for the new
+endpoint. Saving settings does not rotate the server credential. After
+deliberate server-side rotation, enter the replacement token even if the URL
+is unchanged. A failed save leaves the previous settings intact. Successful
+changes take effect the next time Imp starts.
 
 If Direct has a saved token, saving another mode first warns that the locally
 stored Direct URL and token will be removed. **Cancel** keeps the saved

@@ -277,7 +277,27 @@
       connectionSettings = await saveConnectionSettings(update);
       return true;
     } catch (error) {
-      connectionSaveError = typeof error === 'string' ? error : 'Could not save native connection settings.';
+      switch (error) {
+        case 'direct pairing token is required when changing the remote URL':
+          connectionSaveError = 'Enter the pairing token for this endpoint or restore the saved URL.';
+          break;
+        case 'direct pairing token is required':
+        case 'direct pairing token is invalid':
+        case 'direct pairing token must be canonical 256-bit base64url':
+          connectionSaveError = 'Enter a valid 43-character pairing token from the server.';
+          break;
+        case 'direct remote URL is invalid':
+        case 'direct remote URL must use wss':
+        case 'direct remote URL must include a host':
+        case 'direct remote URL must not contain credentials':
+        case 'direct remote URL must not contain query or fragment data':
+        case 'direct remote URL must end at /state':
+          connectionSaveError =
+            'Enter a WSS state URL ending in /state, with no credentials, query, or fragment.';
+          break;
+        default:
+          connectionSaveError = 'Could not save native connection settings.';
+      }
       return false;
     }
   }

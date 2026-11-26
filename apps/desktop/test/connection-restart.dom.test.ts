@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/window', async (importOriginal) => ({
 
 import App from '../src/App.svelte';
 import { createRuntimeClients } from '../src/lib/config.ts';
-import type { ConnectionSettings } from '../src/lib/tunnel.ts';
+import type { ConnectionSettings, ConnectionSettingsUpdate } from '../src/lib/tunnel.ts';
 
 let app: object | undefined;
 const sockets: FixtureSocket[] = [];
@@ -54,6 +54,24 @@ async function click(selector: string) {
   flushSync();
 }
 
+async function input(type: string, value: string) {
+  const field = document.querySelector<HTMLInputElement>(`input[type="${type}"]`)!;
+  flushSync(() => {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await tick();
+  flushSync();
+}
+
+async function submit() {
+  await click('button[type="submit"]');
+  await vi.waitFor(() => {
+    flushSync();
+    expect(document.querySelector('button[type="submit"]:disabled')).toBeNull();
+  });
+}
+
 it('saving through App → Hud → ConnectionDialog keeps the active Direct client until restart', async () => {
   vi.stubEnv('VITE_IMP_SOURCE', 'relay');
   vi.stubGlobal('WebSocket', FixtureSocket);
@@ -73,12 +91,26 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     remoteUrl: 'wss://active.fixture.invalid/state',
     hasPairingToken: true,
   };
-  native.invoke.mockImplementation(async (command: string) => {
+  const replacementUrl = 'wss://replacement.fixture.invalid/state';
+  const replacementToken = 'A'.repeat(43);
+  let rejectReplacementOnce = true;
+  const rawFailure = `Native save details: ${replacementToken}`;
+  native.invoke.mockImplementation(async (command: string, args?: { update: ConnectionSettingsUpdate }) => {
     if (command === 'connection_config') {
       return { mode: 'direct', stateUrl: direct.remoteUrl, authenticationToken: token };
     }
     if (command === 'connection_settings') return direct;
     if (command === 'save_connection_settings') {
+      if (args?.update.mode === 'direct') {
+        if (args.update.pairingToken === undefined) {
+          throw 'direct pairing token is required when changing the remote URL';
+        }
+        if (rejectReplacementOnce) {
+          rejectReplacementOnce = false;
+          throw rawFailure;
+        }
+        return { ...direct, remoteUrl: replacementUrl };
+      }
       return { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false };
     }
     throw new Error(`Unexpected native command: ${command}`);
@@ -109,15 +141,49 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     flushSync();
     expect(document.querySelector('input[name="connection-mode"][value="local"]')).not.toBeNull();
   });
+  expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+  await input('url', replacementUrl);
+  await submit();
+  expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', {
+    update: { mode: 'direct', remoteUrl: replacementUrl },
+  });
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+    'Enter the pairing token for this endpoint or restore the saved URL.',
+  );
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  await input('url', direct.remoteUrl);
+  expect(document.body.textContent).toContain('Leave the token blank to keep your saved credential.');
+  await input('url', replacementUrl);
+
+  await input('password', replacementToken);
+  await submit();
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+    'Could not save native connection settings.',
+  );
+  expect(document.body.textContent).not.toContain(replacementToken);
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe(replacementToken);
+
+  await submit();
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
+  expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+  expect(document.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(replacementUrl);
+  expect(socket.url).toBe(direct.remoteUrl);
+
   await click('input[name="connection-mode"][value="local"]');
-  flushSync(() =>
-    document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-  );
-  await tick();
-  flushSync();
-  expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toHaveLength(
-    0,
-  );
+  await submit();
+  expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toEqual([
+    ['save_connection_settings', { update: { mode: 'direct', remoteUrl: replacementUrl } }],
+    [
+      'save_connection_settings',
+      { update: { mode: 'direct', remoteUrl: replacementUrl, pairingToken: replacementToken } },
+    ],
+    [
+      'save_connection_settings',
+      { update: { mode: 'direct', remoteUrl: replacementUrl, pairingToken: replacementToken } },
+    ],
+  ]);
   await click('button[aria-describedby="discard-direct-warning"]');
   await vi.waitFor(() => {
     flushSync();
@@ -126,7 +192,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
 
   expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', { update: { mode: 'local' } });
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toHaveLength(
-    1,
+    4,
   );
   expect(native.invoke.mock.calls.filter(([command]) => command === 'connection_config')).toHaveLength(1);
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
