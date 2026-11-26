@@ -14,8 +14,9 @@ Imp service does not require them to sign in.
    that file. Import it once per profile you want to use with Imp.
 4. In Imp, open **Settings → Connection → Manage**. If you're switching from
    **Direct**, read the [credential-removal warning](../../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
-   before saving. If **Local** isn't already active, choose **Local** and
-   select **Save**, then use **Quit Imp** in the tray and reopen Imp.
+   before saving. On a fresh install, choose **Local**, select **Save**, then
+   use **Quit Imp** in the tray and reopen Imp. If you previously saved Local,
+   reopen Imp if you haven't done so since saving; otherwise skip this step.
 5. Enable GMCP in Mudlet and log into your MUD. Bring the intended profile to
    the foreground.
 6. Check that Imp shows your character and that your vitals visibly update

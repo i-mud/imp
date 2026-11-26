@@ -91,8 +91,9 @@ accepting it. Stop if the key is unexpected or has changed. Answer any
 authentication prompts in that terminal and keep it open. Press **Ctrl+C**
 there to stop your forward.
 
-A fresh desktop install already uses **External**; no save or restart is
-needed. If you're switching from another mode, choose **External** in
+An unchanged fresh install uses **External**; no save or restart is needed.
+If you already saved External, reopen Imp unless you've done so since saving.
+If you're switching from another mode, choose **External** in
 **Settings → Connection → Manage**, select **Save**, then use **Quit Imp** in
 the tray and reopen Imp.
 

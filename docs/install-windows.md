@@ -30,8 +30,10 @@ the **Connection** section. Select your mode below. When **Save** shows
 **Saved. Restart Imp to use this connection.**, choose **Quit Imp** in the
 tray, then reopen Imp. Closing the manager does not save or restart Imp.
 
-**External** is the fresh-install default. If it's already active and still
-the mode you want, don't save or restart just to select it again. If you are
+The manager shows **saved settings**, not necessarily the running connection.
+If you saved changes but haven't reopened Imp, restart without saving again.
+If you already applied the intended settings, there's nothing to repeat.
+An unchanged fresh install uses **External**. If you are
 switching away from Direct, read [what happens to the saved Direct credential](../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
 before saving.
 

@@ -132,8 +132,9 @@ session don't establish that.
   running connection. Closing the dialog doesn't save or apply changes.
 - **Check and recover:** In **Settings → Connection → Manage**, choose the
   intended mode and **Save**. After **Saved. Restart Imp to use this connection.**,
-  use **Quit Imp** in the Windows notification area, then reopen Imp. Don't
-  restart just to select the mode that's already active. When switching away
+  use **Quit Imp** in the Windows notification area, then reopen Imp. If you
+  already saved the intended settings, restart only if you haven't reopened
+  Imp since saving. The displayed selection is the saved one. When switching away
   from Direct, **Remove credentials and save** deletes the locally stored
   Direct URL and token; **Cancel** preserves the saved configuration. Before
   confirming, make sure you can re-enter both if you intend to return to Direct.

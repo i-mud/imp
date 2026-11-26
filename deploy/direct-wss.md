@@ -135,8 +135,10 @@ Leave **Pairing token** blank only when keeping the saved endpoint and its
 unchanged token. Paste the correct token for a different endpoint, or the
 replacement after rotation even if the URL hasn't changed.
 
-In **v0.5.3**, a blank-token save can reuse the previous token for a different
-Direct URL. Builds with [#66](https://github.com/i-mud/imp/pull/66) reject this:
+Upgrade to [v0.5.4](https://github.com/i-mud/imp/releases/tag/v0.5.4) or later.
+In v0.5.3 and affected older versions, saving a different Direct URL with a
+blank token can reuse the previous credential. v0.5.4 is the first published
+release that rejects this:
 the native check compares the validated host, effective port and full path,
 accepting exact saved text and equivalent simple ASCII spellings such as
 adding the default `:443`. The form offers the keep-token hint only when the
