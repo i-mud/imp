@@ -130,6 +130,8 @@ jobs:
 
       - name: Test installed first launch
         timeout-minutes: 10
+        env:
+          IMP_ACCEPTANCE_RUNNER: ${{ runner.environment }}
         run: ./scripts/test-installed-first-launch.ps1 -Installer (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*.exe).FullName -CheckConnectionUi
 
       - name: Upload NSIS installer
