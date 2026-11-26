@@ -10,6 +10,13 @@ public release versions.
 
 No changes yet.
 
+## [0.5.4] - 2026-11-26
+
+### Bug Fixes
+
+- bind stored Direct credentials to their endpoint ([95c5f7e](https://github.com/i-mud/imp/commit/95c5f7e375a5fcbae763bd2b945e1068700bae05))
+- preserve actionable Managed SSH target validation ([5b31248](https://github.com/i-mud/imp/commit/5b312481e7b797852ee4b9d00ea0b422f60ff01a))
+
 ## [0.5.3] - 2026-11-25
 
 ### Bug Fixes
