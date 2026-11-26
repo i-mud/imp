@@ -211,8 +211,8 @@ Configuration and state directories are kept private to the user.
   existing gateway and public-edge state is preserved.
 - **direct** requires live services and a public DNS hostname. When no
   `gateway.env` exists, it also requires interactive stdin/stdout for a new
-  verified one-time token handoff. With retained credentials, completion reports
-  preservation, not fresh public verification or a new token.
+  verified handoff of a reusable token displayed once. With retained credentials,
+  completion reports preservation, not fresh public verification or a new token.
   `--hostname` and `--behind-nat` are valid only with Direct;
   `--connection direct --no-start` is rejected.
 - **none** installs normal components without configuring fresh Direct access.
@@ -240,9 +240,14 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8789:127.0.0.1:8787 imp-vps
 
 Replace `imp-vps` with your SSH host alias. Desktop port `8789` forwards to
 server port `8787`; do not use desktop port `8787`, which belongs to the
-desktop-owned local node. In either desktop mode, select **Save**, then use
-**Quit Imp** in the tray and reopen Imp. **Managed**, **External**, **Direct**,
-and **Local** are desktop choices, not four server installation modes.
+desktop-owned local node. If you change the desktop mode or settings, select
+**Save**, then use **Quit Imp** in the tray and reopen Imp. A fresh desktop
+already uses **External**; no save or restart is needed. An open SSH session
+does not prove Imp can reach the relay. A reachable relay does not prove the
+game feed is live. See the [player quick start](../docs/quickstart/tinyfugue-remote.md).
+
+**Managed**, **External**, **Direct**, and **Local** are desktop choices, not
+four server installation modes.
 
 ### Automatic Direct public edge
 
@@ -347,7 +352,8 @@ activation, trusted HTTPS GETs to `/unknown`, `/ingest`, and
 `/action-consumer` must each return `404`. NAT readiness dials `127.0.0.1:443`
 while keeping the public hostname for TLS SNI, certificate hostname validation,
 and HTTP Host; the locally presented certificate must validate against normal
-public trust. It does not require the server to reach its own router public IP.
+public trust. It does not require the server to reach its own router public IP
+and does not establish reachability from outside the network.
 Directly-addressed verification continues dialing normal public DNS.
 Certificate errors, redirects, proxy errors, and other HTTP statuses are not
 success; environment proxies are ignored and readiness is bounded.
@@ -356,7 +362,7 @@ Only then does the installer invoke `~/.local/bin/imp-direct-wss setup
 NAT adds `--verify-via-loopback`. It never pipes, captures, parses, or persists
 the provisioning output. The provisioning command owns token generation,
 digest persistence, local/public authenticated verification, rollback, and
-one-time token display.
+displaying the reusable token once.
 
 Failure does not print Direct-ready instructions. The helper restores the
 previous owned listener state, leaving a newly created listener stopped and
@@ -578,7 +584,7 @@ authenticated `/state` protocol-v2 hello are verified. If it was inactive, it
 remains inactive (and retains its previous enabled/disabled state); no
 network preflight or activation occurs.
 
-To require public-edge verification **before** the one-time token handoff:
+To require public-edge verification **before** displaying the reusable token:
 
 ```bash
 ~/.local/bin/imp-direct-wss setup --public-url wss://imp.example.com/state
