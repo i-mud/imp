@@ -311,7 +311,7 @@ function Invoke-ConnectionUi($Process, [string]$Phase) {
         }
     }
     & $Node (Join-Path $PSScriptRoot 'test-installed-connection.mjs') $DebugPort $Phase $TunnelConfig
-    if ($LASTEXITCODE) { throw "Installed connection UI phase failed: $Phase" }
+    if ($LASTEXITCODE) { throw [IO.InvalidDataException]::new("Installed connection UI phase failed: $Phase") }
 }
 
 function Assert-NoManagedRuntime([string]$Log) {
@@ -389,6 +389,7 @@ if ($CheckConnectionUi) {
         $Blocked.Bind([Net.IPEndPoint]::new([Net.IPAddress]::Loopback, 0))
         $Port = $Blocked.LocalEndPoint.Port
         $Invalid = '{"mode":'
+        $FailedPhases = @()
         foreach ($Case in @(
                 @{ Phase = 'deferred' },
                 @{ Phase = 'local' },
@@ -432,11 +433,17 @@ if ($CheckConnectionUi) {
                         }
                     }
                 }
+            } catch [IO.InvalidDataException] {
+                # Only the Local case depends on the previous (deferred) save. Security and cleanup
+                # failures remain fatal; independent seeded cases can report their own UI assertions.
+                if ($Case.Phase -eq 'deferred') { throw }
+                $FailedPhases += $Case.Phase
             } finally {
                 Stop-FixtureDesktop $App $Log
             }
             if (!$App.HasExited) { throw 'Installed desktop is still running after cleanup' }
         }
+        if ($FailedPhases) { throw "Installed connection UI assertions failed: $($FailedPhases -join ', ')" }
     } finally {
         $Blocked.Dispose()
     }

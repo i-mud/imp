@@ -55,7 +55,11 @@ function cdp(method, params) {
 }
 
 async function evaluate(expression) {
-  const { result, exceptionDetails } = await cdp('Runtime.evaluate', { expression, returnByValue: true });
+  const { result, exceptionDetails } = await cdp('Runtime.evaluate', {
+    expression,
+    returnByValue: true,
+    awaitPromise: true,
+  });
   assert.equal(exceptionDetails, undefined, 'Reading the installed page failed');
   return result.value;
 }
@@ -67,13 +71,17 @@ function visibleText(text) {
 async function click(selector, text) {
   const point = await waitFor(
     () =>
-      evaluate(`(() => {
+      evaluate(`(async () => {
       const element = [...document.querySelectorAll(${JSON.stringify(selector)})].find((candidate) =>
         candidate.getClientRects().length && !candidate.disabled &&
         (${JSON.stringify(text ?? null)} === null || candidate.textContent.trim() === ${JSON.stringify(text ?? null)}));
       if (!element) return null;
-      element.scrollIntoView({block: 'center'});
+      element.scrollIntoView({block: 'nearest'});
+      // Route and validation changes resize the native window after the DOM changes.
+      const before = element.getBoundingClientRect();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const {x, y, width, height} = element.getBoundingClientRect();
+      if (x !== before.x || y !== before.y || width !== before.width || height !== before.height) return null;
       const center = {x: x + width / 2, y: y + height / 2};
       return element.contains(document.elementFromPoint(center.x, center.y)) ? center : null;
     })()`),
@@ -125,7 +133,17 @@ const noFields = async () =>
     !(await visible(`${DIALOG} :is(input[type="text"], input[type="url"], input[type="password"])`)),
     'Unexpected connection fields',
   );
-const save = () => click(`${DIALOG} button[type="submit"]`, 'Save');
+async function save() {
+  // Observe a real form submission; a CDP mouse acknowledgement alone doesn't prove activation.
+  const submitted = evaluate(`new Promise(resolve => {
+    const form = document.querySelector('.connection-dialog form');
+    const done = () => { clearTimeout(timer); resolve(true); };
+    const timer = setTimeout(() => { form.removeEventListener('submit', done, true); resolve(false); }, 12000);
+    form.addEventListener('submit', done, {capture: true, once: true});
+  })`);
+  await click(`${DIALOG} button[type="submit"]`, 'Save');
+  ok(await submitted, 'Save did not receive a form submission');
+}
 const cancel = () => click(`${DIALOG} button`, 'Cancel');
 
 const rawConfig = () => readFileSync(tunnelConfig, 'utf8');
@@ -266,6 +284,7 @@ async function chooseExternal() {
     await click(`${DIALOG} summary`, 'Advanced');
   }
   await choose('remote-method', 'external');
+  await waitFor(async () => (await checked('remote-method')) === 'external', 'the External choice');
 }
 
 async function assertInvalid(message, selector) {
@@ -379,6 +398,13 @@ const phases = {
     ok(configIs({ mode: 'local' }), 'An unchanged save altered settings');
     await chooseExternal(); // Mode change.
     await save();
+    await waitFor(async () => {
+      ok(
+        !(await visible(`${DIALOG} .error`)),
+        'Native save returned an error on the Local to External change',
+      );
+      return config().mode === 'external';
+    }, 'the persisted mode to change from Local to External');
     await dialogShows(PENDING);
     await dialogShows('Own SSH tunnel');
     ok(config().mode === 'external', 'External was not saved');
@@ -566,6 +592,16 @@ try {
   // Messages are fixed strings, but redact token- and digest-shaped runs in case a CDP error carries one.
   const message = String(error?.message).replace(/[A-Za-z0-9_-]{40,}/g, '[redacted]');
   console.error(`Installed connection UI phase ${phase} failed: ${message}`);
+  // Allowlisted booleans/enums only. Never print the form, configuration object or native error.
+  const state = await evaluate(`(() => {
+    const d = document.querySelector('.connection-dialog');
+    const selected = name => d?.querySelector('input[name="' + name + '"]:checked')?.value;
+    return { open: !!d, local: selected('client-location') === 'local',
+      external: selected('remote-method') === 'external', submitEnabled: !!d?.querySelector('button[type=submit]:enabled'),
+      error: !!d?.querySelector('.error'), saved: !!d?.querySelector('.saved-message'),
+      pending: !!d?.innerText.includes('Saved for next launch') };
+  })()`).catch(() => null);
+  console.error('Installed form state:', state);
   process.exitCode = 1;
 } finally {
   socket.close();
