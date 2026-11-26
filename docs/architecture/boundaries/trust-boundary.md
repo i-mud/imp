@@ -143,8 +143,10 @@ gateway:
 - the settings-read API returns only whether a stored token exists, never the
   existing plaintext token merely to populate the management UI;
 - an operator-entered replacement token crosses the renderer/native boundary
-  only for the explicit save operation; an existing Direct token can instead
-  be preserved without returning it to the renderer;
+  only for the explicit save operation; the native save path may retain a
+  stored Direct token without returning it to the renderer only for the same
+  [validated state endpoint](../processes/managed-runtime.md#desktop-tunnel-boundary),
+  never merely because the mode is still Direct;
 - switching from Direct to another mode removes the persisted Direct token and
   URL rather than retaining stale credential material;
 - native configuration replacement is staged before replacing the previous
@@ -157,8 +159,8 @@ gateway:
   rotation;
 - installed Linux bundle provisioning reads no token from argv or environment
   and stores only the digest in `~/.config/imp/gateway.env`; plaintext is
-  emitted only for deliberate terminal handoff during successful setup or
-  rotation;
+  displayed once for deliberate terminal handoff during successful setup or
+  rotation; the token itself is reusable until replaced;
 - a handled rotation failure may restore the prior digest, in which case the
   prior token authenticates again and must be treated as immediate containment
   work.

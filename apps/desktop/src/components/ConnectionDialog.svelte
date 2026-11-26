@@ -30,6 +30,10 @@
   let modeGroup = $state<HTMLDivElement>();
   let initialFocusApplied = false;
 
+  const canKeepPairingToken = $derived(
+    settings?.mode === 'direct' && settings.hasPairingToken && remoteUrl === settings.remoteUrl,
+  );
+
   $effect(() => {
     const current = settings;
     if (current === null) return;
@@ -222,7 +226,6 @@
               type="password"
               spellcheck="false"
               autocomplete="off"
-              placeholder={settings.hasPairingToken ? 'Stored token will be kept' : 'Pairing token required'}
               disabled={saving}
               oninput={() => {
                 saved = false;
@@ -236,9 +239,9 @@
           </p>
 
           <p class="mode-help">
-            {settings.hasPairingToken
-              ? 'Leave the token blank to keep the currently stored credential.'
-              : 'Paste the 43-character pairing token from the server setup command.'}
+            {canKeepPairingToken
+              ? 'Leave the token blank to keep your saved credential.'
+              : 'Enter the pairing token for this endpoint.'}
           </p>
           <p class="mode-help">
             After server rotation, paste the replacement token. Save and restart Imp to use it.

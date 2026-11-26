@@ -533,11 +533,11 @@ These lower-level commands support recovery, deliberate rotation, existing
 deployments, and operator-owned/manual TLS edges. For normal supported installs,
 use [connection selection](#connection-selection) instead.
 
-Direct WSS uses one 256-bit pairing token. The gateway stores only its
-SHA-256 digest. The plaintext token is shown once by the bundle's provisioning
-command for deliberate terminal handoff to the desktop. On the VPS, never put
-the plaintext token in arguments, environment variables, files, URLs, service
-units, reverse-proxy configuration, or logs.
+Direct WSS uses one reusable 256-bit pairing token. The gateway stores only
+its SHA-256 digest. Successful setup or rotation shows the new plaintext
+token once for deliberate terminal handoff to the desktop. On the VPS, never
+put the plaintext token in arguments, environment variables, files, URLs,
+service units, reverse-proxy configuration, or logs.
 
 The bundled `imp-direct-wss` command is installed at the stable user link
 `~/.local/bin/imp-direct-wss`. Invoke that link from the installed Linux
@@ -821,8 +821,12 @@ credentials, query, or fragment, and end in `/state`.
 
 The pairing token is persisted by the native application. Imp's settings-read
 path does not return the stored plaintext token merely to populate the form.
-Leave the token field blank when editing Direct settings to keep the stored
-token, or enter the replacement after a deliberate rotation.
+Leave the token field blank only to retain it for the same validated WSS state
+endpoint (host, effective port, and full path). For a different endpoint,
+explicitly enter that endpoint's pairing token. Saving does not rotate the
+gateway credential: after deliberate server-side rotation, enter the replacement
+even if the URL is unchanged. A failed save preserves the previous settings;
+successful changes take effect on the next Imp start.
 
 Do not put the token in a URL, reverse-proxy configuration, `VITE_*`
 environment value, or WebView `localStorage`.

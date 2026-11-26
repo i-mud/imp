@@ -102,9 +102,8 @@ pub struct ConnectionSettings {
 /// One requested settings update.
 ///
 /// `pairing_token: None` means "preserve the existing Direct token" and is
-/// valid only when the currently persisted mode already has one. A supplied
-/// string is always validated as a replacement; an empty string is not a
-/// preserve sentinel.
+/// valid only for the same saved Direct endpoint. A supplied string is always
+/// validated as a replacement; an empty string is not a preserve sentinel.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSettingsUpdate {
@@ -232,20 +231,30 @@ impl TunnelConfig {
                 pairing_token: String::new(),
             },
             TunnelMode::Direct => {
-                let pairing_token = match update.pairing_token {
+                let token = match update.pairing_token.as_deref() {
                     Some(token) => token,
                     None if self.mode == TunnelMode::Direct && !self.pairing_token.is_empty() => {
-                        self.pairing_token.clone()
+                        &self.pairing_token
                     }
                     None => return Err("direct pairing token is required"),
                 };
 
-                TunnelConfig {
+                let url = validate_direct_url(&update.remote_url)?;
+                validate_direct_token(token)?;
+                if update.pairing_token.is_none()
+                    && !same_direct_endpoint(&self.remote_url, &update.remote_url, &url)
+                {
+                    return Err("direct pairing token is required when changing the remote URL");
+                }
+
+                return Ok(TunnelConfig {
                     mode: TunnelMode::Direct,
                     ssh_target: String::new(),
                     remote_url: update.remote_url,
-                    pairing_token,
-                }
+                    pairing_token: update
+                        .pairing_token
+                        .unwrap_or_else(|| self.pairing_token.clone()),
+                });
             }
         };
 
@@ -264,39 +273,61 @@ fn validate(config: &TunnelConfig) -> Result<(), &'static str> {
             Ok(())
         }
         TunnelMode::Direct => {
-            let url = Url::parse(&config.remote_url).map_err(|_| "direct remote URL is invalid")?;
-
-            if url.scheme() != "wss" {
-                return Err("direct remote URL must use wss");
-            }
-            if url.host_str().is_none() {
-                return Err("direct remote URL must include a host");
-            }
-            if !url.username().is_empty() || url.password().is_some() {
-                return Err("direct remote URL must not contain credentials");
-            }
-            if url.query().is_some() || url.fragment().is_some() {
-                return Err("direct remote URL must not contain query or fragment data");
-            }
-            if url
-                .path_segments()
-                .and_then(|mut segments| segments.next_back())
-                != Some("state")
-            {
-                return Err("direct remote URL must end at /state");
-            }
-
-            let decoded = URL_SAFE_NO_PAD
-                .decode(config.pairing_token.as_bytes())
-                .map_err(|_| "direct pairing token is invalid")?;
-
-            if decoded.len() != 32 || URL_SAFE_NO_PAD.encode(&decoded) != config.pairing_token {
-                return Err("direct pairing token must be canonical 256-bit base64url");
-            }
-
-            Ok(())
+            validate_direct_url(&config.remote_url)?;
+            validate_direct_token(&config.pairing_token)
         }
     }
+}
+
+fn validate_direct_url(value: &str) -> Result<Url, &'static str> {
+    let url = Url::parse(value).map_err(|_| "direct remote URL is invalid")?;
+
+    if url.scheme() != "wss" {
+        return Err("direct remote URL must use wss");
+    }
+    if url.host_str().is_none() {
+        return Err("direct remote URL must include a host");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("direct remote URL must not contain credentials");
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("direct remote URL must not contain query or fragment data");
+    }
+    if url
+        .path_segments()
+        .and_then(|mut segments| segments.next_back())
+        != Some("state")
+    {
+        return Err("direct remote URL must end at /state");
+    }
+
+    Ok(url)
+}
+
+fn validate_direct_token(token: &str) -> Result<(), &'static str> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(token.as_bytes())
+        .map_err(|_| "direct pairing token is invalid")?;
+
+    if decoded.len() != 32 || URL_SAFE_NO_PAD.encode(&decoded) != token {
+        return Err("direct pairing token must be canonical 256-bit base64url");
+    }
+
+    Ok(())
+}
+
+fn same_direct_endpoint(saved: &str, requested: &str, requested_url: &Url) -> bool {
+    // Outside simple ASCII spellings, do not assume native and WebView URL normalization agree.
+    let simple_ascii = |value: &str| {
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b":/.-_[]".contains(&byte))
+    };
+    saved == requested
+        || (simple_ascii(saved)
+            && simple_ascii(requested)
+            && Url::parse(saved).is_ok_and(|saved_url| &saved_url == requested_url))
 }
 
 fn persist_config(path: &Path, config: &TunnelConfig) -> Result<(), String> {
@@ -712,60 +743,78 @@ mod tests {
     }
 
     #[test]
-    fn direct_update_requires_token_when_switching_from_non_direct_mode() {
-        let result = TunnelConfig::default().updated(ConnectionSettingsUpdate {
-            mode: TunnelMode::Direct,
-            ssh_target: String::new(),
-            remote_url: "wss://imp.example/state".into(),
-            pairing_token: None,
-        });
+    fn direct_update_requires_valid_token_when_switching_from_non_direct_mode() {
+        for mode in [TunnelMode::External, TunnelMode::Local, TunnelMode::Managed] {
+            let existing = TunnelConfig {
+                mode,
+                ssh_target: "avatar".into(),
+                ..TunnelConfig::default()
+            };
+            for (token, error) in [
+                (None, "direct pairing token is required"),
+                (Some("!"), "direct pairing token is invalid"),
+                (
+                    Some(""),
+                    "direct pairing token must be canonical 256-bit base64url",
+                ),
+            ] {
+                let result = existing.updated(direct_update("wss://imp.example/state", token));
+                assert_eq!(result.unwrap_err(), error, "{mode:?}");
+            }
 
-        assert_eq!(result.unwrap_err(), "direct pairing token is required");
+            let updated = existing
+                .updated(direct_update("wss://imp.example/state", Some(VALID_TOKEN)))
+                .unwrap();
+            assert_eq!(updated.mode, TunnelMode::Direct);
+            assert_eq!(updated.pairing_token, VALID_TOKEN);
+            assert!(updated.ssh_target.is_empty());
+        }
     }
 
     #[test]
-    fn direct_update_can_preserve_existing_token_without_exposing_it() {
-        let existing = TunnelConfig {
-            mode: TunnelMode::Direct,
-            ssh_target: String::new(),
-            remote_url: "wss://old.example/state".into(),
-            pairing_token: VALID_TOKEN.into(),
-        };
-
-        let updated = existing
-            .updated(ConnectionSettingsUpdate {
-                mode: TunnelMode::Direct,
-                ssh_target: "ignored".into(),
-                remote_url: "wss://new.example/state".into(),
-                pairing_token: None,
-            })
-            .unwrap();
-
-        assert_eq!(updated.remote_url, "wss://new.example/state");
-        assert_eq!(updated.pairing_token, VALID_TOKEN);
-        assert!(updated.ssh_target.is_empty());
+    fn direct_update_retains_token_for_the_same_validated_endpoint() {
+        for (saved, requested) in [
+            (
+                "wss://imp.example/state",
+                "WSS://IMP.example:443/cache/../state",
+            ),
+            (
+                "wss://imp.example:8443/imp/state",
+                "wss://IMP.example:8443/imp/./state",
+            ),
+            ("wss://127.1/state", "wss://127.0.0.1/state"),
+            (
+                "wss://[2001:0DB8::1]/state",
+                "wss://[2001:db8::1]:443/state",
+            ),
+            ("wss://bücher.example/state", "wss://bücher.example/state"),
+            (
+                "wss://imp.example/%69mp/state",
+                "wss://imp.example/%69mp/state",
+            ),
+        ] {
+            let existing = direct_config(saved, VALID_TOKEN);
+            let updated = existing.updated(direct_update(requested, None)).unwrap();
+            assert_eq!(updated, direct_config(requested, VALID_TOKEN));
+        }
     }
 
-    #[test]
-    fn direct_update_validates_explicit_replacement_token() {
-        let existing = TunnelConfig {
+    fn direct_config(remote_url: &str, pairing_token: &str) -> TunnelConfig {
+        TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://old.example/state".into(),
-            pairing_token: VALID_TOKEN.into(),
-        };
+            remote_url: remote_url.into(),
+            pairing_token: pairing_token.into(),
+        }
+    }
 
-        let result = existing.updated(ConnectionSettingsUpdate {
+    fn direct_update(remote_url: &str, pairing_token: Option<&str>) -> ConnectionSettingsUpdate {
+        ConnectionSettingsUpdate {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
-            remote_url: "wss://new.example/state".into(),
-            pairing_token: Some(String::new()),
-        });
-
-        assert_eq!(
-            result.unwrap_err(),
-            "direct pairing token must be canonical 256-bit base64url"
-        );
+            remote_url: remote_url.into(),
+            pairing_token: pairing_token.map(str::to_owned),
+        }
     }
 
     fn failing_persist(_path: &Path, _config: &TunnelConfig) -> Result<(), String> {
@@ -883,42 +932,122 @@ mod tests {
     }
 
     #[test]
-    fn store_can_preserve_direct_token_without_returning_it() {
-        let dir = tempdir();
-        let path = dir.join("tunnel.json");
-
-        let existing = TunnelConfig {
-            mode: TunnelMode::Direct,
-            ssh_target: String::new(),
-            remote_url: "wss://old.example/state".into(),
-            pairing_token: VALID_TOKEN.into(),
-        };
+    fn store_retains_direct_token_without_returning_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let existing = direct_config("wss://imp.example/state", VALID_TOKEN);
         persist_config(&path, &existing).unwrap();
-
         let store = ConnectionConfigStore::new(path.clone(), existing);
-        let settings = store
-            .save(ConnectionSettingsUpdate {
-                mode: TunnelMode::Direct,
-                ssh_target: String::new(),
-                remote_url: "wss://new.example/state".into(),
-                pairing_token: None,
-            })
-            .unwrap();
 
-        assert_eq!(settings.mode, TunnelMode::Direct);
-        assert_eq!(settings.remote_url, "wss://new.example/state");
-        assert!(settings.has_pairing_token);
+        for url in [
+            "wss://imp.example/state",
+            "wss://IMP.example:443/proxy/../state",
+        ] {
+            let settings = store.save(direct_update(url, None)).unwrap();
+            assert_eq!(settings.remote_url, url);
+            assert!(settings.has_pairing_token);
+            assert_eq!(store.settings(), settings);
+            for settings in [settings, store.settings()] {
+                let json = serde_json::to_value(settings).unwrap();
+                assert!(json.get("pairingToken").is_none());
+                assert!(!json.to_string().contains(VALID_TOKEN));
+            }
+            assert_eq!(load_or_init(&path), direct_config(url, VALID_TOKEN));
+            assert_eq!(*store.config.lock(), direct_config(url, VALID_TOKEN));
+        }
+    }
 
-        let serialized_settings = serde_json::to_string(&settings).unwrap();
-        assert!(!serialized_settings.contains(VALID_TOKEN));
+    #[test]
+    fn store_rejects_implicit_transfers_and_invalid_updates_without_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let existing = direct_config("wss://xn--bcher-kva.example/imp/state", VALID_TOKEN);
+        persist_config(&path, &existing).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), existing.clone());
+        let changed = "direct pairing token is required when changing the remote URL";
 
-        let persisted: TunnelConfig =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for (url, token, error) in [
+            ("wss://other.example/imp/state", None, changed),
+            ("wss://xn--bcher-kva.example:8443/imp/state", None, changed),
+            ("wss://xn--bcher-kva.example/other/state", None, changed),
+            ("wss://bücher.example/imp/state", None, changed),
+            ("wss://xn--bcher-kva.example/%2e/imp/state", None, changed),
+            ("wss://xn--bcher-kva.example\\imp/state", None, changed),
+            ("not a URL", None, "direct remote URL is invalid"),
+            (
+                "ws://other.example/state",
+                Some(VALID_TOKEN),
+                "direct remote URL must use wss",
+            ),
+            (
+                "wss://user@other.example/state",
+                None,
+                "direct remote URL must not contain credentials",
+            ),
+            (
+                "wss://other.example/state?foo=bar",
+                None,
+                "direct remote URL must not contain query or fragment data",
+            ),
+            (
+                "wss://other.example/ingest",
+                None,
+                "direct remote URL must end at /state",
+            ),
+            (
+                "wss://other.example/state",
+                Some("!"),
+                "direct pairing token is invalid",
+            ),
+            (
+                "wss://other.example/state",
+                Some(""),
+                "direct pairing token must be canonical 256-bit base64url",
+            ),
+        ] {
+            assert_eq!(
+                store.save(direct_update(url, token)).unwrap_err(),
+                error,
+                "{url}"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(*store.config.lock(), existing);
+        }
+    }
 
-        assert_eq!(persisted.pairing_token, VALID_TOKEN);
-        assert_eq!(persisted.remote_url, "wss://new.example/state");
+    #[test]
+    fn store_binds_retention_to_the_last_saved_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let original = "wss://old.example/state";
+        let new = "wss://new.example/state";
+        let existing = direct_config(original, VALID_TOKEN);
+        persist_config(&path, &existing).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), existing);
+        let stale = store.settings();
 
-        std::fs::remove_dir_all(&dir).ok();
+        let replacement = URL_SAFE_NO_PAD.encode([1; 32]);
+        store.save(direct_update(new, Some(&replacement))).unwrap();
+        assert_eq!(*store.config.lock(), direct_config(new, &replacement));
+        assert_eq!(load_or_init(&path), direct_config(new, &replacement));
+        let before = std::fs::read(&path).unwrap();
+
+        assert_eq!(
+            store
+                .save(direct_update(&stale.remote_url, None))
+                .unwrap_err(),
+            "direct pairing token is required when changing the remote URL"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(*store.config.lock(), direct_config(new, &replacement));
+
+        store.save(direct_update(new, None)).unwrap();
+        assert_eq!(load_or_init(&path), direct_config(new, &replacement));
+
+        store.save(direct_update(new, Some(VALID_TOKEN))).unwrap();
+        assert_eq!(*store.config.lock(), direct_config(new, VALID_TOKEN));
+        assert_eq!(load_or_init(&path), direct_config(new, VALID_TOKEN));
     }
 
     #[test]
@@ -926,32 +1055,20 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("tunnel.json");
 
-        let existing = TunnelConfig {
-            mode: TunnelMode::Managed,
-            ssh_target: "avatar".into(),
-            remote_url: String::new(),
-            pairing_token: String::new(),
-        };
+        let existing = direct_config("wss://old.example/state", VALID_TOKEN);
         persist_config(&path, &existing).unwrap();
 
         let before = std::fs::read_to_string(&path).unwrap();
-        let store = ConnectionConfigStore::with_persist(path.clone(), existing, failing_persist);
-
+        let store =
+            ConnectionConfigStore::with_persist(path.clone(), existing.clone(), failing_persist);
+        let replacement = URL_SAFE_NO_PAD.encode([1; 32]);
         let error = store
-            .save(ConnectionSettingsUpdate {
-                mode: TunnelMode::External,
-                ssh_target: String::new(),
-                remote_url: String::new(),
-                pairing_token: None,
-            })
+            .save(direct_update("wss://new.example/state", Some(&replacement)))
             .unwrap_err();
 
         assert_eq!(error, "simulated persistence failure");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-
-        let settings = store.settings();
-        assert_eq!(settings.mode, TunnelMode::Managed);
-        assert_eq!(settings.ssh_target, "avatar");
+        assert_eq!(*store.config.lock(), existing);
 
         std::fs::remove_dir_all(&dir).ok();
     }
