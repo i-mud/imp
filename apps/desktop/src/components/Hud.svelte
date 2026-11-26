@@ -278,6 +278,9 @@
       return true;
     } catch (error) {
       switch (error) {
+        case 'managed mode requires a non-empty sshTarget':
+          connectionSaveError = 'Enter your SSH target.';
+          break;
         case 'direct pairing token is required when changing the remote URL':
           connectionSaveError = 'Enter the pairing token for this endpoint or restore the saved URL.';
           break;

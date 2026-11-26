@@ -477,6 +477,28 @@ describe.each(['expanded', 'compact'] as const)('%s panel shortcuts', (mode) => 
   });
 });
 
+it('shows actionable guidance after an empty Managed SSH target is rejected', async () => {
+  vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
+    mode: 'external',
+    sshTarget: '',
+    remoteUrl: '',
+    hasPairingToken: false,
+  });
+  const save = vi
+    .spyOn(tunnel, 'saveConnectionSettings')
+    .mockRejectedValue('managed mode requires a non-empty sshTarget');
+  mountHud('expanded');
+  click(shortcut('Settings'));
+  click(control('[data-connection-manager-trigger]'));
+  await vi.waitFor(() => click(control('input[value="managed"]')));
+  click(control('button[type="submit"]'));
+  await vi.waitFor(() =>
+    expect(control('.connection-dialog [role="alert"]').textContent).toBe('Enter your SSH target.'),
+  );
+  expect(save).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: '' });
+  expect(document.querySelector('.connection-dialog [role="status"]')).toBeNull();
+});
+
 it('ignores a Connection load from a dismissed manager after reopening', async () => {
   const stale = Promise.withResolvers<tunnel.ConnectionSettings | null>();
   const current = Promise.withResolvers<tunnel.ConnectionSettings | null>();
