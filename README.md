@@ -23,24 +23,24 @@ Use Imp only on computers where you trust the other users and programs. This app
 
 ### Remote TinyFugue on Linux
 
-- **My MUD client runs on another computer or server.** Follow the [remote TinyFugue quick start](docs/quickstart/tinyfugue-remote.md).
+- **My MUD client runs on another computer or server.** Follow the [remote TinyFugue quick start](docs/quickstart/tinyfugue-remote.md) for SSH. If your server uses a public `wss:` endpoint instead, follow the [Direct WSS guide](deploy/direct-wss.md).
 
 #### What you need
 
-The remote quick start lists the supported server and client prerequisites.
+The [remote quick start](docs/quickstart/tinyfugue-remote.md#on-the-linux-server)
+points to the supported server and TinyFugue prerequisites.
 
 ## First use
 
 Imp is working when it shows your intended character and the vitals visibly
 update as you play. A connection indicator or old values alone isn't enough.
-See [installation checks and troubleshooting](docs/install-windows.md#verify-the-installation).
-The [first-use guide](docs/first-use.md) explains the HUD and optional alerts and actions.
+The [first-use guide](docs/first-use.md) explains how to check your setup, read
+the HUD, and try optional alerts and actions.
 
 ## Help, bugs, and alpha feedback
 
-- **Setup help:** See [Windows verification and troubleshooting](docs/install-windows.md#verify-the-installation)
-  or [server diagnostics](deploy/README.md#common-failure-diagnostics). If
-  connected but not live, check the selected profile or world and its GMCP.
+- **Setup help:** Start with [troubleshooting](docs/troubleshooting.md) to
+  distinguish a connection problem from a missing or stale game feed.
 - **Bug or feature request:** Use the [issue chooser](https://github.com/i-mud/imp/issues/new/choose).
 - **Tried the alpha?** Use the [alpha feedback form](https://github.com/i-mud/imp/issues/new?template=alpha_feedback.yml),
   even if setup worked. Tell us your route, which checkpoint you reached,

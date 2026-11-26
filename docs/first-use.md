@@ -25,7 +25,7 @@ In either layout, hover over the status dot beside the character name:
 - **Game feed stalled:** No recent update. This can happen while idle, even if
   the last values remain visible.
 
-If you get stuck, see [Windows troubleshooting](install-windows.md#verify-the-installation).
+If you get stuck, see [connection and game-feed troubleshooting](troubleshooting.md).
 
 ## Optional: Add a low-health alert
 

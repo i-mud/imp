@@ -1,9 +1,7 @@
 # Quick start: Mudlet on Windows
 
-Use this route when Mudlet and Imp run on the same Windows x64 PC. You don't
-need a server installation, SSH, WSS, a pairing credential, development tools,
-or a separate Python installation. AVATAR is the only MUD whose GMCP mapping
-has been verified in live play.
+For Mudlet and Imp on the same Windows x64 PC. No server is needed.
+AVATAR is the only MUD whose GMCP mapping has been verified in live play.
 
 Use Imp only on a PC where you trust the other users and programs: the local
 Imp service does not require them to sign in.
@@ -14,17 +12,18 @@ Imp service does not require them to sign in.
 2. Install Imp and open it once. This creates `%LOCALAPPDATA%\Imp\mudlet\Imp.mpackage`.
 3. In the Mudlet profile you want to use, open **Package Manager** and install
    that file. Import it once per profile you want to use with Imp.
-4. In Imp, open **Settings → Connection → Manage**. Choose **Local** and select
-   **Save**. Use **Quit Imp** in the tray, then reopen Imp.
+4. In Imp, open **Settings → Connection → Manage**. If you're switching from
+   **Direct**, read the [credential-removal warning](../../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
+   before saving. On a fresh install, choose **Local**, select **Save**, then
+   use **Quit Imp** in the tray and reopen Imp. If you previously saved Local,
+   reopen Imp if you haven't done so since saving; otherwise skip this step.
 5. Enable GMCP in Mudlet and log into your MUD. Bring the intended profile to
    the foreground.
 6. Check that Imp shows your character and that your vitals visibly update
    during ordinary play. A connected indicator or retained values aren't enough.
 
-If no data arrives, confirm you reopened Imp after selecting **Local**, then
-check the Mudlet profile, package and GMCP setting. See
-[Windows troubleshooting](../install-windows.md#verify-the-installation) or
-[Mudlet package updates](../../integrations/mudlet/README.md#install-on-windows).
+If no data arrives, see [troubleshooting](../troubleshooting.md). When the
+package changes in a later Imp release, see [Mudlet package updates](../../integrations/mudlet/README.md#install-on-windows).
 
 Once you see live vitals, see the [first-use guide](../first-use.md) for HUD
 layouts and optional alerts and actions.

@@ -8,23 +8,15 @@ MUD <-> Mudlet <-> Lua adapter <-> local helper <-> local Imp node
 
 ## Install on Windows
 
-The Windows desktop installer carries both the shared Mudlet helper/runtime and
-the small per-profile `Imp.mpackage`.
-
-Launch Imp once after installation. The desktop provisions the package at the
-stable path:
+Follow the [local Mudlet quick start](../../docs/quickstart/mudlet-windows.md)
+for installation and per-profile setup. The Windows desktop installer carries
+the shared helper/runtime and provisions this package on launch:
 
 ```text
 %LOCALAPPDATA%\Imp\mudlet\Imp.mpackage
 ```
 
-Use Mudlet's package manager to install that file once in each profile that
-should publish to Imp. Imp does not modify Mudlet profiles automatically.
-
-To show the same-host Mudlet session in the desktop HUD, open **Settings →
-Connection → Manage**, choose **Local**, and select **Save**. Use **Quit Imp**
-in the tray, then reopen Imp. No server bundle, SSH forward, or Direct pairing
-is needed for this setup.
+Imp does not modify Mudlet profiles automatically.
 
 The package starts the desktop-provisioned helper from Imp's versioned local
 runtime. The helper always talks to the same-host Imp node on
@@ -33,10 +25,8 @@ or other remote transport.
 
 The local node runs in every connection mode. If the HUD is set to a remote
 connection, Mudlet still publishes to the local node; the HUD shows its
-selected remote source instead. On the Windows machine,
-`curl.exe --fail --silent --show-error http://127.0.0.1:8787/healthz` checks
-the local node. A foreground profile that has received character state should
-attach a producer and publish a snapshot; `"stale"` can be normal while idle.
+selected remote source instead. See [troubleshooting](../../docs/troubleshooting.md)
+if the intended profile's vitals don't update.
 
 When a later Imp version carries an updated `Imp.mpackage`, launching that
 desktop version refreshes the stable package file above. Reinstall that file in

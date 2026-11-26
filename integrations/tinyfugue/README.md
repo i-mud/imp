@@ -1,5 +1,10 @@
 # TinyFugue adapter
 
+Setting up the HUD? Use the [remote TinyFugue quick start](../../docs/quickstart/tinyfugue-remote.md)
+for SSH or the [Direct WSS guide](../../deploy/direct-wss.md) for a public
+endpoint. This page covers TinyFugue prerequisites, adapter behavior, and
+developer verification.
+
 Imp keeps MUD-specific data outside the desktop application:
 
 ```text
@@ -117,42 +122,17 @@ tf -f"$HOME/avatar/tf/.tfrc" -n
 ```
 
 the selected file is `$HOME/avatar/tf/.tfrc`, not `~/.tfrc`. Keep any other
-options that your actual invocation needs. Pass that same file as
-`--tf-startup "$HOME/avatar/tf/.tfrc"` to Imp's installer. Without `-f`,
-TinyFugue checks `.tfrc` then `tfrc` in the home directory before checking
-those names in the working directory.
-Confirm the hook will load before the startup path connects or logs in.
+options that your actual invocation needs. Without `-f`, TinyFugue checks
+`.tfrc` then `tfrc` in the home directory before checking those names in the
+working directory. Give that actual file to the [server installer](../../deploy/README.md#tinyfugue-startup-file)
+and confirm the hook loads before the startup path connects or logs in.
 
 ## Running (normal production path)
 
-Use the [server installation guide](../../deploy/README.md#install-from-a-release-bundle)
-to install the relay, feed, and capture hook. If setup requires manual
-insertion, put this line first in the actual macro-format startup file, before
-any connection/login commands:
-
-```text
-/load ~/.config/imp/capture.tf
-```
-
-Confirm your actual invocation loads it early. The hook is additive:
-sends no GMCP of its own.
-
-The installer uses an existing `~/.tfrc` by default. If it is absent, interactive
-stdin and stdout allow an explicit existing-file selection; otherwise supply
-`./install.sh --tf-startup "/path/to/your TinyFugue/startup-file"`.
-An invalid explicit file fails early; no startup file is created or guessed.
-When startup inspection is safe, the installer backs up the selected file and
-prepends the load line, preserving its original bytes, ownership and permissions.
-Duplicate detection covers one level of literal absolute or `~/` `/load` paths.
-An existing exact hook is left unchanged with an ordering warning. Recognized unsafe
-includes, BOM-prefixed files, and legacy plain-world lists remain unchanged for
-manual early-loading setup. For a legacy world list, place the hook after all
-world definitions but before connection/login, or convert the definitions to
-`/addworld` first. Do not blindly prepend a command: it ends TF's legacy loader
-mode. Arbitrary startup macros cannot be fully inspected. Neither existing-hook
-ordering nor the runtime invocation is verified by installation. See
-[`../../deploy/README.md`](../../deploy/README.md#tinyfugue-startup-file)
-for startup selection and the VPS systemd setup.
+Use the [release bundle guide](../../deploy/README.md#install-from-a-release-bundle)
+to install the relay, feed, and capture hook. Follow the [startup-file instructions](../../deploy/README.md#tinyfugue-startup-file)
+if the installer cannot establish load order. Capture is additive and sends no
+GMCP of its own.
 
 If TinyFugue is already running the corrected executable, run
 `/load ~/.config/imp/capture.tf` once after installation, before testing
@@ -205,9 +185,8 @@ the live session identity and counters; exiting TinyFugue closes its helper pipe
 
 ## GMCP login and character identity
 
-If the operator's login scripts use `GMCP_LOGIN` to negotiate GMCP capabilities
-and send `Char.Login`, confirm that the actual launched executable provides
-this hook; a version number alone does not establish that it is compiled in.
+Imp does not provide GMCP negotiation; confirm [the actual executable supports
+your login macros](#prerequisites).
 
 Imp gets character identity from `Char.Status.character_name`. Without a
 matching checkpoint, it waits for GMCP to supply identity. Imp does not send
@@ -259,8 +238,8 @@ to a private, size-rotated file set. Transient `IMP2 T` received-text events are
 explicitly excluded even when diagnostic capture is enabled. The files live under `~/.local/state/imp/diagnostics/` (mode `0700` directory, `0600`
 files, 1 MiB per file, 5 files kept). This is a debugging aid for a specific
 session, not a default; see
-[`../../deploy/README.md`](../../deploy/README.md) for enabling it under the
-VPS systemd deployment.
+[operator instructions](../../deploy/operator-reference.md#diagnostic-raw-capture-opt-in-vps)
+for enabling it under the VPS systemd deployment.
 
 ## Offline conversion and replay
 

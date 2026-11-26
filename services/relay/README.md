@@ -43,5 +43,5 @@ Selecting Direct explicitly can provision it and the supported Caddy edge;
 ordinary upgrades preserve gateway enablement and restart it only if already
 active. The operator remains responsible for public DNS and reachability, and
 for TLS and route configuration when using an operator-managed edge. See
-[server connection selection](../../deploy/README.md#connection-selection)
-and [manual gateway provisioning](../../deploy/README.md#direct-wss-gateway-advanced).
+[Direct WSS setup](../../deploy/direct-wss.md)
+and [manual gateway provisioning](../../deploy/operator-reference.md#direct-wss-gateway-advanced).
