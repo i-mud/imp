@@ -31,6 +31,9 @@ the **Connection** section. Choose a mode below and fill in its fields. Click
 **Save**, then quit and relaunch Imp when it says **Saved. Restart Imp to use
 this connection.** Closing the manager does not save or restart Imp.
 
+If **External** is already active, as on a fresh install, don't save or restart
+just to select it again.
+
 **External** is the fresh-install default. Select **Local** explicitly for
 same-host Mudlet. For either remote SSH mode, choose **SSH**
 (`--connection ssh`) on the server: Managed and External differ only in who
@@ -112,8 +115,8 @@ machines are mutually trusted.
 ## Direct WSS
 
 Direct mode does not use SSH. Follow the [server's Direct WSS setup](../deploy/README.md#connection-selection)
-to obtain a publicly trusted WSS endpoint and a one-time pairing token. In the
-automatic setup, Imp provisions its own restricted Caddy edge and gateway.
+to obtain a publicly trusted WSS endpoint and a reusable pairing token displayed
+once. In the automatic setup, Imp provisions its own restricted Caddy edge and gateway.
 Never capture or redirect the provisioning output. An existing credential is
 preserved, not rotated or redisplayed, and does not imply a freshly verified
 pairing.
@@ -138,6 +141,8 @@ confirm or save. Connection changes still take effect only after restarting Imp.
 
 See [server connection selection](../deploy/README.md#connection-selection) for
 automatic-path requirements. DNS/DDNS, router forwarding, and firewalls remain
+A successful [local NAT check](../deploy/README.md#bounded-public-verification)
+does not prove the desktop can connect from outside the network.
 operator-owned. Existing operator public edges and unsupported environments
 require [advanced/manual gateway and TLS provisioning](../deploy/README.md#direct-wss-gateway-advanced);
 that section also covers status, safe public verification, and deliberate rotation.
