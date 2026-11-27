@@ -259,6 +259,10 @@ External mode also consumes `127.0.0.1:8789`, but Imp owns no SSH process in
 that mode. Local mode consumes the desktop node directly on `8787`. Direct WSS
 uses neither consumer loopback port for the HUD connection.
 
+The [Slice 29.3a forwarding experiment](../../audits/guided-ssh-forward.md)
+tests a different listener ownership model in the native acceptance harness.
+It is not a selectable consumer and changes none of these rules.
+
 Runtime diagnostics preserve the same UI boundary. Local mode reads
 `NodeSupervisor` diagnostics; Managed/External loopback consumption uses tunnel
 diagnostics; Direct WSS uses its socket lifecycle. Components still receive only

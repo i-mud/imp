@@ -72,14 +72,39 @@ impl RuntimeOwner {
         args: impl IntoIterator<Item = &'a OsStr>,
         stdout: RuntimeStdout,
     ) -> io::Result<OwnedChild> {
-        spawn_in_job(self.job.as_raw_handle() as HANDLE, program, args, stdout)
+        spawn_in_job(
+            self.job.as_raw_handle() as HANDLE,
+            program,
+            args,
+            stdout,
+            false,
+        )
+    }
+
+    #[cfg(feature = "runtime-acceptance")]
+    #[allow(dead_code)] // Used by the acceptance harness's copy of this module.
+    pub fn spawn_duplex<'a>(
+        &self,
+        program: &'a OsStr,
+        args: impl IntoIterator<Item = &'a OsStr>,
+    ) -> io::Result<OwnedChild> {
+        spawn_in_job(
+            self.job.as_raw_handle() as HANDLE,
+            program,
+            args,
+            RuntimeStdout::Piped,
+            true,
+        )
     }
 }
 
-/// A process handle plus the parent ends of its stdout/stderr pipes.
+/// A process handle plus the parent ends of its stdio pipes.
 pub struct OwnedChild {
     process: OwnedHandle,
     id: u32,
+    #[cfg(feature = "runtime-acceptance")]
+    #[allow(dead_code)] // Used by the acceptance harness's copy of this module.
+    pub stdin: Option<File>,
     pub stdout: Option<File>,
     pub stderr: Option<File>,
 }
@@ -407,6 +432,7 @@ fn spawn_in_job<'a>(
     program: &'a OsStr,
     args: impl IntoIterator<Item = &'a OsStr>,
     stdout: RuntimeStdout,
+    pipe_stdin: bool,
 ) -> io::Result<OwnedChild> {
     let application_name = resolve_executable(program)?;
     let mut command_line = Vec::new();
@@ -417,7 +443,13 @@ fn spawn_in_job<'a>(
     }
     command_line.push(0);
 
-    let stdin_read = null_handle(true)?;
+    let (stdin_read, stdin_write) = if pipe_stdin {
+        let (read, write) = create_pipe()?;
+        make_parent_handle_noninheritable(&write)?;
+        (read, Some(write))
+    } else {
+        (null_handle(true)?, None)
+    };
     let (stdout_read, stdout_write) = match stdout {
         RuntimeStdout::Piped => {
             let (read, write) = create_pipe()?;
@@ -513,9 +545,13 @@ fn spawn_in_job<'a>(
     // SAFETY: Each read end is an owned pipe handle and ownership is transferred to File.
     let stderr = unsafe { File::from_raw_handle(stderr_read.into_raw_handle()) };
 
+    #[cfg(not(feature = "runtime-acceptance"))]
+    drop(stdin_write);
     Ok(OwnedChild {
         process,
         id: process_info.dwProcessId,
+        #[cfg(feature = "runtime-acceptance")]
+        stdin: stdin_write.map(File::from),
         stdout,
         stderr: Some(stderr),
     })
@@ -640,6 +676,7 @@ mod tests {
             command.get_program(),
             command.get_args(),
             RuntimeStdout::Piped,
+            false,
         );
         if let Ok(mut child) = result {
             let _ = child.kill();

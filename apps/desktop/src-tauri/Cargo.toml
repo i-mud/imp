@@ -20,7 +20,7 @@ required-features = ["runtime-acceptance"]
 test = false
 
 [features]
-runtime-acceptance = []
+runtime-acceptance = ["windows-sys/Win32_Networking_WinSock"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

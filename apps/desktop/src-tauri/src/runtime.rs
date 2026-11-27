@@ -1,6 +1,6 @@
 //! Lifetime ownership for the node, gateway, and managed SSH trees only.
-//! Spawns accept only executable/argv and stdout policy. Runtime children inherit
-//! cwd/environment, use null stdin and piped stderr, and are hidden on Windows.
+//! Runtime children inherit cwd/environment, use null stdin and piped stderr, and
+//! are hidden on Windows. Only the acceptance harness uses duplex pipes.
 
 #[cfg(unix)]
 #[path = "runtime/unix.rs"]
