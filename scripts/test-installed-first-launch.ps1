@@ -247,38 +247,31 @@ function Start-Desktop([string]$Log, [bool]$UseEnvironment, [ref]$Process) {
     }
 }
 
-function Start-FixtureDesktop([string]$Log) {
-    $Process = $null
-    try {
-        # Same-context env-only launch first; the policy is a hosted-CI-only fallback.
-        Start-Desktop $Log ($CheckConnectionUi -and !$PolicyActive) ([ref]$Process)
-        if (!$CheckConnectionUi) { return $Process }
-        if (Wait-DebugListener $Process 15) {
-            if (!$PolicyActive -and !$script:EvidenceShown) {
-                $script:EvidenceShown = $true
-                $null = Write-LaunchEvidence 'env-only' $Process $true
-            }
-            return $Process
+function Start-FixtureDesktop([string]$Log, [ref]$App) {
+    # The caller's finally owns the process as soon as Start-Desktop assigns it.
+    # Same-context env-only launch first; the policy is a hosted-CI-only fallback.
+    Start-Desktop $Log ($CheckConnectionUi -and !$PolicyActive) $App
+    if (!$CheckConnectionUi) { return }
+    if (Wait-DebugListener $App.Value 15) {
+        if (!$PolicyActive -and !$script:EvidenceShown) {
+            $script:EvidenceShown = $true
+            $null = Write-LaunchEvidence 'env-only' $App.Value $true
         }
-        $Label = if ($PolicyActive) { 'policy' } else { 'env-only' }
-        $Evidence = Write-LaunchEvidence $Label $Process (!$PolicyActive)
-        $Fallback = !$PolicyActive -and $Elevated -and $env:IMP_ACCEPTANCE_RUNNER -eq 'github-hosted' -and $Evidence.HostHigh
-        if (!$Fallback) { throw 'Expected a loopback WebView2 debugger; no supported fallback applies here' }
-        Stop-FixtureDesktop $Process $Log
-        if (!$Process.HasExited) { throw 'Installed desktop is still running after cleanup' }
-        $Process = $null
-        Wait-FixtureGone
-        Enable-WebViewPolicy
-        Start-Desktop $Log $false ([ref]$Process)
-        $Listening = Wait-DebugListener $Process 15
-        $null = Write-LaunchEvidence 'policy' $Process $false
-        if (!$Listening) { throw 'Expected a loopback WebView2 debugger after the executable-scoped policy launch' }
-        return $Process
-    } catch {
-        # A return transfers ownership to the caller; until then, cleanup belongs here.
-        if ($Process) { Stop-FixtureDesktop $Process $Log }
-        throw
+        return
     }
+    $Label = if ($PolicyActive) { 'policy' } else { 'env-only' }
+    $Evidence = Write-LaunchEvidence $Label $App.Value (!$PolicyActive)
+    $Fallback = !$PolicyActive -and $Elevated -and $env:IMP_ACCEPTANCE_RUNNER -eq 'github-hosted' -and $Evidence.HostHigh
+    if (!$Fallback) { throw 'Expected a loopback WebView2 debugger; no supported fallback applies here' }
+    Stop-FixtureDesktop $App.Value $Log
+    if (!$App.Value.HasExited) { throw 'Installed desktop is still running after cleanup' }
+    $App.Value = $null
+    Wait-FixtureGone
+    Enable-WebViewPolicy
+    Start-Desktop $Log $false $App
+    $Listening = Wait-DebugListener $App.Value 15
+    $null = Write-LaunchEvidence 'policy' $App.Value $false
+    if (!$Listening) { throw 'Expected a loopback WebView2 debugger after the executable-scoped policy launch' }
 }
 
 function Stop-FixtureDesktop($Process, [string]$Log) {
@@ -366,8 +359,9 @@ if (-not (Test-Helper $Bundle)) { throw "Installed Mudlet resource is incomplete
 # Tauri builds the HUD window before the setup hook that provisions; its stderr says whether
 # provisioning ran. Only the Mudlet helper lines are ever reported.
 $StandardError = Join-Path $env:TEMP ('imp-first-launch-' + [guid]::NewGuid() + '.log')
-$App = Start-FixtureDesktop $StandardError
+$App = $null
 try {
+    Start-FixtureDesktop $StandardError ([ref]$App)
     $Started = [DateTime]::UtcNow
     $Ready = $false
     while ($true) {
@@ -401,7 +395,7 @@ try {
     Write-Output ("Installed desktop $Version provisioned the Mudlet helper and stayed alive for {0:N0} s." -f
         ([DateTime]::UtcNow - $Started).TotalSeconds)
 } finally {
-    Stop-FixtureDesktop $App $StandardError
+    if ($App) { Stop-FixtureDesktop $App $StandardError }
 }
 if (-not $App.HasExited) { throw 'Installed desktop is still running after cleanup' }
 
@@ -431,9 +425,18 @@ if ($CheckConnectionUi) {
             # Allow the previous desktop's owned node and isolated WebView to exit before relaunch.
             Wait-FixtureGone
             $Log = Join-Path $env:TEMP ('imp-installed-' + [guid]::NewGuid() + '.log')
-            $App = Start-FixtureDesktop $Log
+            $App = $null
             try {
-                Invoke-ConnectionUi $App $Case.Phase
+                Start-FixtureDesktop $Log ([ref]$App)
+                try {
+                    Invoke-ConnectionUi $App $Case.Phase
+                } catch [IO.InvalidDataException] {
+                    # Only Local depends on the deferred phase's save. Let independent seeded
+                    # phases report their own UI failures without absorbing launch or cleanup errors.
+                    if ($Case.Phase -eq 'deferred') { throw }
+                    $FailedPhases += $Case.Phase
+                    continue
+                }
                 Assert-OwnedNode $Log
                 if ($Case.Phase -ne 'managed') { Assert-NoManagedRuntime $Log }
                 if ($Case.Phase -eq 'managed' -and
@@ -458,13 +461,8 @@ if ($CheckConnectionUi) {
                         }
                     }
                 }
-            } catch [IO.InvalidDataException] {
-                # Only the Local case depends on the previous (deferred) save. Security and cleanup
-                # failures remain fatal; independent seeded cases can report their own UI assertions.
-                if ($Case.Phase -eq 'deferred') { throw }
-                $FailedPhases += $Case.Phase
             } finally {
-                Stop-FixtureDesktop $App $Log
+                if ($App) { Stop-FixtureDesktop $App $Log }
             }
             if (!$App.HasExited) { throw 'Installed desktop is still running after cleanup' }
         }
