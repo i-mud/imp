@@ -1,6 +1,9 @@
 #![cfg(feature = "runtime-acceptance")]
 
 #[allow(dead_code)]
+#[path = "support/guided_forward.rs"]
+mod guided_forward;
+#[allow(dead_code)]
 #[path = "../src/runtime.rs"]
 mod runtime;
 

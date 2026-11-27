@@ -2,7 +2,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 #[cfg(test)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::net::UnixStream;
@@ -14,10 +14,14 @@ use super::RuntimeStdout;
 
 #[cfg(not(test))]
 const HELPER_MODE: &str = "--imp-runtime-owner";
+#[cfg(not(test))]
+const DUPLEX_HELPER_MODE: &str = "--imp-runtime-owner-duplex";
 #[cfg(test)]
 const TEST_COMMAND_ENV: &str = "IMP_RUNTIME_OWNER_TEST_COMMAND";
 #[cfg(test)]
 const TEST_CONTROL_FD_ENV: &str = "IMP_RUNTIME_OWNER_TEST_CONTROL_FD";
+#[cfg(test)]
+const TEST_STDIN_FD_ENV: &str = "IMP_RUNTIME_OWNER_TEST_STDIN_FD";
 const CONTROL_OK: u8 = 0;
 const CONTROL_ERROR: u8 = 1;
 const HELPER_FAILURE_EXIT: i32 = 125;
@@ -35,11 +39,42 @@ impl RuntimeOwner {
         args: impl IntoIterator<Item = &'a OsStr>,
         stdout: RuntimeStdout,
     ) -> io::Result<OwnedChild> {
+        self.spawn_with_stdin(program, args, stdout, false)
+    }
+
+    #[cfg(feature = "runtime-acceptance")]
+    #[allow(dead_code)] // Used by the acceptance harness's copy of this module.
+    pub fn spawn_duplex<'a>(
+        &self,
+        program: &'a OsStr,
+        args: impl IntoIterator<Item = &'a OsStr>,
+    ) -> io::Result<OwnedChild> {
+        self.spawn_with_stdin(program, args, RuntimeStdout::Piped, true)
+    }
+
+    fn spawn_with_stdin<'a>(
+        &self,
+        program: &'a OsStr,
+        args: impl IntoIterator<Item = &'a OsStr>,
+        stdout: RuntimeStdout,
+        pipe_stdin: bool,
+    ) -> io::Result<OwnedChild> {
         let executable = env::current_exe()?;
         let (mut control_reader, control_writer) = UnixStream::pair()?;
         control_reader.set_read_timeout(Some(Duration::from_secs(10)))?;
-        let control_writer = move_above_stdio(control_writer)?;
+        let control_writer = move_above_stdio(control_writer.into())?;
         let control_fd = control_writer.as_raw_fd();
+        // Guardian stdin is reserved for lifetime; send child stdin over a separate pipe.
+        let (stdin_read, stdin_write) = if pipe_stdin {
+            let (read, write) = io::pipe()?;
+            (
+                Some(move_above_stdio(read.into())?),
+                Some(File::from(OwnedFd::from(write))),
+            )
+        } else {
+            (None, None)
+        };
+        let stdin_fd = stdin_read.as_ref().map(AsRawFd::as_raw_fd);
         let mut guardian_command = Command::new(executable);
         let args = args.into_iter();
 
@@ -55,15 +90,26 @@ impl RuntimeOwner {
                 ])
                 .env(TEST_COMMAND_ENV, encode_command(program, args))
                 .env(TEST_CONTROL_FD_ENV, control_fd.to_string());
+            if let Some(fd) = stdin_fd {
+                guardian_command.env(TEST_STDIN_FD_ENV, fd.to_string());
+            } else {
+                guardian_command.env_remove(TEST_STDIN_FD_ENV);
+            }
         }
 
         #[cfg(not(test))]
         {
-            guardian_command
-                .arg(HELPER_MODE)
-                .arg(control_fd.to_string())
-                .arg(program)
-                .args(args);
+            if let Some(fd) = stdin_fd {
+                guardian_command
+                    .arg(DUPLEX_HELPER_MODE)
+                    .arg(control_fd.to_string())
+                    .arg(fd.to_string());
+            } else {
+                guardian_command
+                    .arg(HELPER_MODE)
+                    .arg(control_fd.to_string());
+            }
+            guardian_command.arg(program).args(args);
         }
 
         guardian_command
@@ -81,12 +127,17 @@ impl RuntimeOwner {
                 if libc::setsid() == -1 {
                     return Err(io::Error::last_os_error());
                 }
-                set_cloexec(control_fd, false)
+                set_cloexec(control_fd, false)?;
+                if let Some(fd) = stdin_fd {
+                    set_cloexec(fd, false)?;
+                }
+                Ok(())
             });
         }
 
         let mut guardian = guardian_command.spawn()?;
         drop(control_writer);
+        drop(stdin_read);
 
         let lifetime = guardian.stdin.take().expect("piped runtime lifetime");
         let stdout = guardian
@@ -111,12 +162,16 @@ impl RuntimeOwner {
             guardian.id()
         );
 
+        #[cfg(not(feature = "runtime-acceptance"))]
+        drop(stdin_write);
         Ok(OwnedChild {
             lifetime: Some(lifetime),
             guardian,
             control: control_reader,
             exit_status: None,
             id: child_pid,
+            #[cfg(feature = "runtime-acceptance")]
+            stdin: stdin_write,
             stdout,
             stderr: Some(stderr),
         })
@@ -130,6 +185,9 @@ pub struct OwnedChild {
     control: UnixStream,
     exit_status: Option<ExitStatus>,
     id: u32,
+    #[cfg(feature = "runtime-acceptance")]
+    #[allow(dead_code)] // Used by the acceptance harness's copy of this module.
+    pub stdin: Option<File>,
     pub stdout: Option<File>,
     pub stderr: Option<File>,
 }
@@ -186,25 +244,38 @@ pub fn run_helper_if_requested() {
     {
         let mut args = env::args_os();
         let _ = args.next();
-        if args.next().as_deref() != Some(OsStr::new(HELPER_MODE)) {
+        let mode = args.next();
+        let duplex = cfg!(feature = "runtime-acceptance")
+            && mode.as_deref() == Some(OsStr::new(DUPLEX_HELPER_MODE));
+        if !duplex && mode.as_deref() != Some(OsStr::new(HELPER_MODE)) {
             return;
         }
 
-        let Some(fd) = args
-            .next()
-            .and_then(|arg| arg.to_str().and_then(|value| value.parse::<i32>().ok()))
-        else {
+        let mut next_fd = || {
+            args.next()
+                .and_then(|arg| arg.to_str()?.parse::<i32>().ok())
+        };
+        let Some(fd) = next_fd() else {
             std::process::exit(HELPER_FAILURE_EXIT);
+        };
+        let stdin_fd = if duplex {
+            let Some(fd) = next_fd() else {
+                std::process::exit(HELPER_FAILURE_EXIT);
+            };
+            Some(fd)
+        } else {
+            None
         };
         let Some(program) = args.next() else {
             std::process::exit(HELPER_FAILURE_EXIT);
         };
-        exit_guardian(run_guardian(fd, program, args));
+        exit_guardian(run_guardian(fd, stdin_fd, program, args));
     }
 }
 
 fn run_guardian(
     fd: i32,
+    stdin_fd: Option<i32>,
     program: OsString,
     args: impl Iterator<Item = OsString>,
 ) -> GuardianOutcome {
@@ -219,6 +290,21 @@ fn run_guardian(
         send_start_error(&mut control, &error);
         return GuardianOutcome::Failure;
     }
+    let stdin = match stdin_fd {
+        Some(stdin_fd) => {
+            let result = if stdin_fd <= libc::STDERR_FILENO || stdin_fd == fd {
+                Err(io::Error::from_raw_os_error(libc::EBADF))
+            } else {
+                set_cloexec(stdin_fd, true)
+            };
+            if let Err(error) = result {
+                send_start_error(&mut control, &error);
+                return GuardianOutcome::Failure;
+            }
+            Stdio::from(unsafe { File::from_raw_fd(stdin_fd) })
+        }
+        None => Stdio::null(),
+    };
     #[cfg(target_os = "linux")]
     if let Err(error) = enable_subreaper() {
         send_start_error(&mut control, &error);
@@ -230,14 +316,15 @@ fn run_guardian(
     let mut runtime = Command::new(program);
     runtime
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
     #[cfg(test)]
     runtime
         .env_remove(TEST_COMMAND_ENV)
-        .env_remove(TEST_CONTROL_FD_ENV);
+        .env_remove(TEST_CONTROL_FD_ENV)
+        .env_remove(TEST_STDIN_FD_ENV);
 
     unsafe {
         runtime.pre_exec(move || {
@@ -265,6 +352,7 @@ fn run_guardian(
             return GuardianOutcome::Failure;
         }
     };
+    drop(runtime);
     let child_pid = child.id();
     let _ = write_start_ok(&mut control, child_pid);
 
@@ -498,22 +586,21 @@ fn set_cloexec(fd: libc::c_int, enabled: bool) -> io::Result<()> {
     }
 }
 
-fn move_above_stdio(stream: UnixStream) -> io::Result<UnixStream> {
-    if stream.as_raw_fd() > libc::STDERR_FILENO {
-        return Ok(stream);
+fn move_above_stdio(fd: OwnedFd) -> io::Result<OwnedFd> {
+    if fd.as_raw_fd() > libc::STDERR_FILENO {
+        return Ok(fd);
     }
-    let fd = unsafe {
+    let duplicate = unsafe {
         libc::fcntl(
-            stream.as_raw_fd(),
+            fd.as_raw_fd(),
             libc::F_DUPFD_CLOEXEC,
             libc::STDERR_FILENO + 1,
         )
     };
-    if fd == -1 {
+    if duplicate == -1 {
         return Err(io::Error::last_os_error());
     }
-    drop(stream);
-    Ok(unsafe { UnixStream::from_raw_fd(fd) })
+    Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
 }
 
 fn send_start_error(control: &mut File, error: &io::Error) {
@@ -597,6 +684,45 @@ mod tests {
         let Some((program, args)) = encoded.as_deref().and_then(decode_command) else {
             std::process::exit(HELPER_FAILURE_EXIT);
         };
-        exit_guardian(run_guardian(control_fd, program, args.into_iter()));
+        let stdin_fd = env::var(TEST_STDIN_FD_ENV)
+            .ok()
+            .and_then(|fd| fd.parse::<i32>().ok());
+        exit_guardian(run_guardian(
+            control_fd,
+            stdin_fd,
+            program,
+            args.into_iter(),
+        ));
+    }
+
+    #[cfg(feature = "runtime-acceptance")]
+    #[test]
+    fn duplex_stdin_eof_does_not_cross_siblings() {
+        let owner = RuntimeOwner::new().unwrap();
+        let spawn =
+            |script| owner.spawn_duplex(OsStr::new("/bin/sh"), ["-c", script].map(OsStr::new));
+        let mut first =
+            spawn(r#"read -r value && [ "$value" = payload ] && ! read -r extra"#).unwrap();
+        let mut sibling = spawn("read -r extra").unwrap();
+
+        let mut stdin = first.stdin.take().unwrap();
+        stdin.write_all(b"payload\n").unwrap();
+        drop(stdin);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = first.try_wait().unwrap() {
+                break Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                first.kill().unwrap();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let sibling_alive = sibling.try_wait().unwrap().is_none();
+        sibling.kill().unwrap();
+        assert!(status.expect("child did not receive stdin EOF").success());
+        assert!(sibling_alive);
     }
 }

@@ -1,5 +1,6 @@
 //! Isolated native parent/child fixtures; never terminates the test runner.
 
+mod guided_forward;
 #[allow(dead_code)]
 #[path = "../../src/runtime.rs"]
 mod runtime;
@@ -289,6 +290,29 @@ fn main() {
             let _ = std::io::stdin().read(&mut [0]);
             child.kill().unwrap();
             child.wait().unwrap();
+        }
+        "guided-forward" => {
+            let result = (|| {
+                let [_, _, host, user, port, local_port, config] = args.as_slice() else {
+                    return Err(io::Error::other("invalid guided fixture arguments"));
+                };
+                let port_number = |arg: &std::ffi::OsStr| {
+                    arg.to_str()
+                        .and_then(|s| s.parse::<u16>().ok())
+                        .ok_or_else(|| io::Error::other("invalid fixture port"))
+                };
+                guided_forward::run(
+                    host.to_str().unwrap_or_default(),
+                    user.to_str().unwrap_or_default(),
+                    (port != "default").then(|| port_number(port)).transpose()?,
+                    port_number(local_port)?,
+                    Path::new(config),
+                )
+            })();
+            if let Err(error) = result {
+                eprintln!("guided fixture: {}", error.kind());
+                std::process::exit(1);
+            }
         }
         "ssh" => {
             if let Some(home) = args.get(6) {
