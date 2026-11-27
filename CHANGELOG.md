@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.7.0] - 2026-11-27
+
+### Features
+
+- configure Managed SSH with server login details ([7de3953](https://github.com/i-mud/imp/commit/7de39537c1f3cd600009d12c6ab9673a19280f58))
+
 ## [0.6.0] - 2026-11-27
 
 ### Features
