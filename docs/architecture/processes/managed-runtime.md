@@ -218,7 +218,17 @@ platform `ssh` client directly by argv and forwards:
 ```
 
 OpenSSH continues to own agent, `IdentityFile`, `ProxyJump`, `known_hosts`, and
-host verification.
+host verification. An existing SSH target remains an opaque legacy string with
+the historical options. A structured destination passes the validated host,
+username (`-l`), and optional port (`-p`) as separate argv values. Username and
+explicit port override configuration; an omitted port inherits it (normally
+22). The host selects trusted OpenSSH configuration, not necessarily the final
+network address: `HostName`, `Match`, identities and proxies can still apply.
+Structured mode passes `StrictHostKeyChecking=yes`, `UpdateHostKeys=no`,
+`VerifyHostKeyDNS=no` and `NoHostAuthenticationForLocalhost=no` to the target
+client. The user's `CheckHostIP` policy still applies. These options neither
+change the legacy command nor constrain independently launched proxy or jump
+clients.
 
 The desktop-owned client adds `-S none` and `-o ForkAfterAuthentication=no`.
 OpenSSH's documented `none` control path disables both creation and reuse of
@@ -255,13 +265,23 @@ same supervisor starts its own SSH child. An unrelated listener is left alone
 and reported unavailable. Feed states `down`, `stale`, and `live` are all valid
 relay health states and do not themselves trigger takeover.
 
+Both forms of Managed SSH retain this adoption behavior. Compatibility with
+the Imp health probe does not prove process ownership or SSH destination.
+The independently connecting renderer uses the port number, not proof of
+which process accepted a state or action stream. A port check while the child
+is alive is not an ownership assertion; the port can be reused after failure
+or teardown. No route is promoted to strict gameplay ownership by using
+structured settings.
+
 External mode also consumes `127.0.0.1:8789`, but Imp owns no SSH process in
 that mode. Local mode consumes the desktop node directly on `8787`. Direct WSS
 uses neither consumer loopback port for the HUD connection.
 
 The [Slice 29.3a forwarding experiment](../../audits/guided-ssh-forward.md)
 tests a different listener ownership model in the native acceptance harness.
-It is not a selectable consumer and changes none of these rules.
+It is not a selectable consumer and changes none of these rules. See the
+[Guided SSH roadmap](../../roadmap.md#slice-29---connection-onboarding) for
+subsequent negative evidence and the separate one-shot check proposal.
 
 Runtime diagnostics preserve the same UI boundary. Local mode reads
 `NodeSupervisor` diagnostics; Managed/External loopback consumption uses tunnel
@@ -278,22 +298,25 @@ The local node and Mudlet package provisioning remain independent of the
 consumer choice.
 
 `ConnectionConfigStore` exposes renderer-safe summaries of the startup
-selection and the saved settings: mode, SSH target, Direct URL, and whether
-a Direct token exists. Reads through the settings API never return the
-token or a digest. The native store compares the saved configuration with
-its startup selection, including the actual credential; only the pending
-flag is exposed for this comparison. A token-only replacement on the same
+selection and the saved settings: mode, SSH target or structured destination,
+Direct URL, and whether a Direct token exists. Reads through the settings API
+never return the token or a digest. The native store compares the saved
+configuration with its startup selection, including the actual credential,
+and exposes only the pending flag. A token-only replacement on the same
 endpoint therefore requires a restart even when the summaries look alike.
 
 Writes are canonical by mode. Local and External clear unrelated transport
-material; Managed requires a non-empty trimmed SSH target; Direct requires the
-strict `wss:` endpoint plus a canonical 256-bit pairing token. Switching away
-from Direct removes the stored Direct URL and credential. When the persisted
+material; Managed persists either the legacy `sshTarget` string or the
+structured `sshDestination` object with `host`, `username`, and optional `port`,
+never both. A mixed form on disk, or both populated in the settings IPC, is
+invalid. A legacy target is not parsed or migrated to structured fields.
+Direct requires the strict `wss:` endpoint plus a canonical 256-bit pairing
+token. Switching away from Direct removes the stored Direct URL and credential.
 mode is Direct and a token exists, the connection dialog requires an inline
 confirmation before submitting a mode-away save. Cancel preserves the saved
 configuration and pending edits without submitting; Close and Escape never
-confirm. Changing the destination mode or SSH target, or a failed save, requires
-fresh confirmation. Returning to Direct requires the URL and token again;
+confirm. Changing the destination mode or SSH login details, or a failed save,
+requires fresh confirmation. Returning to Direct requires the URL and token;
 if the token is unavailable, deliberate server-side rotation obtains a new one.
 This renderer warning does not change native validation or canonical deletion.
 

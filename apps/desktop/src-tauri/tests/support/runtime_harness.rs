@@ -7,6 +7,9 @@ mod runtime;
 #[allow(dead_code)]
 #[path = "../../src/tunnel.rs"]
 mod tunnel;
+#[allow(dead_code)]
+#[path = "../../src/tunnel_config.rs"]
+mod tunnel_config;
 
 use std::io::{self, BufRead, Read, Write};
 use std::net::TcpListener;
@@ -16,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tunnel_config::{ManagedDestination, SshDestination};
 
 fn worker(record: &Path, grandchild: Option<&Path>, escape: bool, stdin_control: bool) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -314,18 +318,43 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        "ssh" => {
-            if let Some(home) = args.get(6) {
+        mode @ ("ssh" | "ssh-structured") => {
+            let (config, destination, local_port, pid_file, home) = match &args[2..] {
+                [config, host, username, port, local_port, pid_file, rest @ ..]
+                    if mode == "ssh-structured" =>
+                {
+                    let destination = SshDestination {
+                        host: host.to_str().unwrap().into(),
+                        username: username.to_str().unwrap().into(),
+                        port: (port != "default").then(|| port.to_str().unwrap().parse().unwrap()),
+                    };
+                    destination.validate().unwrap();
+                    (
+                        config,
+                        ManagedDestination::Server(destination),
+                        local_port,
+                        pid_file,
+                        rest.first(),
+                    )
+                }
+                [config, alias, local_port, pid_file, rest @ ..] if mode == "ssh" => (
+                    config,
+                    ManagedDestination::Alias(alias.to_str().unwrap().into()),
+                    local_port,
+                    pid_file,
+                    rest.first(),
+                ),
+                _ => panic!("invalid SSH fixture arguments"),
+            };
+            if let Some(home) = home {
                 std::env::set_var("HOME", home);
                 #[cfg(windows)]
                 std::env::set_var("USERPROFILE", home);
             }
-            let ssh = tunnel::ssh_command(
-                args[3].to_str().unwrap(),
-                args[4].to_str().unwrap().parse().unwrap(),
-            );
+            let ssh =
+                tunnel::ssh_command(&destination, local_port.to_str().unwrap().parse().unwrap());
             let mut command = Command::new(ssh.get_program());
-            command.arg("-F").arg(&args[2]).args(ssh.get_args());
+            command.arg("-F").arg(config).args(ssh.get_args());
             let owner = runtime::RuntimeOwner::new().unwrap();
             let mut child = owner
                 .spawn(
@@ -334,7 +363,7 @@ fn main() {
                     runtime::RuntimeStdout::Null,
                 )
                 .unwrap();
-            std::fs::write(&args[5], child.id().to_string()).unwrap();
+            std::fs::write(pid_file, child.id().to_string()).unwrap();
             runtime::log_output(&mut child, "fixture-ssh");
             let _ = std::io::stdin().read(&mut [0]);
             child.kill().unwrap();

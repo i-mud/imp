@@ -255,7 +255,7 @@ the feature harness, then run:
 
 ```bash
 cargo build --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features runtime-acceptance --bin runtime-ownership-harness
-uv run --project services/relay python scripts/test-managed-ssh.py apps/desktop/src-tauri/target/debug/runtime-ownership-harness
+uv run --locked --project services/relay python scripts/test-managed-ssh.py apps/desktop/src-tauri/target/debug/runtime-ownership-harness
 ```
 
 This requires the installed OpenSSH server (`sshd`), usable server prerequisites,
@@ -267,6 +267,24 @@ ProxyCommand/ProxyJump with explicitly foreground jump aliases, normal/abrupt
 cleanup, relaunch, and an independently persistent external master/forward.
 Its observer retains pidfds only for its own descendant tree, including
 adopted daemonized fixtures, and cleans/waits them before propagating failure.
+
+The Linux run includes structured Managed SSH coverage with the same system
+OpenSSH client and isolated server. The native Windows counterpart uses a
+disposable Linux container. In the native Windows mirror, build the same
+harness with the Windows toolchain, then run with native Windows Python via
+the locked relay environment:
+
+```powershell
+uv run --locked --project services/relay python scripts/test-structured-ssh.py container apps/desktop/src-tauri/target/debug/runtime-ownership-harness.exe
+```
+
+This requires Windows system `ssh.exe` and `ssh-keygen.exe` and Docker in
+Linux-container mode. Only the container's SSH port is published on a random
+IPv4 loopback port; the relay is not published. Both structured checks exercise
+strict host trust and refusal, configured and explicit SSH ports, the real relay
+state and action paths without replay, and owned-process cleanup. They use
+synthetic gameplay data and do not establish published-artifact or independent
+human acceptance.
 
 ## Server bundle checks
 

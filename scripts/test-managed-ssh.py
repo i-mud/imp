@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check owned foreground SSH using disposable keys, sshd, and the frozen node."""
+"""Check owned legacy and structured SSH using disposable keys, sshd and relays."""
 
 import ctypes
 import os
@@ -28,6 +28,8 @@ def free_port():
 
 
 def main():
+    if not __debug__:
+        raise RuntimeError("run the SSH acceptance with Python assertions enabled")
     if sys.platform != "linux" or not hasattr(os, "pidfd_open"):
         raise RuntimeError("this authenticated fixture requires Linux pidfds")
     if len(sys.argv) != 2:
@@ -35,6 +37,7 @@ def main():
             "usage: test-managed-ssh.py /path/to/runtime-ownership-harness"
         )
     harness = pathlib.Path(sys.argv[1]).resolve()
+    scripts = pathlib.Path(__file__).resolve().parent
     node = (
         pathlib.Path(__file__).resolve().parents[1]
         / "apps/desktop/src-tauri/binaries/imp-node-x86_64-unknown-linux-gnu"
@@ -125,10 +128,8 @@ def main():
                 time.sleep(0.02)
             raise AssertionError(f"timed out waiting for {description}")
 
-        def spawn(args, **kwargs):
-            process = subprocess.Popen(
-                args, stdout=subprocess.DEVNULL, stderr=log, **kwargs
-            )
+        def spawn(args, *, stdout=subprocess.DEVNULL, **kwargs):
+            process = subprocess.Popen(args, stdout=stdout, stderr=log, **kwargs)
             processes.append(process)
             capture()
             if process.pid not in handles:
@@ -251,6 +252,47 @@ StrictModes no
             )
             run([str(sshd), "-t", "-f", str(sshd_config)])
             spawn([str(sshd), "-D", "-e", "-f", str(sshd_config)])
+            wait_until(lambda: not listener_closed(server_port), "fixture sshd listener")
+
+            # The synthetic backend binds first and registers its own producer and
+            # consumer. Only launch action probes after that exact child is ready.
+            relay_output = root / "structured-relay.log"
+            with relay_output.open("wb") as output:
+                relay = spawn(
+                    [sys.executable, scripts / "test-guided-relay.py", "backend"],
+                    stdin=subprocess.PIPE,
+                    stdout=output,
+                )
+                try:
+                    wait_until(
+                        lambda: alive(relay.pid)
+                        and b"READY 8787\n" in relay_output.read_bytes(),
+                        "synthetic relay producer and consumer",
+                    )
+                    client = spawn(
+                        [
+                            sys.executable,
+                            scripts / "test-structured-ssh.py",
+                            "exercise",
+                            harness,
+                            root,
+                            pwd.getpwuid(os.getuid()).pw_name,
+                            str(server_port),
+                        ]
+                    )
+                    wait_until(
+                        lambda: client.poll() is not None,
+                        "native Linux structured SSH client",
+                        timeout=45,
+                    )
+                    assert client.returncode == 0, "native Linux structured SSH failed"
+                    relay.stdin.write(b"stop\n")
+                    relay.stdin.close()
+                    assert relay.wait(timeout=10) == 0, "synthetic relay failed"
+                    assert b"no replay to replacement consumer" in relay_output.read_bytes()
+                finally:
+                    print(relay_output.read_text(errors="replace"), end="", flush=True)
+
             backend = spawn([str(node), "--host", "127.0.0.1", "--port", "8787"])
             wait_until(lambda: health(8787), "frozen node backend")
 

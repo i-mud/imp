@@ -13,8 +13,9 @@ Imp service does not require them to sign in.
 3. In the Mudlet profile you want to use, open **Package Manager** and install
    that file. Import it once per profile you want to use with Imp.
 4. In Imp, select **Set up connection**, or open **Settings → Connection →
-   Manage** if you dismissed the prompt. Choose **On this computer**; no
-   connection details are needed. In [v0.5.4](../install-windows.md#published-v054),
+   Manage** if you dismissed the prompt. In v0.6.0 and later, choose
+   **On this computer**; no connection details are needed.
+   In [v0.5.4](../install-windows.md#published-v054),
    open **Settings → Connection → Manage** and choose **Local** instead.
    If switching from Direct, read the
    [credential-removal warning](../../deploy/direct-wss.md#existing-direct-credentials-and-recovery)

@@ -1,0 +1,8 @@
+{
+  "mode": "managed",
+  "sshDestination": {
+    "host": "mud.example.com",
+    "username": "muduser",
+    "port": 2222
+  }
+}

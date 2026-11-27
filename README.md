@@ -17,8 +17,9 @@ the installed Windows app or live gameplay._
 
 Use Imp only on computers where you trust the other users and programs. This applies to your Windows PC and any server running Imp.
 
-The guides distinguish the new **Set up connection** flow in source builds
-from [connection setup in the published v0.5.4 release](docs/install-windows.md#published-v054).
+The published [v0.6.0 release](https://github.com/i-mud/imp/releases/tag/v0.6.0)
+includes **Set up connection**. Managed SSH in that release still uses an SSH
+alias; separate server, username, and port fields are for newer source builds.
 
 ### Local Mudlet on Windows
 

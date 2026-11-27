@@ -6,11 +6,12 @@
 
 use std::fmt;
 use std::io::{ErrorKind, Write};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use tempfile::NamedTempFile;
 use url::Url;
 
@@ -19,6 +20,7 @@ use crate::tunnel::SSH_FORWARD_PORT;
 const UNAVAILABLE_ERROR: &str =
     "Imp could not read tunnel.json. Restore a valid file or move it aside, then restart Imp.";
 const CHANGED_ERROR: &str = "Connection settings changed on disk. Restart Imp before saving again.";
+const CONFLICTING_DESTINATIONS: &str = "Choose either a server login or an SSH alias, not both.";
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -34,14 +36,15 @@ pub enum TunnelMode {
 }
 
 #[derive(Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "DiskTunnelConfig")]
 pub struct TunnelConfig {
     #[serde(default)]
     pub mode: TunnelMode,
-    /// An existing `Host` alias from the user's `~/.ssh/config`. Required
-    /// when `mode` is `managed`.
+    /// The legacy SSH target, used only when there is no structured destination.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ssh_target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_destination: Option<SshDestination>,
     /// Direct-WSS state endpoint. Required when `mode` is `direct`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub remote_url: String,
@@ -51,11 +54,146 @@ pub struct TunnelConfig {
     pub pairing_token: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiskTunnelConfig {
+    #[serde(default)]
+    mode: TunnelMode,
+    #[serde(default, deserialize_with = "present")]
+    ssh_target: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    ssh_destination: Option<SshDestination>,
+    #[serde(default)]
+    remote_url: String,
+    #[serde(default)]
+    pairing_token: String,
+}
+
+impl TryFrom<DiskTunnelConfig> for TunnelConfig {
+    type Error = &'static str;
+
+    fn try_from(disk: DiskTunnelConfig) -> Result<Self, Self::Error> {
+        if disk.ssh_destination.is_some() {
+            if disk.ssh_target.is_some() {
+                return Err(CONFLICTING_DESTINATIONS);
+            }
+            if disk.mode != TunnelMode::Managed {
+                return Err("A server login requires Managed SSH.");
+            }
+        }
+        Ok(Self {
+            mode: disk.mode,
+            ssh_target: disk.ssh_target.unwrap_or_default(),
+            ssh_destination: disk.ssh_destination,
+            remote_url: disk.remote_url,
+            pairing_token: disk.pairing_token,
+        })
+    }
+}
+
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SshDestination {
+    pub host: String,
+    pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
+impl<'de> Deserialize<'de> for SshDestination {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(remote = "SshDestination", deny_unknown_fields)]
+        struct Fields {
+            host: String,
+            username: String,
+            #[serde(default, deserialize_with = "present")]
+            port: Option<u16>,
+        }
+
+        struct Object;
+        impl<'de> de::Visitor<'de> for Object {
+            type Value = SshDestination;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("an SSH destination object")
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                Fields::deserialize(de::value::MapAccessDeserializer::new(map))
+            }
+        }
+
+        deserializer.deserialize_map(Object)
+    }
+}
+
+impl SshDestination {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !valid_ssh_host(&self.host) {
+            return Err("Enter a DNS name, IPv4 address, or bare IPv6 address in Server.");
+        }
+        let username_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+        if self.username.len() > 64
+            || !self.username.bytes().next().is_some_and(username_byte)
+            || !self
+                .username
+                .bytes()
+                .skip(1)
+                .all(|b| username_byte(b) || matches!(b, b'.' | b'-'))
+        {
+            return Err("Username must start with a letter, digit, or underscore and use at most 64 ASCII letters, digits, underscores, dots, or hyphens.");
+        }
+        if self.port == Some(0) {
+            return Err("Port must be from 1 to 65535, or omitted.");
+        }
+        Ok(())
+    }
+}
+
+fn valid_ssh_host(host: &str) -> bool {
+    if host.parse::<Ipv4Addr>().is_ok() || host.parse::<Ipv6Addr>().is_ok() {
+        return true;
+    }
+    let dns = host.strip_suffix('.').unwrap_or(host);
+    // Resolvers can interpret abbreviated, octal and hexadecimal names as IPv4.
+    let numeric = dns.split('.').all(|label| {
+        label.bytes().all(|b| b.is_ascii_digit())
+            || label
+                .strip_prefix("0x")
+                .or_else(|| label.strip_prefix("0X"))
+                .is_some_and(|tail| tail.bytes().all(|b| b.is_ascii_hexdigit()))
+    });
+    dns.len() <= 253
+        && !numeric
+        && dns.split('.').all(|label| {
+            let label = label.as_bytes();
+            label.len() <= 63
+                && label.first().is_some_and(u8::is_ascii_alphanumeric)
+                && label.last().is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+        })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManagedDestination {
+    Alias(String),
+    Server(SshDestination),
+}
+
 impl fmt::Debug for TunnelConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TunnelConfig")
             .field("mode", &self.mode)
             .field("ssh_target", &self.ssh_target)
+            .field("ssh_destination", &self.ssh_destination)
             .field("remote_url", &self.remote_url)
             .field(
                 "pairing_token",
@@ -101,6 +239,8 @@ pub struct RuntimeConnectionConfig {
 pub struct ConnectionSettings {
     pub mode: TunnelMode,
     pub ssh_target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_destination: Option<SshDestination>,
     pub remote_url: String,
     pub has_pairing_token: bool,
 }
@@ -124,6 +264,8 @@ pub struct ConnectionSettingsUpdate {
     pub mode: TunnelMode,
     #[serde(default)]
     pub ssh_target: String,
+    #[serde(default)]
+    pub ssh_destination: Option<SshDestination>,
     #[serde(default)]
     pub remote_url: String,
     #[serde(default)]
@@ -231,6 +373,28 @@ impl ConnectionConfigStore {
 }
 
 impl TunnelConfig {
+    pub fn managed_destination(&self) -> Result<ManagedDestination, &'static str> {
+        if self.mode != TunnelMode::Managed {
+            return Err("A server login or SSH alias requires Managed SSH.");
+        }
+        self.validate_managed_destination()?;
+        Ok(match &self.ssh_destination {
+            Some(destination) => ManagedDestination::Server(destination.clone()),
+            None => ManagedDestination::Alias(self.ssh_target.trim().to_owned()),
+        })
+    }
+
+    fn validate_managed_destination(&self) -> Result<(), &'static str> {
+        match &self.ssh_destination {
+            Some(_) if !self.ssh_target.is_empty() => Err(CONFLICTING_DESTINATIONS),
+            Some(destination) => destination.validate(),
+            None if self.ssh_target.trim().is_empty() => {
+                Err("managed mode requires a non-empty sshTarget")
+            }
+            None => Ok(()),
+        }
+    }
+
     pub fn runtime_connection_config(&self) -> RuntimeConnectionConfig {
         match self.mode {
             TunnelMode::Local => RuntimeConnectionConfig {
@@ -256,24 +420,28 @@ impl TunnelConfig {
             TunnelMode::External => ConnectionSettings {
                 mode: TunnelMode::External,
                 ssh_target: String::new(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 has_pairing_token: false,
             },
             TunnelMode::Local => ConnectionSettings {
                 mode: TunnelMode::Local,
                 ssh_target: String::new(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 has_pairing_token: false,
             },
             TunnelMode::Managed => ConnectionSettings {
                 mode: TunnelMode::Managed,
                 ssh_target: self.ssh_target.clone(),
+                ssh_destination: self.ssh_destination.clone(),
                 remote_url: String::new(),
                 has_pairing_token: false,
             },
             TunnelMode::Direct => ConnectionSettings {
                 mode: TunnelMode::Direct,
                 ssh_target: String::new(),
+                ssh_destination: None,
                 remote_url: self.remote_url.clone(),
                 has_pairing_token: !self.pairing_token.is_empty(),
             },
@@ -286,7 +454,12 @@ impl TunnelConfig {
         }
         match self.mode {
             TunnelMode::External | TunnelMode::Local => true,
-            TunnelMode::Managed => self.ssh_target.trim() == other.ssh_target.trim(),
+            // Keep the exact server input: trusted OpenSSH configuration can use it.
+            TunnelMode::Managed => match (&self.ssh_destination, &other.ssh_destination) {
+                (Some(left), Some(right)) => left == right,
+                (None, None) => self.ssh_target.trim() == other.ssh_target.trim(),
+                _ => false,
+            },
             TunnelMode::Direct => {
                 self.pairing_token == other.pairing_token
                     && (self.remote_url == other.remote_url
@@ -298,17 +471,22 @@ impl TunnelConfig {
     }
 
     fn updated(&self, update: ConnectionSettingsUpdate) -> Result<Self, &'static str> {
+        if update.ssh_destination.is_some() && !update.ssh_target.is_empty() {
+            return Err(CONFLICTING_DESTINATIONS);
+        }
         let candidate = match update.mode {
             TunnelMode::External => TunnelConfig::default(),
             TunnelMode::Local => TunnelConfig {
                 mode: TunnelMode::Local,
                 ssh_target: String::new(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             },
             TunnelMode::Managed => TunnelConfig {
                 mode: TunnelMode::Managed,
                 ssh_target: update.ssh_target.trim().to_owned(),
+                ssh_destination: update.ssh_destination,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             },
@@ -332,6 +510,7 @@ impl TunnelConfig {
                 return Ok(TunnelConfig {
                     mode: TunnelMode::Direct,
                     ssh_target: String::new(),
+                    ssh_destination: None,
                     remote_url: update.remote_url,
                     pairing_token: update
                         .pairing_token
@@ -348,12 +527,7 @@ impl TunnelConfig {
 fn validate(config: &TunnelConfig) -> Result<(), &'static str> {
     match config.mode {
         TunnelMode::External | TunnelMode::Local => Ok(()),
-        TunnelMode::Managed => {
-            if config.ssh_target.trim().is_empty() {
-                return Err("managed mode requires a non-empty sshTarget");
-            }
-            Ok(())
-        }
+        TunnelMode::Managed => config.validate_managed_destination(),
         TunnelMode::Direct => {
             validate_direct_url(&config.remote_url)?;
             validate_direct_token(&config.pairing_token)
@@ -654,6 +828,7 @@ mod tests {
         ConnectionSettingsUpdate {
             mode: TunnelMode::Local,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: String::new(),
             pairing_token: None,
         }
@@ -674,6 +849,7 @@ mod tests {
             TunnelConfig {
                 mode: TunnelMode::Local,
                 ssh_target: String::new(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             }
@@ -692,6 +868,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: "ignored".into(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -700,6 +877,7 @@ mod tests {
             .updated(ConnectionSettingsUpdate {
                 mode: TunnelMode::Local,
                 ssh_target: "ignored".into(),
+                ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
@@ -710,6 +888,7 @@ mod tests {
             TunnelConfig {
                 mode: TunnelMode::Local,
                 ssh_target: String::new(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             }
@@ -731,6 +910,7 @@ mod tests {
             TunnelConfig {
                 mode: TunnelMode::Managed,
                 ssh_target: "avatar".into(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             }
@@ -851,6 +1031,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Managed,
             ssh_target: "avatar".into(),
+            ssh_destination: None,
             remote_url: String::new(),
             pairing_token: String::new(),
         };
@@ -872,6 +1053,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -898,6 +1080,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -918,6 +1101,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: "should-not-survive".into(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -926,6 +1110,7 @@ mod tests {
             .updated(ConnectionSettingsUpdate {
                 mode: TunnelMode::External,
                 ssh_target: "ignored".into(),
+                ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
@@ -939,6 +1124,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -946,6 +1132,7 @@ mod tests {
         let empty = existing.updated(ConnectionSettingsUpdate {
             mode: TunnelMode::Managed,
             ssh_target: "   ".into(),
+            ssh_destination: None,
             remote_url: String::new(),
             pairing_token: None,
         });
@@ -958,6 +1145,7 @@ mod tests {
             .updated(ConnectionSettingsUpdate {
                 mode: TunnelMode::Managed,
                 ssh_target: "  avatar  ".into(),
+                ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
@@ -968,6 +1156,7 @@ mod tests {
             TunnelConfig {
                 mode: TunnelMode::Managed,
                 ssh_target: "avatar".into(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             }
@@ -1035,6 +1224,7 @@ mod tests {
         TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: remote_url.into(),
             pairing_token: pairing_token.into(),
         }
@@ -1044,6 +1234,7 @@ mod tests {
         ConnectionSettingsUpdate {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: remote_url.into(),
             pairing_token: pairing_token.map(str::to_owned),
         }
@@ -1061,6 +1252,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -1071,6 +1263,7 @@ mod tests {
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::Managed,
                 ssh_target: "  avatar  ".into(),
+                ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
@@ -1092,6 +1285,7 @@ mod tests {
             TunnelConfig {
                 mode: TunnelMode::Managed,
                 ssh_target: "avatar".into(),
+                ssh_destination: None,
                 remote_url: String::new(),
                 pairing_token: String::new(),
             }
@@ -1108,6 +1302,7 @@ mod tests {
         let existing = TunnelConfig {
             mode: TunnelMode::Managed,
             ssh_target: "avatar".into(),
+            ssh_destination: None,
             remote_url: String::new(),
             pairing_token: String::new(),
         };
@@ -1118,6 +1313,7 @@ mod tests {
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::External,
                 ssh_target: "ignored".into(),
+                ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
@@ -1149,6 +1345,7 @@ mod tests {
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::Direct,
                 ssh_target: "ignored".into(),
+                ssh_destination: None,
                 remote_url: "wss://imp.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
             })
@@ -1403,6 +1600,7 @@ mod tests {
         let old = TunnelConfig {
             mode: TunnelMode::Managed,
             ssh_target: "old".into(),
+            ssh_destination: None,
             remote_url: String::new(),
             pairing_token: String::new(),
         };
@@ -1411,6 +1609,7 @@ mod tests {
         let replacement = TunnelConfig {
             mode: TunnelMode::Managed,
             ssh_target: "new".into(),
+            ssh_destination: None,
             remote_url: String::new(),
             pairing_token: String::new(),
         };
@@ -1433,6 +1632,7 @@ mod tests {
         let config = TunnelConfig {
             mode: TunnelMode::Direct,
             ssh_target: String::new(),
+            ssh_destination: None,
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
@@ -1442,6 +1642,323 @@ mod tests {
         assert_eq!(mode, 0o600);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    const STRUCTURED_MANAGED: &str = include_str!("../tests/fixtures/structured-managed.json");
+
+    fn server() -> SshDestination {
+        SshDestination {
+            host: "mud.example.com".into(),
+            username: "muduser".into(),
+            port: Some(2222),
+        }
+    }
+
+    fn server_update(destination: SshDestination) -> ConnectionSettingsUpdate {
+        ConnectionSettingsUpdate {
+            mode: TunnelMode::Managed,
+            ssh_target: String::new(),
+            ssh_destination: Some(destination),
+            remote_url: String::new(),
+            pairing_token: None,
+        }
+    }
+
+    #[test]
+    fn structured_destination_validation() {
+        for host in [
+            "mud",
+            "MD-01.example.",
+            "xn--bcher-kva.example",
+            "192.0.2.10",
+            "2001:db8::1",
+            "::ffff:192.0.2.10",
+        ] {
+            let destination = SshDestination {
+                host: host.into(),
+                ..server()
+            };
+            assert_eq!(destination.validate(), Ok(()), "{host}");
+        }
+        for host in [
+            "",
+            ".",
+            "x..example",
+            "x..",
+            "-x.example",
+            "x-.example",
+            "x_y.example",
+            "bücher.example",
+            " user",
+            "ssh://example.com",
+            "user@example.com",
+            "example.com:22",
+            "example.com\n",
+            "example.com\0",
+            "example;command",
+            "$(command)",
+            "[2001:db8::1]",
+            "[2001:db8::1]:22",
+            "fe80::1%eth0",
+            "::ffff:192.000.2.10",
+            "127.1",
+            "127.000.0.1",
+            "127.0.0.1.",
+            "127.0.0.256",
+            "2130706433",
+            "017700000001",
+            "0X7f000001.",
+            "0x7f.0.0.1",
+            "0x",
+        ] {
+            let destination = SshDestination {
+                host: host.into(),
+                ..server()
+            };
+            assert!(
+                destination.validate().unwrap_err().contains("Server"),
+                "{host}"
+            );
+        }
+        let label = "a".repeat(63);
+        let max_name = format!("{label}.{label}.{label}.{}.", "a".repeat(61));
+        assert!(valid_ssh_host(&max_name));
+        assert!(!valid_ssh_host(&format!(
+            "{label}.{label}.{label}.{}",
+            "a".repeat(62)
+        )));
+        assert!(!valid_ssh_host(&format!("a{label}.example")));
+
+        for username in ["_user.0-1", "7", &"a".repeat(64)] {
+            let destination = SshDestination {
+                username: username.into(),
+                ..server()
+            };
+            assert_eq!(destination.validate(), Ok(()), "{username}");
+        }
+        for username in [
+            "",
+            "-user",
+            ".user",
+            "user@host",
+            "user name",
+            "user\t",
+            "úsér",
+            &"a".repeat(65),
+        ] {
+            let destination = SshDestination {
+                username: username.into(),
+                ..server()
+            };
+            assert!(
+                destination.validate().unwrap_err().contains("Username"),
+                "{username:?}"
+            );
+        }
+        for port in [None, Some(1), Some(u16::MAX)] {
+            assert_eq!(SshDestination { port, ..server() }.validate(), Ok(()));
+        }
+        assert!(SshDestination {
+            port: Some(0),
+            ..server()
+        }
+        .validate()
+        .unwrap_err()
+        .contains("Port"));
+    }
+
+    #[test]
+    fn disk_rejects_ambiguous_or_invalid_managed_destinations_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        for text in [
+            r#"{"mode":"managed","sshTarget":"avatar","sshDestination":{"host":"example.com","username":"user"}}"#,
+            r#"{"mode":"managed","sshTarget":"","sshDestination":{"host":"example.com","username":"user"}}"#,
+            r#"{"mode":"managed","sshTarget":null,"sshDestination":{"host":"example.com","username":"user"}}"#,
+            r#"{"mode":"managed","sshTarget":"avatar","sshDestination":null}"#,
+            r#"{"mode":"managed","sshDestination":null}"#,
+            r#"{"mode":"managed","sshDestination":["example.com","user",22]}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com"}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","host":"other.example","username":"user"}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"user","port":null}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"user","port":"22"}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"user","port":22.0}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"user","port":0}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"user","port":-1}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"user","port":65536}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"127.1","username":"user"}}"#,
+            r#"{"mode":"managed","sshDestination":{"host":"example.com","username":"-user"}}"#,
+        ] {
+            std::fs::write(&path, text).unwrap();
+            let loaded = load(&path);
+            assert_eq!(loaded, LoadedConfig::Unavailable, "{text}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn structured_managed_round_trips_canonical_downgrade_fixture() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let legacy = r#"{"mode":"managed","sshTarget":"avatar"}"#;
+        std::fs::write(&path, legacy).unwrap();
+        let running = load(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+        assert_eq!(
+            running.configured().unwrap().managed_destination(),
+            Ok(ManagedDestination::Alias("avatar".into()))
+        );
+        let store = ConnectionConfigStore::new(path.clone(), running);
+        let update = serde_json::from_str(STRUCTURED_MANAGED).unwrap();
+        let status = store.save(update).unwrap();
+        assert!(status.pending_restart);
+        assert_eq!(status.running.unwrap().ssh_target, "avatar");
+        let projected = serde_json::to_value(status.saved.unwrap()).unwrap();
+        assert_eq!(
+            projected,
+            serde_json::json!({
+                "mode": "managed",
+                "sshTarget": "",
+                "sshDestination": { "host": "mud.example.com", "username": "muduser", "port": 2222 },
+                "remoteUrl": "",
+                "hasPairingToken": false,
+            })
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), STRUCTURED_MANAGED);
+        let reloaded = load(&path);
+        assert_eq!(
+            reloaded.configured().unwrap().managed_destination(),
+            Ok(ManagedDestination::Server(server()))
+        );
+        assert_eq!(
+            serde_json::to_value(reloaded.runtime_connection_config()).unwrap(),
+            serde_json::json!({
+                "mode": "local",
+                "stateUrl": format!("ws://127.0.0.1:{SSH_FORWARD_PORT}/state"),
+                "authenticationToken": null,
+            })
+        );
+    }
+
+    #[test]
+    fn structured_managed_restart_compares_each_field_and_distinguishes_omitted_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let default_port = SshDestination {
+            port: None,
+            ..server()
+        };
+        let initial = ConnectionConfigStore::new(path.clone(), LoadedConfig::Unconfigured);
+        initial.save(server_update(default_port.clone())).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        assert!(saved["sshDestination"].get("port").is_none());
+        let running = load(&path);
+        assert_eq!(
+            running.configured().unwrap().managed_destination(),
+            Ok(ManagedDestination::Server(default_port.clone()))
+        );
+        let store = ConnectionConfigStore::new(path.clone(), running);
+        for destination in [
+            SshDestination {
+                host: "other.example".into(),
+                ..default_port.clone()
+            },
+            SshDestination {
+                username: "other".into(),
+                ..default_port.clone()
+            },
+            SshDestination {
+                port: Some(22),
+                ..default_port.clone()
+            },
+        ] {
+            let status = store.save(server_update(destination.clone())).unwrap();
+            assert!(status.pending_restart);
+            assert_eq!(
+                status.running.unwrap().ssh_destination.as_ref(),
+                Some(&default_port)
+            );
+            assert_eq!(status.saved.unwrap().ssh_destination, Some(destination));
+        }
+        let alias: ConnectionSettingsUpdate =
+            serde_json::from_str(r#"{"mode":"managed","sshTarget":"mud.example.com"}"#).unwrap();
+        assert!(store.save(alias).unwrap().pending_restart);
+        assert!(
+            !store
+                .save(server_update(default_port))
+                .unwrap()
+                .pending_restart
+        );
+        for mode in [TunnelMode::Local, TunnelMode::External] {
+            store.save(server_update(server())).unwrap();
+            let status = store
+                .save(ConnectionSettingsUpdate {
+                    mode,
+                    ..server_update(server())
+                })
+                .unwrap();
+            assert!(status.pending_restart);
+            assert!(status.saved.unwrap().ssh_destination.is_none());
+            let persisted: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert!(persisted.get("sshDestination").is_none());
+            assert!(persisted.get("sshTarget").is_none());
+        }
+    }
+
+    #[test]
+    fn structured_save_rejections_and_failed_persistence_preserve_direct_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let direct = direct_config("wss://imp.example/state", VALID_TOKEN);
+        persist_config(&path, &direct, true).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let mut store = ConnectionConfigStore::new(path.clone(), load(&path));
+        let before = store.settings().unwrap();
+
+        for target in ["avatar", " "] {
+            let update = ConnectionSettingsUpdate {
+                ssh_target: target.into(),
+                ..server_update(server())
+            };
+            assert_eq!(store.save(update).unwrap_err(), CONFLICTING_DESTINATIONS);
+        }
+        let invalid = SshDestination {
+            host: " bad".into(),
+            ..server()
+        };
+        assert!(store.save(server_update(invalid)).is_err());
+        store.persist = failing_persist;
+        assert_eq!(
+            store.save(server_update(server())).unwrap_err(),
+            "simulated persistence failure"
+        );
+        assert_eq!(store.settings().unwrap(), before);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        store.persist = persist_config;
+        assert!(store
+            .save(direct_update("wss://other.example/state", None))
+            .is_err());
+        assert!(
+            !store
+                .save(direct_update("wss://imp.example/state", None))
+                .unwrap()
+                .pending_restart
+        );
+        assert!(store.save(server_update(server())).unwrap().pending_restart);
+        assert!(store
+            .save(direct_update("wss://imp.example/state", None))
+            .is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), STRUCTURED_MANAGED);
+
+        let mut update = direct_update("wss://imp.example/state", Some(VALID_TOKEN));
+        update.ssh_destination = Some(server());
+        let status = store.save(update).unwrap();
+        assert!(!status.pending_restart);
+        assert!(status.saved.unwrap().ssh_destination.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
     }
 
     fn tempdir() -> std::path::PathBuf {

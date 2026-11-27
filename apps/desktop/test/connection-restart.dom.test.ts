@@ -65,8 +65,8 @@ async function click(selector: string) {
   flushSync();
 }
 
-async function input(type: string, value: string) {
-  const field = document.querySelector<HTMLInputElement>(`input[type="${type}"]`)!;
+async function input(key: string, value: string) {
+  const field = document.querySelector<HTMLInputElement>(`input[name="${key}"], input[type="${key}"]`)!;
   flushSync(() => {
     field.value = value;
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -82,6 +82,15 @@ async function submit() {
     expect(document.querySelector('button[type="submit"]:disabled')).toBeNull();
   });
 }
+
+const SSH_DESTINATION = { host: 'mud.fixture.invalid', username: 'player' };
+const GUIDED: ConnectionSettings = {
+  mode: 'managed',
+  sshTarget: '',
+  sshDestination: SSH_DESTINATION,
+  remoteUrl: '',
+  hasPairingToken: false,
+};
 
 it.each([
   ['absent configuration', 'unconfigured', 'Set up connection'],
@@ -105,7 +114,7 @@ it.each([
     if (command === 'save_connection_settings') {
       return {
         running: null,
-        saved: { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false },
+        saved: GUIDED,
         pendingRestart: true,
       };
     }
@@ -134,13 +143,18 @@ it.each([
       await vi.waitFor(() => {
         expect(target.querySelector('input[name="client-location"][value="local"]')).not.toBeNull();
       });
-      await click('input[name="client-location"][value="local"]');
+      await click('input[name="client-location"][value="remote"]');
+      await click('input[name="remote-method"][value="managed"]');
+      await input('ssh-host', SSH_DESTINATION.host);
+      await input('ssh-username', SSH_DESTINATION.username);
       await click('button[type="submit"]');
       await vi.waitFor(() => {
         flushSync();
         expect(target.querySelector('button[type="submit"]:disabled')).toBeNull();
       });
-      expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', { update: { mode: 'local' } });
+      expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', {
+        update: { mode: 'managed', sshDestination: SSH_DESTINATION },
+      });
       expect(target.textContent).toContain('Saved. Restart Imp');
       expect(target.querySelector('.vitals, .compact-primary, .action-bar')).toBeNull();
       await click('[aria-label="Close connection settings"]');
@@ -199,7 +213,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
         }
         saved = { ...direct, remoteUrl: replacementUrl };
       } else {
-        saved = { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false };
+        saved = GUIDED;
       }
       return { running: direct, saved, pendingRestart: true };
     }
@@ -273,7 +287,9 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   expect(document.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(replacementUrl);
   expect(socket.url).toBe(direct.remoteUrl);
 
-  await click('input[name="client-location"][value="local"]');
+  await click('input[name="remote-method"][value="managed"]');
+  await input('ssh-host', SSH_DESTINATION.host);
+  await input('ssh-username', SSH_DESTINATION.username);
   await submit();
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toEqual([
     [
@@ -291,7 +307,9 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
   });
 
-  expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', { update: { mode: 'local' } });
+  expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', {
+    update: { mode: 'managed', sshDestination: SSH_DESTINATION },
+  });
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toHaveLength(
     3,
   );
@@ -314,7 +332,30 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   await vi.waitFor(() => expect(document.body.textContent).toContain('Saved for next launch'));
   expect(document.body.textContent).toContain('In use');
   expect(document.body.textContent).toContain(direct.remoteUrl);
+  expect(document.body.textContent).toContain('player@mud.fixture.invalid');
+  expect(document.querySelector<HTMLInputElement>('input[name="ssh-host"]')?.value).toBe(
+    SSH_DESTINATION.host,
+  );
+  expect(document.querySelector<HTMLInputElement>('input[name="ssh-username"]')?.value).toBe(
+    SSH_DESTINATION.username,
+  );
+  expect(document.querySelector<HTMLInputElement>('input[name="ssh-port"]')?.value).toBe('');
   expect(document.body.textContent).not.toContain(replacementUrl);
+  await input('ssh-host', 'unsaved.fixture.invalid');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  await vi.waitFor(() =>
+    expect(document.activeElement?.hasAttribute('data-connection-manager-trigger')).toBe(true),
+  );
+  await click('[data-connection-manager-trigger]');
+  await vi.waitFor(() =>
+    expect(document.querySelector<HTMLInputElement>('input[name="ssh-host"]')?.value).toBe(
+      SSH_DESTINATION.host,
+    ),
+  );
+  expect(document.body.textContent).not.toContain('unsaved.fixture.invalid');
+  expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toHaveLength(
+    3,
+  );
   await click('[aria-label="Close connection settings"]');
   // The retained real client still authenticates with its original runtime credential after saving.
   flushSync(() => socket.dispatchEvent(new Event('open')));

@@ -25,8 +25,9 @@ That confirms the desktop build, not that it is connected or receiving state.
 
 ## Configure the connection
 
-These steps apply to source builds with the new Connection dialog. For
-the published v0.5.4 release, see [Published v0.5.4](#published-v054).
+The published v0.6.0 release has the Connection dialog described here but
+uses an SSH alias for Managed SSH. Newer source builds also accept separate
+server-login fields. For the older manager, see [Published v0.5.4](#published-v054).
 
 On a fresh launch, select **Set up connection**. **Not now** dismisses the
 prompt without choosing or saving a connection. You can return to setup or
@@ -70,8 +71,9 @@ Use [Local for Mudlet on this Windows PC](quickstart/mudlet-windows.md).
 
 Choose **On another computer or server → Use my server login**.
 
-Follow [Managed SSH](../deploy/ssh.md#managed-ssh) to verify your OpenSSH login,
-run the noninteractive preflight, and let Imp maintain the connection.
+Follow [Managed SSH](../deploy/ssh.md#managed-ssh) to verify the host key and
+run a noninteractive preflight. Use an existing SSH alias with v0.6.0 or
+separate server-login fields in a source build that offers them.
 
 ## External SSH
 

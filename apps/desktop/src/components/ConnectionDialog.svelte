@@ -41,6 +41,10 @@
   let location = $state<'local' | 'remote' | null>(null);
   let mode = $state<ConnectionMode | null>(null);
   let sshTarget = $state('');
+  let useSshAlias = $state(false);
+  let sshHost = $state('');
+  let sshUsername = $state('');
+  let sshPort = $state('');
   let remoteUrl = $state('');
   let pairingToken = $state('');
   let saving = $state(false);
@@ -52,9 +56,15 @@
   let titleClose = $state<HTMLButtonElement>();
   let footerClose = $state<HTMLButtonElement>();
   let sshField = $state<HTMLInputElement>();
+  let serverField = $state<HTMLInputElement>();
+  let usernameField = $state<HTMLInputElement>();
+  let portField = $state<HTMLInputElement>();
   let urlField = $state<HTMLInputElement>();
   let tokenField = $state<HTMLInputElement>();
-  let issue = $state<{ field: 'ssh' | 'url' | 'token'; message: string } | null>(null);
+  let issue = $state<{
+    field: 'ssh' | 'server' | 'username' | 'port' | 'url' | 'token';
+    message: string;
+  } | null>(null);
   let showSaveError = $state(false);
   let advancedOpen = $state(false);
   let initialFocusApplied = false;
@@ -71,7 +81,13 @@
     mode = current?.mode ?? null;
     location = current === null ? null : current.mode === 'local' ? 'local' : 'remote';
     advancedOpen = current?.mode === 'external';
-    sshTarget = current?.sshTarget ?? '';
+    const destination = current?.sshDestination;
+    const target = current?.mode === 'managed' ? current.sshTarget : '';
+    sshTarget = target;
+    useSshAlias = target !== '' && !destination;
+    sshHost = destination?.host ?? '';
+    sshUsername = destination?.username ?? '';
+    sshPort = destination?.port?.toString() ?? '';
     remoteUrl = current?.remoteUrl ?? '';
     pairingToken = '';
     confirmingDiscard = false;
@@ -131,12 +147,41 @@
     return requested !== null && simple.test(previous) && stateUrl(previous)?.href === requested.href;
   }
 
+  function validSshHost(host: string): boolean {
+    if (host.includes(':')) {
+      if (!/^[a-f0-9:.]+$/i.test(host)) return false;
+      // Use only the URL parser's IPv6 grammar; do not apply its IPv4/DNS normalization.
+      try {
+        return new URL(`http://[${host}]/`).hostname !== '';
+      } catch {
+        return false;
+      }
+    }
+
+    if (/^(?:(?:[0-9]+|0x[0-9a-f]*)\.)*(?:[0-9]+|0x[0-9a-f]*)\.?$/i.test(host)) {
+      const parts = host.split('.');
+      return (
+        parts.length === 4 &&
+        parts.every((part) => /^(?:0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)
+      );
+    }
+
+    const name = host.endsWith('.') ? host.slice(0, -1) : host;
+    return (
+      name.length <= 253 &&
+      name.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))
+    );
+  }
+
   function endpoint(summary: ConnectionSettings): string {
-    return summary.mode === 'managed'
-      ? summary.sshTarget
-      : summary.mode === 'direct'
-        ? summary.remoteUrl
-        : '';
+    if (summary.mode === 'managed') {
+      const destination = summary.sshDestination;
+      if (!destination) return summary.sshTarget;
+      const { host, username, port } = destination;
+      const address = host.includes(':') ? `[${host}]` : host;
+      return `${username}@${address}${port === undefined ? '' : `:${port}`}`;
+    }
+    return summary.mode === 'direct' ? summary.remoteUrl : '';
   }
 
   function edit(): void {
@@ -155,6 +200,13 @@
     mode = nextMode;
     if (nextMode === 'external') advancedOpen = true;
     edit();
+  }
+
+  async function switchSshRepresentation(): Promise<void> {
+    useSshAlias = !useSshAlias;
+    edit();
+    await tick();
+    (useSshAlias ? sshField : serverField)?.focus();
   }
 
   function editUrl(next: string): void {
@@ -184,14 +236,40 @@
       return;
     }
 
-    const target = sshTarget.trim();
-    const url = remoteUrl.trim();
-    if (mode === 'managed' && !target) {
-      issue = { field: 'ssh', message: 'Enter your SSH target.' };
-      sshField?.focus();
-      return;
-    }
-    if (mode === 'direct') {
+    let update: ConnectionSettingsUpdate;
+    if (mode === 'managed') {
+      if (useSshAlias) {
+        const target = sshTarget.trim();
+        if (!target) {
+          issue = { field: 'ssh', message: 'Enter your SSH target.' };
+          sshField?.focus();
+          return;
+        }
+        update = { mode, sshTarget: target };
+      } else {
+        const host = sshHost.replace(/^ +| +$/g, '');
+        const username = sshUsername.replace(/^ +| +$/g, '');
+        const port = sshPort.replace(/^ +| +$/g, '');
+        if (!validSshHost(host)) {
+          issue = { field: 'server', message: 'Enter a server hostname or IP address.' };
+          serverField?.focus();
+          return;
+        }
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(username)) {
+          issue = { field: 'username', message: 'Enter a valid SSH username.' };
+          usernameField?.focus();
+          return;
+        }
+        const portNumber = Number(port);
+        if (port && (!/^[0-9]+$/.test(port) || portNumber < 1 || portNumber > 65535)) {
+          issue = { field: 'port', message: 'Enter a port from 1 to 65535.' };
+          portField?.focus();
+          return;
+        }
+        update = { mode, sshDestination: port ? { host, username, port: portNumber } : { host, username } };
+      }
+    } else if (mode === 'direct') {
+      const url = remoteUrl.trim();
       if (!stateUrl(url)) {
         issue = {
           field: 'url',
@@ -210,6 +288,9 @@
         tokenField?.focus();
         return;
       }
+      update = pairingToken ? { mode, remoteUrl: url, pairingToken } : { mode, remoteUrl: url };
+    } else {
+      update = { mode };
     }
 
     if (stored?.mode === 'direct' && stored.hasPairingToken && mode !== 'direct' && !discardConfirmed) {
@@ -220,15 +301,6 @@
         cancelDiscardButton?.focus();
       }
       return;
-    }
-
-    let update: ConnectionSettingsUpdate;
-    if (mode === 'managed') {
-      update = { mode, sshTarget: target };
-    } else if (mode === 'direct') {
-      update = pairingToken ? { mode, remoteUrl: url, pairingToken } : { mode, remoteUrl: url };
-    } else {
-      update = { mode };
     }
 
     saving = true;
@@ -380,26 +452,89 @@
             follow your MUD client's setup guide.
           </p>
         {:else if mode === 'managed'}
-          <label>
-            <span>SSH target</span>
-            <input
-              bind:this={sshField}
-              bind:value={sshTarget}
-              type="text"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="avatar"
-              required
-              disabled={saving}
-              aria-invalid={issue?.field === 'ssh' || undefined}
-              aria-describedby={issue?.field === 'ssh' ? 'ssh-help connection-field-error' : 'ssh-help'}
-              oninput={edit}
-            />
-          </label>
-
-          <p id="ssh-help" class="mode-help">
-            Enter an existing Host alias from your SSH configuration. Imp uses the system OpenSSH client.
-          </p>
+          {#if useSshAlias}
+            <label>
+              <span>SSH target</span>
+              <input
+                bind:this={sshField}
+                bind:value={sshTarget}
+                name="ssh-target"
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="avatar"
+                required
+                disabled={saving}
+                aria-invalid={issue?.field === 'ssh' || undefined}
+                aria-describedby={issue?.field === 'ssh' ? 'ssh-help connection-field-error' : 'ssh-help'}
+                oninput={edit}
+              />
+            </label>
+            <p id="ssh-help" class="mode-help">Enter an existing Host alias from your SSH configuration.</p>
+          {:else}
+            <label>
+              <span>Server</span>
+              <input
+                bind:this={serverField}
+                bind:value={sshHost}
+                name="ssh-host"
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="mud.example.org"
+                required
+                disabled={saving}
+                aria-invalid={issue?.field === 'server' || undefined}
+                aria-describedby={issue?.field === 'server' ? 'connection-field-error' : undefined}
+                oninput={edit}
+              />
+            </label>
+            <div class="ssh-login">
+              <label>
+                <span>Username</span>
+                <input
+                  bind:this={usernameField}
+                  bind:value={sshUsername}
+                  name="ssh-username"
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  required
+                  disabled={saving}
+                  aria-invalid={issue?.field === 'username' || undefined}
+                  aria-describedby={issue?.field === 'username' ? 'connection-field-error' : undefined}
+                  oninput={edit}
+                />
+              </label>
+              <label>
+                <span>Port (optional)</span>
+                <input
+                  bind:this={portField}
+                  bind:value={sshPort}
+                  name="ssh-port"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  disabled={saving}
+                  aria-invalid={issue?.field === 'port' || undefined}
+                  aria-describedby={issue?.field === 'port'
+                    ? 'ssh-port-help connection-field-error'
+                    : 'ssh-port-help'}
+                  oninput={edit}
+                />
+              </label>
+            </div>
+            <p id="ssh-port-help" class="mode-help">Leave port blank to use your OpenSSH configuration.</p>
+          {/if}
+          <button
+            class="manager-btn secondary ssh-representation"
+            name="ssh-representation"
+            type="button"
+            disabled={saving}
+            onclick={switchSshRepresentation}
+          >
+            {useSshAlias ? 'Use server and username' : 'Use an existing SSH alias'}
+          </button>
         {:else if mode === 'direct'}
           <label>
             <span>WSS state URL</span>
@@ -563,6 +698,16 @@
   form {
     display: grid;
     gap: var(--space-4);
+  }
+
+  .ssh-login {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 5.5rem);
+    gap: var(--space-4);
+  }
+
+  .ssh-representation {
+    justify-self: start;
   }
 
   label {

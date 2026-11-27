@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 
 // The PowerShell caller verifies that this listener belongs to its isolated WebView.
 const endpoint = `http://127.0.0.1:${Number(process.argv[2])}`;
-const [phase, tunnelConfig] = process.argv.slice(3);
+const [phase, tunnelConfig, fixturePort, screenshotDirectory] = process.argv.slice(3);
 setTimeout(() => {
   console.error('Installed connection UI acceptance timed out');
   process.exit(1);
@@ -93,7 +95,11 @@ async function click(selector, text) {
 
 const J = JSON.stringify;
 const DIALOG = '.connection-dialog';
-const SSH = `${DIALOG} input[type="text"]`;
+const SSH = `${DIALOG} input[name="ssh-target"]`;
+const SSH_HOST = `${DIALOG} input[name="ssh-host"]`;
+const SSH_USER = `${DIALOG} input[name="ssh-username"]`;
+const SSH_PORT = `${DIALOG} input[name="ssh-port"]`;
+const SSH_ENTRY = `${DIALOG} button[name="ssh-representation"]`;
 const URL_FIELD = `${DIALOG} input[type="url"]`;
 const TOKEN = `${DIALOG} input[type="password"]`;
 const MANAGE = 'button[aria-label="Manage connection"]';
@@ -103,6 +109,8 @@ const SAVED = 'Connection settings saved.';
 const SAVED_PENDING = 'Saved. Restart Imp to use this connection.';
 const PENDING = 'Saved for next launch';
 const DEFERRED_HINT = 'Open Settings → Connection → Manage to set up a connection.';
+const DESTINATION = { host: '127.0.0.1', username: 'imp-fixture', port: Number(fixturePort) };
+const DESTINATION_LABEL = `${DESTINATION.username}@${DESTINATION.host}:${DESTINATION.port}`;
 // Fixture-only synthetic credentials; each ends in a character the pairing-token format accepts.
 const TOKEN_A = 'Q'.repeat(43);
 const TOKEN_B = 'g'.repeat(43);
@@ -113,6 +121,15 @@ const ok = (condition, message) => assert.ok(condition, message);
 const dialogText = () => evaluate(`document.querySelector(${J(DIALOG)})?.innerText ?? ''`);
 const dialogShows = (text) =>
   waitFor(async () => (await dialogText()).includes(text), `dialog text: ${text}`);
+const summaryShows = (heading, method, destination = '') =>
+  waitFor(
+    () =>
+      evaluate(`Array.from(document.querySelectorAll(${J(`${DIALOG} .connection-summary > div`)}))
+    .some(row => row.querySelector('dt')?.textContent.trim() === ${J(heading)}
+      && row.querySelector('dd')?.textContent.trim().startsWith(${J(method)})
+      && (row.querySelector('dd span')?.textContent.trim() ?? '') === ${J(destination)})`),
+    `${heading} connection summary`,
+  );
 const dialogLacks = async (text) =>
   ok(!(await dialogText()).includes(text), `Unexpected dialog text: ${text}`);
 const bodyLacks = async (text) =>
@@ -150,8 +167,10 @@ const rawConfig = () => readFileSync(tunnelConfig, 'utf8');
 const config = () => JSON.parse(rawConfig());
 const configIs = (expected) => {
   const saved = config();
-  return ['mode', 'sshTarget', 'remoteUrl', 'pairingToken'].every(
-    (name) => (saved[name] ?? null) === (expected[name] ?? null),
+  return (
+    ['mode', 'sshTarget', 'remoteUrl', 'pairingToken'].every(
+      (name) => (saved[name] ?? null) === (expected[name] ?? null),
+    ) && isDeepStrictEqual(saved.sshDestination, expected.sshDestination)
   );
 };
 const bytesAre = (expected) => rawConfig() === expected;
@@ -207,6 +226,13 @@ async function assertFits() {
   })()`),
     'the manager and its controls to fit the native window',
   );
+}
+
+async function screenshot(filename) {
+  if (!screenshotDirectory) return;
+  await assertFits();
+  const { data } = await cdp('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(screenshotDirectory, filename), Buffer.from(data, 'base64'), { flag: 'wx' });
 }
 
 async function openSettings() {
@@ -323,9 +349,16 @@ const phases = {
     ok(!(await evaluate(`document.querySelector(${J(`${DIALOG} details`)}).open`)), 'Advanced started open');
 
     await choose('remote-method', 'managed');
+    await click(SSH_HOST);
+    await press('Enter');
+    await assertInvalid('Enter a server hostname or IP address.', SSH_HOST);
+    await click(SSH_ENTRY, 'Use an existing SSH alias');
     await click(SSH);
     await press('Enter');
     await assertInvalid('Enter your SSH target.', SSH);
+    await typeInto(SSH, 'imp-fixture');
+    await click(SSH_ENTRY, 'Use server and username');
+    await waitFor(() => visible(SSH_HOST), 'the server address field');
     await choose('remote-method', 'direct');
     ok((await value(URL_FIELD)) === '' && (await value(TOKEN)) === '', 'Direct fields were prefilled');
     await typeInto(URL_FIELD, 'https://127.0.0.1/state');
@@ -426,6 +459,7 @@ const phases = {
       ok(configIs(seeded), 'A rejected target changed settings');
     });
     await openManager();
+    await screenshot('managed-ssh-alias.png');
     await save(); // Unchanged.
     await dialogShows(SAVED);
     await dialogLacks(PENDING);
@@ -437,6 +471,64 @@ const phases = {
     await dialogShows(seeded.sshTarget);
     ok(configIs({ mode: 'managed', sshTarget: alternate }), 'The target was not saved');
     await closeManager('footer', MANAGER_TRIGGER);
+  },
+
+  async 'managed-structured'() {
+    const before = rawConfig();
+    await openManager();
+    await choose('client-location', 'remote');
+    await choose('remote-method', 'managed');
+    await typeInto(SSH_HOST, DESTINATION.host);
+    await typeInto(SSH_USER, DESTINATION.username);
+    await typeInto(SSH_PORT, String(DESTINATION.port));
+    await closeManager('escape', MANAGER_TRIGGER);
+    ok(bytesAre(before), 'Closing an unsaved server login changed settings');
+
+    await openManager();
+    await summaryShows('In use', 'This computer');
+    await dialogLacks(PENDING);
+    ok((await checked('client-location')) === 'local', 'The cancelled server login was retained');
+    await choose('client-location', 'remote');
+    await choose('remote-method', 'managed');
+    await typeInto(SSH_HOST, DESTINATION.host);
+    await save();
+    await assertInvalid('Enter a valid SSH username.', SSH_USER);
+    await typeInto(SSH_USER, DESTINATION.username);
+    await typeInto(SSH_PORT, '0');
+    await save();
+    await assertInvalid('Enter a port from 1 to 65535.', SSH_PORT);
+    ok(bytesAre(before), 'Rejected server login settings changed the file');
+    await typeInto(SSH_PORT, String(DESTINATION.port));
+    await save();
+    await dialogShows(SAVED_PENDING);
+    await summaryShows('In use', 'This computer');
+    await summaryShows(PENDING, 'Server login', DESTINATION_LABEL);
+    ok(configIs({ mode: 'managed', sshDestination: DESTINATION }), 'Server login was not saved');
+    ok(!Object.hasOwn(config(), 'sshTarget'), 'Server login was saved with a legacy SSH target');
+    await closeManager('footer', MANAGER_TRIGGER);
+  },
+
+  async 'managed-restart'() {
+    const before = rawConfig();
+    ok(
+      configIs({ mode: 'managed', sshDestination: DESTINATION }),
+      'The saved server login did not survive restart',
+    );
+    const check = async () => {
+      await summaryShows('In use', 'Server login', DESTINATION_LABEL);
+      await dialogLacks(PENDING);
+      ok((await checked('remote-method')) === 'managed', 'Managed was not selected after restart');
+      ok((await value(SSH_HOST)) === DESTINATION.host, 'The saved server was not shown');
+      ok((await value(SSH_USER)) === DESTINATION.username, 'The saved username was not shown');
+      ok((await value(SSH_PORT)) === String(DESTINATION.port), 'The saved port was not shown');
+      ok(!(await visible(SSH)), 'The alias field was shown for a structured server login');
+    };
+    await eachView(check);
+    await openManager();
+    await check();
+    await screenshot('managed-ssh-server-login.png');
+    await closeManager('footer', MANAGER_TRIGGER);
+    ok(bytesAre(before), 'Opening a saved server login rewrote it');
   },
 
   async external() {

@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$Installer,
     [int]$AliveSeconds = 15,
     [int]$ProvisionSeconds = 60,
-    [switch]$CheckConnectionUi
+    [switch]$CheckConnectionUi,
+    [string]$ScreenshotDirectory
 )
 
 # Install the NSIS artifact into the default per-user layout (<LocalAppData>\Imp, the layout in which
@@ -12,7 +13,9 @@ param(
 # refuses any existing installation, Imp settings, WebView data, or running Imp desktop rather than
 # loading or changing them. The optional UI step additionally requires Node 24 and is for a fresh
 # interactive Windows CI runner; it enables a temporary loopback-only WebView debugger.
+# Optional screenshots contain only the synthetic Managed forms in the isolated WebView.
 $ErrorActionPreference = 'Stop'
+if ($ScreenshotDirectory -and !$CheckConnectionUi) { throw 'Screenshots require -CheckConnectionUi' }
 $Config = Get-Content (Join-Path $PSScriptRoot '..\apps\desktop\src-tauri\tauri.conf.json') -Raw |
     ConvertFrom-Json
 $Version = $Config.version
@@ -93,6 +96,9 @@ public static int ElevationType(IntPtr process) {
     $DebugPort = $Reservation.LocalEndpoint.Port
     $Reservation.Stop()
     $WebViewArgs = "--no-proxy-server --remote-debugging-address=127.0.0.1 --remote-debugging-port=$DebugPort"
+    if ($ScreenshotDirectory) {
+        $ScreenshotDirectory = (New-Item -ItemType Directory -Path $ScreenshotDirectory).FullName
+    }
 }
 
 function Test-Helper([string]$Directory) {
@@ -314,7 +320,7 @@ function Stop-FixtureDesktop($Process, [string]$Log) {
     Remove-Item $Log -ErrorAction SilentlyContinue
 }
 
-function Invoke-ConnectionUi($Process, [string]$Phase) {
+function Invoke-ConnectionUi($Process, [string]$Phase, [int]$FixturePort = 0) {
     $Listeners = @(Wait-DebugListener $Process 15)
     if (!$Listeners) { throw 'Expected a loopback WebView2 debugger' }
     foreach ($Listener in $Listeners) {
@@ -327,7 +333,9 @@ function Invoke-ConnectionUi($Process, [string]$Phase) {
             throw 'Refusing to connect to a debugger outside the isolated Imp WebView'
         }
     }
-    & $Node (Join-Path $PSScriptRoot 'test-installed-connection.mjs') $DebugPort $Phase $TunnelConfig
+    $Arguments = @((Join-Path $PSScriptRoot 'test-installed-connection.mjs'), $DebugPort, $Phase, $TunnelConfig, $FixturePort)
+    if ($ScreenshotDirectory) { $Arguments += $ScreenshotDirectory }
+    & $Node @Arguments
     if ($LASTEXITCODE) { throw [IO.InvalidDataException]::new("Installed connection UI phase failed: $Phase") }
 }
 
@@ -413,10 +421,13 @@ if ($CheckConnectionUi) {
                 @{ Phase = 'deferred' },
                 @{ Phase = 'local' },
                 @{ Phase = 'managed'; Config = @{ mode = 'managed'; sshTarget = "ssh://imp-fixture@127.0.0.1:$Port" } },
+                @{ Phase = 'managed-structured'; Config = @{ mode = 'local' } },
+                @{ Phase = 'managed-restart' },
                 @{ Phase = 'external'; Config = @{ mode = 'external' } },
                 @{ Phase = 'direct'; Config = @{ mode = 'direct'; remoteUrl = "wss://127.0.0.1:$Port/state"; pairingToken = ('A' * 43) } },
                 @{ Phase = 'legacy'; Config = @{} },
                 @{ Phase = 'invalid' })) {
+            if ($Case.Phase -eq 'managed-restart' -and $FailedPhases -contains 'managed-structured') { continue }
             if ($null -ne $Case.Config) {
                 [IO.File]::WriteAllText($TunnelConfig, ($Case.Config | ConvertTo-Json))
             } elseif ($Case.Phase -eq 'invalid') {
@@ -429,20 +440,20 @@ if ($CheckConnectionUi) {
             try {
                 Start-FixtureDesktop $Log ([ref]$App)
                 try {
-                    Invoke-ConnectionUi $App $Case.Phase
+                    Invoke-ConnectionUi $App $Case.Phase $Port
                 } catch [IO.InvalidDataException] {
-                    # Only Local depends on the deferred phase's save. Let independent seeded
-                    # phases report their own UI failures without absorbing launch or cleanup errors.
+                    # Local depends on deferral's save; the structured restart depends on its save.
+                    # Independent phases still report UI failures without absorbing launch or cleanup errors.
                     if ($Case.Phase -eq 'deferred') { throw }
                     $FailedPhases += $Case.Phase
                     continue
                 }
                 Assert-OwnedNode $Log
-                if ($Case.Phase -ne 'managed') { Assert-NoManagedRuntime $Log }
-                if ($Case.Phase -eq 'managed' -and
-                    !(Select-String -Path $Log -Pattern '^imp: owned SSH pid=' -Quiet)) {
-                    throw 'Saved Managed route did not start its owned SSH process'
-                }
+                if ($Case.Phase -in 'managed', 'managed-restart') {
+                    if (!(Select-String -Path $Log -Pattern '^imp: owned SSH pid=' -Quiet)) {
+                        throw 'Saved Managed route did not start its owned SSH process'
+                    }
+                } else { Assert-NoManagedRuntime $Log }
                 switch ($Case.Phase) {
                     'deferred' {
                         if ((Get-Content $TunnelConfig -Raw | ConvertFrom-Json).mode -ne 'local') {

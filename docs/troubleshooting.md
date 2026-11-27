@@ -24,8 +24,8 @@ session don't establish that.
 
 ## Imp says the connection is not set up
 
-- **Meaning:** In builds with the new first-launch experience, Imp has no
-  saved connection and is not trying to reach a relay. Dismissing the setup
+- **Meaning:** In v0.6.0 and later, this message means Imp has no saved
+  connection and is not trying to reach a relay.
   prompt doesn't pick a connection.
 - **Check and recover:** Select **Set up connection** or go to
   **Settings → Connection → Manage**, then follow the
@@ -55,9 +55,9 @@ session don't establish that.
   connection **In use** (in v0.5.4, the selection shows what was last saved).
   Follow the matching route:
   - **Managed SSH (Use my server login):** Use the
-    [Managed SSH preflight](../deploy/ssh.md#managed-ssh) with the same SSH
-    alias. Resolve any prompts in your own SSH client first. Verify an
-    unexpected host key with the server operator.
+    [Managed SSH preflight](../deploy/ssh.md#managed-ssh) with the same server
+    details or SSH alias. Resolve prompts in your own SSH client first. If the
+    host key is unexpected or has changed, stop and verify it with the server operator.
   - **External SSH (Use my own SSH tunnel):** Make sure your
     [SSH forward](../deploy/ssh.md#external-ssh) is still running on
     `127.0.0.1:8789` and points to the right server's loopback relay.

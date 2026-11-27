@@ -106,8 +106,10 @@ Desktop native runtime:
 - `GatewaySupervisor` starts the same packaged sidecar in `gateway` mode with
   loopback endpoints and locally configured pairing-token digest material.
 - `TunnelSupervisor` invokes the system `ssh` executable directly by argv with
-  fixed forwarding/options. The operator-provided SSH alias follows `--`;
-  no MUD-derived value reaches its argv.
+  fixed forwarding/options. The operator-provided SSH host or legacy target
+  follows `--`; the structured username and optional port are separate option
+  values. Native validation rejects invalid structured fields and never puts
+  MUD-derived values into SSH argv.
 - Each supervisor tracks and terminates only children it spawned. Existing
   listeners are never killed merely because they occupy a desired port.
 
@@ -129,8 +131,13 @@ Imp supports two remote desktop transports with different credential
 boundaries.
 
 SSH mode still requests, stores, and manages no SSH password or private key.
-The system OpenSSH client retains ownership of its existing agent, keys, host
-verification, and configuration.
+The system OpenSSH client retains ownership of its agent, keys, host
+verification, and configuration. Structured destinations require strict,
+pre-established target host trust and do not weaken the legacy mode's
+existing verification behavior. Trusted OpenSSH configuration is still
+active, can rewrite the destination or run local commands such as `Match
+exec` and `ProxyCommand`, and can start a jump client with its own policy.
+Imp neither rewrites that configuration nor repairs host trust.
 
 Direct WSS mode uses one 256-bit pairing token for the authenticated remote
 gateway:

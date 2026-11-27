@@ -3,6 +3,42 @@
 Canonical status for Imp. Platform-independent checks run in WSL2; the
 native shell is also runtime-verified on Windows 11 x64.
 
+## Slice 29 - Connection onboarding
+
+The published [v0.6.0](https://github.com/i-mud/imp/releases/tag/v0.6.0)
+installer includes the intent-based connection dialog and still uses an SSH
+alias for Managed SSH. The current source adds separate server, username and
+optional SSH port fields with strict target host verification. No alias setup
+is required with those fields, and existing SSH targets still use their
+original alias mode. The Windows OpenSSH preparation and noninteractive
+preflight, server install, save and restart, and final gameplay check remain
+separate steps. There is no in-app connection check in this increment.
+
+This is easier configuration of the existing Managed SSH transport, not
+strict gameplay ownership. Both forms supervise their own foreground OpenSSH
+child but can adopt a compatible process already listening on `127.0.0.1:8789`.
+The renderer uses the fixed port for state and actions; the health response
+and port readiness do not establish either listener ownership or the intended
+SSH destination. See [tunnel ownership](../deploy/ssh.md#tunnel-ownership-and-ports).
+
+Prior experiments are negative production evidence:
+
+- [#69](https://github.com/i-mud/imp/pull/69): one `ssh -W` per gameplay stream
+  lost reverse TCP half-close and added repeated action latency on Linux
+  and Windows even in a loopback fixture.
+- [#70](https://github.com/i-mud/imp/pull/70): the persistent-session fixture
+  sent an action to a replacement backend while the original still provided
+  state; a stalled stream blocked a sibling and the paired latency gate failed.
+- [#71](https://github.com/i-mud/imp/pull/71): exact-stream attribution did not
+  enforce conflict refusal on native Windows. Two OpenSSH listeners shared the
+  same address and port. Gate 1 failed; Gate 2 was not started.
+
+Synthetic relay and native installed-fixture checks are not published artifact
+acceptance or independent human onboarding. These gates and the existing
+Slice 28 recruitment requirements remain separate and unchanged. The
+[roadmap](roadmap.md#slice-29---connection-onboarding) distinguishes the
+read-only check proposal from deferred gameplay transport work.
+
 ## Slice 28 — External Alpha Readiness
 
 **In progress.** The 28.0 audit is complete; it inspected

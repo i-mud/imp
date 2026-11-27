@@ -45,9 +45,16 @@ export type RuntimeConnectionConfig =
 
 export type ConnectionMode = 'external' | 'local' | 'managed' | 'direct';
 
+interface SshDestination {
+  readonly host: string;
+  readonly username: string;
+  readonly port?: number;
+}
+
 export interface ConnectionSettings {
   readonly mode: ConnectionMode;
   readonly sshTarget: string;
+  readonly sshDestination?: SshDestination;
   readonly remoteUrl: string;
   readonly hasPairingToken: boolean;
 }
@@ -61,6 +68,7 @@ export interface ConnectionSettingsState {
 export interface ConnectionSettingsUpdate {
   readonly mode: ConnectionMode;
   readonly sshTarget?: string;
+  readonly sshDestination?: SshDestination;
   readonly remoteUrl?: string;
   /**
    * Omit to keep the saved Direct token for the same state endpoint.
