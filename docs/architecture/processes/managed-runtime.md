@@ -3,8 +3,9 @@
 ## Why this is a process card
 
 The runtime has independent process owners on both producer and consumer hosts.
-Imp may own a same-host node, an optional authenticated gateway, and a Managed
-SSH child, while the MUD client remains operator-owned.
+Imp may own a same-host node, an optional authenticated gateway, a Managed
+SSH gameplay forward, and a separate diagnostic child. The MUD client
+remains operator-owned.
 
 Those lifecycles must stay separate. A MUD-client adapter always talks to the
 Imp node on its own host; remote access is node-to-UI transport rather than
@@ -26,6 +27,7 @@ client-adapter transport.
 | VPS authenticated gateway                   | `imp-gateway.service`           | loopback user service; state/action only                           |
 | desktop authenticated gateway               | desktop `GatewaySupervisor`     | active only when producer-side WSS is enabled                      |
 | Managed SSH consumer forward on `8789`      | desktop `TunnelSupervisor`      | at most one owned child per Imp process                            |
+| One-shot Managed SSH diagnostic             | native Managed check            | one owned foreground child per active check                        |
 | healthy pre-existing relay on `8789`        | whoever started it              | Managed mode may adopt and monitor it; never owns or signals it    |
 | WebSocket reconnect and HUD state           | `RelayStateSource` / HUD model  | transport-independent freshness presentation                       |
 
@@ -278,12 +280,36 @@ that mode. Local mode consumes the desktop node directly on `8787`. Direct WSS
 uses neither consumer loopback port for the HUD connection.
 
 The [Slice 29.3a forwarding experiment](../../audits/guided-ssh-forward.md)
-tests a different listener ownership model in the native acceptance harness.
-It is not a selectable consumer and changes none of these rules. See the
+does not provide a selectable consumer or change these rules. See the
 [Guided SSH roadmap](../../roadmap.md#slice-29---connection-onboarding) for
-subsequent negative evidence and the separate one-shot check proposal.
+subsequent negative gameplay evidence.
 
-Runtime diagnostics preserve the same UI boundary. Local mode reads
+The Managed SSH dialog can explicitly check unsaved login details without
+reading or writing saved settings. The check owns one foreground OpenSSH
+child and uses its stdin/stdout for fixed `-W 127.0.0.1:8787` forwarding and
+one read-only `/state` WebSocket. Neither Imp nor the directly launched
+target client opens a listener for the diagnostic. The check does not probe
+or adopt a port, issue a remote command, retry, or start gameplay consumers.
+The target client uses strict verification in both login forms and disables
+shared masters and authentication-triggered backgrounding.
+On Windows, the check uses only the Windows system OpenSSH client under
+`%SystemRoot%\System32\OpenSSH\ssh.exe`, reporting SSH unavailable if absent.
+The gameplay supervisor's executable lookup is unchanged.
+
+Each proxy or jump process used by the check must run with verified,
+noninteractive foreground operation and no extra forwards or listeners.
+The operator must configure this: the target client's overrides do not
+propagate to nested processes, and Imp does not enforce their policy.
+This diagnostic precondition does not change Managed gameplay configuration.
+
+One five-second overall deadline covers the check, including SSH and state
+protocol exchange. Cancellation or completion retires the check and its
+owned resources; a late result cannot update a newer form or check.
+Isolation from `8789` means a successful check says nothing about whether
+the Managed gameplay forward can bind or which endpoint state and actions
+will reach after restart.
+
+Gameplay runtime diagnostics preserve the same UI boundary. Local mode reads
 `NodeSupervisor` diagnostics; Managed/External loopback consumption uses tunnel
 diagnostics; Direct WSS uses its socket lifecycle. Components still receive only
 the existing connection/freshness presentation.
@@ -346,15 +372,19 @@ or SSH supervisor.
 
 One `RuntimeOwner` is initialized before the desktop supervisors. Node and
 gateway keep Tauri's bundled sidecar resolution and argv; Managed SSH uses the
-system OpenSSH client with the foreground/nonpersistent policy above. All three
-launch through the same ownership boundary. Saving settings still applies on
-next start, and existing startup/adoption/retry decisions are unchanged.
+system OpenSSH client with the foreground/nonpersistent policy above. These
+processes and the one-shot Managed check launch through the native lifetime
+ownership boundary, but the check is not owned by a gameplay supervisor.
+Saving settings still applies on next start; startup/adoption/retry decisions
+are unchanged.
 
 The spawn API accepts executable, argv, and stdout policy rather than silently
 discarding `std::process::Command` settings. Runtime children inherit cwd and
-environment, use null stdin and piped stderr, and are hidden on Windows. Node
-and gateway stdout remains piped for diagnostics; Managed SSH stdout goes to
-the null device, including synchronous `LocalCommand` output.
+environment and are hidden on Windows. Supervisors use null stdin and piped
+stderr; node and gateway stdout remains piped for diagnostics. Gameplay
+Managed SSH sends stdout, including synchronous `LocalCommand` output, to the
+null device. The one-shot check pipes all three streams for protocol exchange
+and bounded native error classification.
 
 ### Windows
 
@@ -437,6 +467,8 @@ remain platform-owned.
 - `services/relay/src/imp_relay/server_runtime.py` - frozen roles and stable aliases
 - `deploy/systemd/` - VPS user units
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH child ownership and adopted-endpoint watch
+- `apps/desktop/src-tauri/src/managed_check.rs` and `managed_check/` - explicit
+  check ownership, cancellation, SSH stdio and native state classification
 - `apps/desktop/src-tauri/src/node.rs` and `gateway.rs` - sidecar supervision
 - `apps/desktop/src-tauri/src/runtime.rs` and `runtime/` - platform lifetime ownership
 - `apps/desktop/src-tauri/src/tunnel_config.rs` - native connection validation,

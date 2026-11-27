@@ -321,6 +321,7 @@
       switch (error) {
         case CONNECTION_FILE_UNREADABLE:
         case CONNECTION_FILE_CHANGED:
+        case 'Wait for the connection check to finish, then try saving again.':
           connectionSaveError = error;
           break;
         case 'managed mode requires a non-empty sshTarget':

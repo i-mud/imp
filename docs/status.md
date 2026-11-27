@@ -5,21 +5,41 @@ native shell is also runtime-verified on Windows 11 x64.
 
 ## Slice 29 - Connection onboarding
 
-The published [v0.6.0](https://github.com/i-mud/imp/releases/tag/v0.6.0)
-installer includes the intent-based connection dialog and still uses an SSH
-alias for Managed SSH. The current source adds separate server, username and
-optional SSH port fields with strict target host verification. No alias setup
-is required with those fields, and existing SSH targets still use their
-original alias mode. The Windows OpenSSH preparation and noninteractive
-preflight, server install, save and restart, and final gameplay check remain
-separate steps. There is no in-app connection check in this increment.
+The published [v0.7.0](https://github.com/i-mud/imp/releases/tag/v0.7.0)
+installer includes the intent-based dialog and separate Managed SSH server,
+username and optional SSH port fields with strict target host verification
+([PR #72](https://github.com/i-mud/imp/pull/72)). A saved alias still uses its
+original mode. v0.7.0 has no in-app connection check and still uses the
+[terminal preflight](../deploy/ssh.md#terminal-preflight).
 
-This is easier configuration of the existing Managed SSH transport, not
-strict gameplay ownership. Both forms supervise their own foreground OpenSSH
-child but can adopt a compatible process already listening on `127.0.0.1:8789`.
-The renderer uses the fixed port for state and actions; the health response
-and port readiness do not establish either listener ownership or the intended
-SSH destination. See [tunnel ownership](../deploy/ssh.md#tunnel-ownership-and-ports).
+At PR #72 head `1447347ec6`, the native Windows installed-fixture
+[run 46058018012](https://github.com/i-mud/imp/actions/runs/46058018012) failed
+with `Expected a loopback WebView2 debugger after the executable-scoped policy launch`.
+[Run 46058025528](https://github.com/i-mud/imp/actions/runs/46058025528) and
+[run 46060962523](https://github.com/i-mud/imp/actions/runs/46060962523) passed
+at the same head. The passing runs do not explain or erase the failure.
+
+**29.3e, current source:** An explicit **Check connection** uses the entered
+Managed SSH alias or structured login and reports the remote relay's feed
+state or a safe diagnostic. It uses one temporary, owned SSH stdio stream
+to read `/state`, with a five-second deadline, no remote shell command, and
+no changes to saved settings or active gameplay. It replaces routine
+terminal preflight in this source workflow, not host trust, noninteractive
+credentials, server setup, Save and restart, or watching the intended
+character's vitals update during play.
+
+The no-listener guarantee covers Imp and the directly launched SSH client
+for the check. Every nested proxy or jump process must be configured by
+the operator for verified, noninteractive foreground operation with no
+additional forwards or listeners. The target client's overrides do not
+propagate to nested processes. Imp does not enforce those settings.
+
+This does not change Managed gameplay ownership. Both login forms supervise
+their own foreground OpenSSH forward but can adopt a compatible process
+already listening on `127.0.0.1:8789`. The renderer still uses that fixed port
+for state and actions. A health response doesn't attribute the listener,
+and a diagnostic result doesn't test its bind or prove where gameplay
+will connect. See [tunnel ownership](../deploy/ssh.md#tunnel-ownership-and-ports).
 
 Prior experiments are negative production evidence:
 
@@ -33,11 +53,31 @@ Prior experiments are negative production evidence:
   enforce conflict refusal on native Windows. Two OpenSSH listeners shared the
   same address and port. Gate 1 failed; Gate 2 was not started.
 
-Synthetic relay and native installed-fixture checks are not published artifact
-acceptance or independent human onboarding. These gates and the existing
-Slice 28 recruitment requirements remain separate and unchanged. The
-[roadmap](roadmap.md#slice-29---connection-onboarding) distinguishes the
-read-only check proposal from deferred gameplay transport work.
+The native 29.3e fixture passed 20 cases each on WSL2 (OpenSSH 10.2p1)
+and Windows (system OpenSSH 9.5p2). Direct and foreground jump logins
+reached the production relay with a synthetic producer and action consumer.
+Only `/state` was requested by the diagnostic; no command was dispatched.
+The separate SSH connection and deliberately occupied `8789` survived.
+
+| One loopback fixture run                | WSL2            | Windows         |
+| --------------------------------------- | --------------- | --------------- |
+| Direct login, configured port           | 205 ms          | 375 ms          |
+| Compliant foreground jump               | 285 ms          | 438 ms          |
+| Timeout at login / upgrade / status     | 5.013–5.030 s   | 5.047–5.062 s   |
+| Explicit cancellation: owned retirement | 10.1 ms         | 15.7 ms         |
+| Maximum observed orderly retirement     | 10.3 ms or less | 16.1 ms or less |
+| Abrupt death to SSH and peer closure    | 21.5 ms         | 16.0 ms         |
+
+These are measurements, not WAN latency guarantees. The diagnostic deadline
+is five seconds; retirement has a separate one-second budget. Unknown SSH
+diagnostics are not guessed from exit status 255. The [browser result
+screenshots](audits/managed-check-browser) use controlled IPC, not SSH. The
+installed NSIS/WebView2 gate exercises actual native IPC separately on the PR.
+Neither source-fixture results nor candidate-installer checks are
+published-artifact acceptance or independent human onboarding. Slice 28
+recruitment requirements remain unchanged. The
+[roadmap](roadmap.md#slice-29---connection-onboarding) separates the read-only
+diagnostic from deferred strict gameplay transport.
 
 ## Slice 28 — External Alpha Readiness
 

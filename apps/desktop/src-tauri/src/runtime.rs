@@ -1,6 +1,22 @@
 //! Lifetime ownership for the node, gateway, and managed SSH trees only.
-//! Runtime children inherit cwd/environment, use null stdin and piped stderr, and
-//! are hidden on Windows. Only the acceptance harness uses duplex pipes.
+//! Runtime children inherit cwd/environment and are hidden on Windows. The
+//! diagnostic uses duplex pipes; gameplay uses null stdin and piped stderr.
+
+use std::time::Duration;
+
+pub(crate) const DIAGNOSTIC_POLL: Duration = Duration::from_millis(10);
+pub(crate) const DIAGNOSTIC_CLEANUP: Duration = Duration::from_secs(1);
+
+#[derive(Debug)]
+pub(crate) struct SshUnavailable;
+
+impl std::fmt::Display for SshUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OpenSSH executable unavailable")
+    }
+}
+
+impl std::error::Error for SshUnavailable {}
 
 #[cfg(unix)]
 #[path = "runtime/unix.rs"]

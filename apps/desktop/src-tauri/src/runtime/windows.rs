@@ -10,16 +10,20 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::ptr::{null, null_mut};
 
-use super::RuntimeStdout;
+use super::{RuntimeStdout, SshUnavailable};
 
 use windows_sys::Win32::Foundation::{
-    SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    SetHandleInformation, ERROR_BAD_EXE_FORMAT, ERROR_EXE_MACHINE_TYPE_MISMATCH,
+    ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, HANDLE, HANDLE_FLAG_INHERIT, WAIT_FAILED,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
 use windows_sys::Win32::System::JobObjects::{
-    CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    CreateJobObjectW, JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::SystemInformation::{GetSystemDirectoryW, GetWindowsDirectoryW};
@@ -78,6 +82,7 @@ impl RuntimeOwner {
             args,
             stdout,
             false,
+            None,
         )
     }
 
@@ -94,7 +99,60 @@ impl RuntimeOwner {
             args,
             RuntimeStdout::Piped,
             true,
+            None,
         )
+    }
+
+    pub(crate) fn spawn_duplex_interruptible<'a>(
+        &self,
+        program: &'a OsStr,
+        args: impl IntoIterator<Item = &'a OsStr>,
+        check: &dyn Fn() -> io::Result<()>,
+    ) -> io::Result<OwnedChild> {
+        check()?;
+        let system_ssh;
+        let program = if program == OsStr::new("ssh") {
+            let system_directory =
+                windows_directory(GetSystemDirectoryW).ok_or_else(io::Error::last_os_error)?;
+            system_ssh = system_directory.join("OpenSSH").join("ssh.exe");
+            system_ssh.as_os_str()
+        } else {
+            program
+        };
+        spawn_in_job(
+            self.job.as_raw_handle() as HANDLE,
+            program,
+            args,
+            RuntimeStdout::Piped,
+            true,
+            Some(check),
+        )
+    }
+
+    pub(crate) fn begin_diagnostic_retirement(&self, _child: &mut OwnedChild) -> io::Result<()> {
+        // This job is exclusive to the diagnostic, unlike the shared gameplay job.
+        if unsafe { TerminateJobObject(self.job.as_raw_handle() as HANDLE, 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn diagnostic_retired(&self, child: &mut OwnedChild) -> io::Result<bool> {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: The job handle is live and accounting is writable with the supplied size.
+        if unsafe {
+            QueryInformationJobObject(
+                self.job.as_raw_handle() as HANDLE,
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                size_of_val(&accounting) as u32,
+                null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(accounting.ActiveProcesses == 0 && child.try_wait()?.is_some())
     }
 }
 
@@ -102,8 +160,6 @@ impl RuntimeOwner {
 pub struct OwnedChild {
     process: OwnedHandle,
     id: u32,
-    #[cfg(feature = "runtime-acceptance")]
-    #[allow(dead_code)] // Used by the acceptance harness's copy of this module.
     pub stdin: Option<File>,
     pub stdout: Option<File>,
     pub stderr: Option<File>,
@@ -429,12 +485,19 @@ fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
 
 fn spawn_in_job<'a>(
     job: HANDLE,
-    program: &'a OsStr,
+    program: &OsStr,
     args: impl IntoIterator<Item = &'a OsStr>,
     stdout: RuntimeStdout,
     pipe_stdin: bool,
+    check: Option<&dyn Fn() -> io::Result<()>>,
 ) -> io::Result<OwnedChild> {
-    let application_name = resolve_executable(program)?;
+    let application_name = resolve_executable(program).map_err(|error| {
+        if check.is_some() && error.kind() == io::ErrorKind::NotFound {
+            io::Error::new(io::ErrorKind::NotFound, SshUnavailable)
+        } else {
+            error
+        }
+    })?;
     let mut command_line = Vec::new();
     append_quoted_arg(&mut command_line, program)?;
     for arg in args {
@@ -507,6 +570,9 @@ fn spawn_in_job<'a>(
     startup.StartupInfo.hStdError = stderr_write.as_raw_handle() as HANDLE;
     startup.lpAttributeList = attributes.list;
 
+    if let Some(check) = check {
+        check()?;
+    }
     let mut process_info = PROCESS_INFORMATION::default();
     // SAFETY: The application name and mutable command line are NUL-terminated; startup and
     // attribute storage are valid, and HANDLE_LIST restricts inheritance to the three listed
@@ -526,7 +592,21 @@ fn spawn_in_job<'a>(
         )
     } == 0
     {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        if check.is_some()
+            && matches!(
+                error.raw_os_error().map(|code| code as u32),
+                Some(
+                    ERROR_FILE_NOT_FOUND
+                        | ERROR_PATH_NOT_FOUND
+                        | ERROR_BAD_EXE_FORMAT
+                        | ERROR_EXE_MACHINE_TYPE_MISMATCH
+                )
+            )
+        {
+            return Err(io::Error::new(io::ErrorKind::NotFound, SshUnavailable));
+        }
+        return Err(error);
     }
 
     // SAFETY: Successful CreateProcessW returns these fresh process/thread handles.
@@ -545,12 +625,9 @@ fn spawn_in_job<'a>(
     // SAFETY: Each read end is an owned pipe handle and ownership is transferred to File.
     let stderr = unsafe { File::from_raw_handle(stderr_read.into_raw_handle()) };
 
-    #[cfg(not(feature = "runtime-acceptance"))]
-    drop(stdin_write);
     Ok(OwnedChild {
         process,
         id: process_info.dwProcessId,
-        #[cfg(feature = "runtime-acceptance")]
         stdin: stdin_write.map(File::from),
         stdout,
         stderr: Some(stderr),
@@ -607,10 +684,7 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
     use windows_sys::Win32::Foundation::{GetHandleInformation, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::JobObjects::{
-        JobObjectExtendedLimitInformation, QueryInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
+    use windows_sys::Win32::System::JobObjects::JobObjectExtendedLimitInformation;
 
     #[test]
     fn job_is_kill_on_close_and_noninheritable() {
@@ -677,6 +751,7 @@ mod tests {
             command.get_args(),
             RuntimeStdout::Piped,
             false,
+            None,
         );
         if let Ok(mut child) = result {
             let _ = child.kill();

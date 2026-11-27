@@ -1,4 +1,5 @@
 mod gateway;
+mod managed_check;
 mod mudlet;
 mod node;
 mod remote_access;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use gateway::{GatewayStatus, GatewaySupervisor};
+use managed_check::{ExitReadiness, ManagedCheck};
 use node::{NodeStatus, NodeSupervisor};
 use tunnel::{TunnelStatus, TunnelSupervisor, NODE_PORT, SSH_FORWARD_PORT};
 use tunnel_config::{
@@ -46,18 +48,29 @@ fn connection_config(config: tauri::State<'_, RuntimeConnectionConfig>) -> Runti
 }
 
 #[tauri::command]
-fn connection_settings(
-    store: tauri::State<'_, ConnectionConfigStore>,
+async fn connection_settings(
+    store: tauri::State<'_, Arc<ConnectionConfigStore>>,
 ) -> Result<ConnectionSettingsStatus, String> {
-    store.settings()
+    let store = Arc::clone(store.inner());
+    tauri::async_runtime::spawn_blocking(move || store.settings())
+        .await
+        .map_err(|_| "Imp could not read connection settings.".to_owned())?
 }
 
 #[tauri::command]
-fn save_connection_settings(
-    store: tauri::State<'_, ConnectionConfigStore>,
+async fn save_connection_settings(
+    store: tauri::State<'_, Arc<ConnectionConfigStore>>,
+    check: tauri::State<'_, Arc<ManagedCheck>>,
     update: ConnectionSettingsUpdate,
 ) -> Result<ConnectionSettingsStatus, String> {
-    store.save(update)
+    let reservation = check.inner().reserve_save()?;
+    let store = Arc::clone(store.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        store.save(update)
+    })
+    .await
+    .map_err(|_| "Imp could not save connection settings.".to_owned())?
 }
 
 #[tauri::command]
@@ -83,6 +96,8 @@ pub fn run() {
             connection_config,
             connection_settings,
             save_connection_settings,
+            managed_check::check_managed_connection,
+            managed_check::cancel_managed_connection,
             alerts_muted
         ])
         .setup(|app| {
@@ -158,7 +173,8 @@ pub fn run() {
             };
 
             app.manage(runtime_connection);
-            app.manage(config_store);
+            app.manage(Arc::new(config_store));
+            app.manage(Arc::new(ManagedCheck::default()));
             app.manage(tunnel_supervisor);
             app.manage(runtime_owner);
             app.manage(node_supervisor);
@@ -168,10 +184,32 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running Imp")
         .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                if let Some(check) = app_handle.try_state::<Arc<ManagedCheck>>() {
+                    match check.begin_shutdown() {
+                        ExitReadiness::Ready => {}
+                        ExitReadiness::Waiting => api.prevent_exit(),
+                        ExitReadiness::NeedsWait => {
+                            api.prevent_exit();
+                            let check = Arc::clone(check.inner());
+                            let app = app_handle.clone();
+                            let code = code.unwrap_or(0);
+                            tauri::async_runtime::spawn_blocking(move || {
+                                check.shutdown();
+                                app.exit(code);
+                            });
+                        }
+                    }
+                }
+            }
+
             // Clean up only processes owned by this Imp instance when the
             // event loop is actually exiting, rather than when exit is merely
             // requested. Stop the gateway before its local node.
             if let tauri::RunEvent::Exit = event {
+                if let Some(check) = app_handle.try_state::<Arc<ManagedCheck>>() {
+                    check.shutdown();
+                }
                 if let Some(supervisor) = app_handle.try_state::<Arc<GatewaySupervisor>>() {
                     supervisor.shutdown();
                 }

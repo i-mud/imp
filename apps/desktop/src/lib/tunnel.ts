@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { get, readonly, writable } from 'svelte/store';
 
 /**
  * Reads the desktop transport supervisor's diagnostic without exposing SSH,
@@ -77,6 +78,29 @@ export interface ConnectionSettingsUpdate {
   readonly pairingToken?: string;
 }
 
+export type ManagedCheckDestination =
+  { readonly sshTarget: string } | { readonly sshDestination: SshDestination };
+
+export type ManagedCheckResult =
+  | 'invalid_destination'
+  | 'ssh_unavailable'
+  | 'live'
+  | 'stale'
+  | 'down'
+  | 'no_usable_state'
+  | 'host_verification'
+  | 'authentication'
+  | 'forwarding_unavailable'
+  | 'invalid_protocol'
+  | 'timeout'
+  | 'cancelled'
+  | 'connection_failed'
+  | 'busy';
+
+const checkPending = writable(false);
+export const managedCheckPending = readonly(checkPending);
+const MANAGED_CHECK_SEQUENCE_KEY = 'imp.managed-check-sequence';
+
 const POLL_INTERVAL_MS = 2_000;
 
 const DETAIL_BY_DIAGNOSTIC: Partial<Record<TunnelDiagnostic, string>> = {
@@ -148,6 +172,36 @@ export async function saveConnectionSettings(
   }
 
   return invoke<ConnectionSettingsState>('save_connection_settings', { update });
+}
+
+export function checkManagedConnection(
+  destination: ManagedCheckDestination,
+): { requestId: number; result: Promise<ManagedCheckResult> } | null {
+  if (!isTauriRuntime() || get(checkPending)) return null;
+
+  // Native stays up across WebView reloads; keep only the request counter in this session.
+  const requestId = Number(sessionStorage.getItem(MANAGED_CHECK_SEQUENCE_KEY)) + 1;
+  if (!Number.isSafeInteger(requestId) || requestId < 1) {
+    throw new Error('Invalid Managed connection check sequence.');
+  }
+  sessionStorage.setItem(MANAGED_CHECK_SEQUENCE_KEY, String(requestId));
+
+  checkPending.set(true);
+  const result = (async (): Promise<ManagedCheckResult> => {
+    try {
+      return await invoke<ManagedCheckResult>('check_managed_connection', { requestId, destination });
+    } catch {
+      return 'connection_failed';
+    } finally {
+      // Cancellation only signals the native check; its original command confirms retirement.
+      checkPending.set(false);
+    }
+  })();
+  return { requestId, result };
+}
+
+export async function cancelManagedConnection(requestId: number): Promise<void> {
+  await invoke<void>('cancel_managed_connection', { requestId });
 }
 
 /**

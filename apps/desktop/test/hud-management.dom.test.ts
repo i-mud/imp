@@ -13,6 +13,7 @@ import { INITIAL_MODEL } from '../src/lib/hud/model.ts';
 import { saveDisplayMode, type DisplayMode } from '../src/lib/hud/presentation.ts';
 import * as tunnel from '../src/lib/tunnel.ts';
 import { closeWindow } from '../src/lib/window.ts';
+import { waitForDomTransition } from './dom-transition.ts';
 
 vi.mock(import('../src/lib/window.ts'), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -554,36 +555,52 @@ it('keeps recovery accessible for unavailable settings even after dismissing fir
   await expectFocus(control('[data-connection-setup-trigger]'));
 });
 
-it('shows actionable guidance when native settings reject a Managed SSH target', async () => {
-  const external: tunnel.ConnectionSettings = {
-    mode: 'external',
-    sshTarget: '',
-    remoteUrl: '',
-    hasPairingToken: false,
-  };
-  vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
-    running: external,
-    saved: external,
-    pendingRestart: false,
-  });
-  const save = vi
-    .spyOn(tunnel, 'saveConnectionSettings')
-    .mockRejectedValue('managed mode requires a non-empty sshTarget');
-  mountHud('expanded');
-  click(shortcut('Settings'));
-  click(control('[data-connection-manager-trigger]'));
-  await vi.waitFor(() => click(control('input[name="client-location"][value="remote"]')));
-  await vi.waitFor(() => click(control('input[value="managed"]')));
-  // The dialog rejects blank targets itself; this covers the native-rejection mapping in Hud.
-  click(control('button[name="ssh-representation"]'));
-  input(control<HTMLInputElement>('input[name="ssh-target"]'), 'avatar');
-  click(control('button[type="submit"]'));
-  await vi.waitFor(() =>
-    expect(control('.connection-dialog [role="alert"]').textContent).toBe('Enter your SSH target.'),
-  );
-  expect(save).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: 'avatar' });
-  expect(document.querySelector('.connection-dialog [role="status"]')).toBeNull();
-});
+it.for([
+  ['an invalid Managed target', 'managed mode requires a non-empty sshTarget', 'Enter your SSH target.'],
+  [
+    'a check still retiring after reload',
+    'Wait for the connection check to finish, then try saving again.',
+    'Wait for the connection check to finish, then try saving again.',
+  ],
+])(
+  'keeps the draft and permits retry after native save rejects %s',
+  async ([, error, message], { signal }) => {
+    const external: tunnel.ConnectionSettings = {
+      mode: 'external',
+      sshTarget: '',
+      remoteUrl: '',
+      hasPairingToken: false,
+    };
+    const updated = { mode: 'managed', sshTarget: 'avatar' } as const;
+    vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
+      running: external,
+      saved: external,
+      pendingRestart: false,
+    });
+    const save = vi
+      .spyOn(tunnel, 'saveConnectionSettings')
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce({ running: external, saved: { ...external, ...updated }, pendingRestart: true });
+    mountHud('expanded');
+    click(shortcut('Settings'));
+    click(control('[data-connection-manager-trigger]'));
+    await waitForDomTransition(() => !!document.querySelector('input[name="client-location"]'), signal);
+    click(control('input[name="client-location"][value="remote"]'));
+    click(control('input[value="managed"]'));
+    click(control('button[name="ssh-representation"]'));
+    input(control<HTMLInputElement>('input[name="ssh-target"]'), 'avatar');
+    click(control('button[type="submit"]'));
+    await waitForDomTransition(() => !!document.querySelector('button[type="submit"]:enabled'), signal);
+    expect(control('.connection-dialog [role="alert"]').textContent).toBe(message);
+    expect(save).toHaveBeenCalledExactlyOnceWith(updated);
+    expect(document.querySelector('.connection-dialog .saved-message')).toBeNull();
+    expect(control<HTMLInputElement>('input[name="ssh-target"]').value).toBe('avatar');
+    click(control('button[type="submit"]'));
+    await waitForDomTransition(() => !!document.querySelector('.connection-dialog .saved-message'), signal);
+    expect(save.mock.calls).toEqual([[updated], [updated]]);
+    expect(control('.connection-dialog .saved-message').textContent).toContain('Saved. Restart Imp');
+  },
+);
 
 it('ignores a Connection load from a dismissed manager after reopening', async () => {
   const stale = Promise.withResolvers<tunnel.ConnectionSettingsState | null>();

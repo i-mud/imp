@@ -2,6 +2,9 @@
 
 mod guided_forward;
 #[allow(dead_code)]
+#[path = "../../src/managed_check.rs"]
+mod managed_check;
+#[allow(dead_code)]
 #[path = "../../src/runtime.rs"]
 mod runtime;
 #[allow(dead_code)]
@@ -198,6 +201,42 @@ fn capture_io(output: &Path, error: &Path, large: bool) {
     std::fs::write(error, stderr).unwrap();
 }
 
+fn managed_check(args: &[std::ffi::OsString]) {
+    let [program, config, destination] = args else {
+        panic!("invalid Managed check fixture arguments");
+    };
+    let destination = serde_json::from_str(destination.to_str().unwrap()).unwrap();
+    let check = Arc::new(managed_check::ManagedCheck::default());
+    thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            let result = check.run_with(1, destination, |destination, deadline, cancelled| {
+                managed_check::process::run_fixture(
+                    destination,
+                    deadline,
+                    cancelled,
+                    program,
+                    config,
+                    |pid| println!("pid {pid}"),
+                    |duration| println!("cleanup_us {}", duration.as_micros()),
+                )
+            });
+            println!(
+                "result {}",
+                serde_json::to_value(result).unwrap().as_str().unwrap()
+            );
+        });
+        for command in io::stdin().lock().lines() {
+            match command.unwrap().as_str() {
+                "cancel" => check.cancel(1),
+                "shutdown" => break,
+                _ => panic!("invalid Managed check fixture command"),
+            }
+        }
+        check.shutdown();
+        worker.join().unwrap();
+    });
+}
+
 fn main() {
     runtime::run_helper_if_requested();
     let args: Vec<_> = std::env::args_os().collect();
@@ -318,6 +357,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "managed-check" => managed_check(&args[2..]),
         mode @ ("ssh" | "ssh-structured") => {
             let (config, destination, local_port, pid_file, home) = match &args[2..] {
                 [config, host, username, port, local_port, pid_file, rest @ ..]

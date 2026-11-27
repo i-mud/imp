@@ -8,9 +8,9 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use super::RuntimeStdout;
+use super::{RuntimeStdout, SshUnavailable, DIAGNOSTIC_CLEANUP, DIAGNOSTIC_POLL};
 
 #[cfg(not(test))]
 const HELPER_MODE: &str = "--imp-runtime-owner";
@@ -24,6 +24,7 @@ const TEST_CONTROL_FD_ENV: &str = "IMP_RUNTIME_OWNER_TEST_CONTROL_FD";
 const TEST_STDIN_FD_ENV: &str = "IMP_RUNTIME_OWNER_TEST_STDIN_FD";
 const CONTROL_OK: u8 = 0;
 const CONTROL_ERROR: u8 = 1;
+const CONTROL_EXEC_ERROR: u8 = 2;
 const HELPER_FAILURE_EXIT: i32 = 125;
 
 pub struct RuntimeOwner;
@@ -39,7 +40,7 @@ impl RuntimeOwner {
         args: impl IntoIterator<Item = &'a OsStr>,
         stdout: RuntimeStdout,
     ) -> io::Result<OwnedChild> {
-        self.spawn_with_stdin(program, args, stdout, false)
+        self.spawn_with_stdin(program, args, stdout, false, None)
     }
 
     #[cfg(feature = "runtime-acceptance")]
@@ -49,7 +50,26 @@ impl RuntimeOwner {
         program: &'a OsStr,
         args: impl IntoIterator<Item = &'a OsStr>,
     ) -> io::Result<OwnedChild> {
-        self.spawn_with_stdin(program, args, RuntimeStdout::Piped, true)
+        self.spawn_with_stdin(program, args, RuntimeStdout::Piped, true, None)
+    }
+
+    pub(crate) fn spawn_duplex_interruptible<'a>(
+        &self,
+        program: &'a OsStr,
+        args: impl IntoIterator<Item = &'a OsStr>,
+        check: &dyn Fn() -> io::Result<()>,
+    ) -> io::Result<OwnedChild> {
+        check()?;
+        self.spawn_with_stdin(program, args, RuntimeStdout::Piped, true, Some(check))
+    }
+
+    pub(crate) fn begin_diagnostic_retirement(&self, child: &mut OwnedChild) -> io::Result<()> {
+        child.lifetime.take();
+        Ok(())
+    }
+
+    pub(crate) fn diagnostic_retired(&self, child: &mut OwnedChild) -> io::Result<bool> {
+        child.try_wait().map(|status| status.is_some())
     }
 
     fn spawn_with_stdin<'a>(
@@ -58,10 +78,15 @@ impl RuntimeOwner {
         args: impl IntoIterator<Item = &'a OsStr>,
         stdout: RuntimeStdout,
         pipe_stdin: bool,
+        check: Option<&dyn Fn() -> io::Result<()>>,
     ) -> io::Result<OwnedChild> {
         let executable = env::current_exe()?;
         let (mut control_reader, control_writer) = UnixStream::pair()?;
-        control_reader.set_read_timeout(Some(Duration::from_secs(10)))?;
+        control_reader.set_read_timeout(Some(if check.is_some() {
+            DIAGNOSTIC_POLL
+        } else {
+            Duration::from_secs(10)
+        }))?;
         let control_writer = move_above_stdio(control_writer.into())?;
         let control_fd = control_writer.as_raw_fd();
         // Guardian stdin is reserved for lifetime; send child stdin over a separate pipe.
@@ -135,6 +160,9 @@ impl RuntimeOwner {
             });
         }
 
+        if let Some(check) = check {
+            check()?;
+        }
         let mut guardian = guardian_command.spawn()?;
         drop(control_writer);
         drop(stdin_read);
@@ -148,29 +176,47 @@ impl RuntimeOwner {
             File::from_raw_fd(guardian.stderr.take().expect("piped stderr").into_raw_fd())
         };
 
-        let child_pid = match read_start(&mut control_reader) {
+        let start = read_start(&mut control_reader, check);
+        let child_pid = match start {
             Ok(pid) => pid,
             Err(error) => {
                 drop(lifetime);
-                let _ = guardian.wait();
+                if check.is_some() {
+                    let deadline = Instant::now() + DIAGNOSTIC_CLEANUP;
+                    loop {
+                        match guardian.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) if Instant::now() < deadline => {
+                                std::thread::park_timeout(DIAGNOSTIC_POLL);
+                            }
+                            _ => {
+                                // Lifetime is already closed; do not kill the native reaper
+                                // ahead of the group it is responsible for.
+                                eprintln!("imp: managed connection check could not confirm startup retirement");
+                                return Err(io::Error::other("runtime guardian retirement failed"));
+                            }
+                        }
+                    }
+                } else {
+                    let _ = guardian.wait();
+                }
                 return Err(error);
             }
         };
 
-        eprintln!(
-            "imp: runtime owner guardian pid={} child pid={child_pid}",
-            guardian.id()
-        );
+        if check.is_none() {
+            eprintln!(
+                "imp: runtime owner guardian pid={} child pid={child_pid}",
+                guardian.id()
+            );
+        }
 
-        #[cfg(not(feature = "runtime-acceptance"))]
-        drop(stdin_write);
         Ok(OwnedChild {
             lifetime: Some(lifetime),
             guardian,
             control: control_reader,
             exit_status: None,
             id: child_pid,
-            #[cfg(feature = "runtime-acceptance")]
             stdin: stdin_write,
             stdout,
             stderr: Some(stderr),
@@ -185,8 +231,6 @@ pub struct OwnedChild {
     control: UnixStream,
     exit_status: Option<ExitStatus>,
     id: u32,
-    #[cfg(feature = "runtime-acceptance")]
-    #[allow(dead_code)] // Used by the acceptance harness's copy of this module.
     pub stdin: Option<File>,
     pub stdout: Option<File>,
     pub stderr: Option<File>,
@@ -245,8 +289,7 @@ pub fn run_helper_if_requested() {
         let mut args = env::args_os();
         let _ = args.next();
         let mode = args.next();
-        let duplex = cfg!(feature = "runtime-acceptance")
-            && mode.as_deref() == Some(OsStr::new(DUPLEX_HELPER_MODE));
+        let duplex = mode.as_deref() == Some(OsStr::new(DUPLEX_HELPER_MODE));
         if !duplex && mode.as_deref() != Some(OsStr::new(HELPER_MODE)) {
             return;
         }
@@ -345,10 +388,13 @@ fn run_guardian(
         });
     }
 
+    if stdin_fd.is_some() && lifetime_closed_before_spawn(libc::STDIN_FILENO) {
+        return GuardianOutcome::Failure;
+    }
     let child = match runtime.spawn() {
         Ok(child) => child,
         Err(error) => {
-            send_start_error(&mut control, &error);
+            write_start_error(&mut control, CONTROL_EXEC_ERROR, &error);
             return GuardianOutcome::Failure;
         }
     };
@@ -436,6 +482,25 @@ fn wait_for_exit_or_lifetime_eof(child_pid: u32) -> io::Result<()> {
             return Ok(());
         }
     }
+}
+
+fn lifetime_closed_before_spawn(fd: libc::c_int) -> bool {
+    let mut descriptor = libc::pollfd {
+        fd,
+        events: 0,
+        revents: 0,
+    };
+    // poll reports hangup even without requesting readability. Treat poll failure as closed.
+    (unsafe { libc::poll(&mut descriptor, 1, 0) }) != 0
+}
+
+#[cfg(test)]
+#[test]
+fn preclosed_guardian_lifetime_prevents_launch() {
+    let (reader, writer) = io::pipe().unwrap();
+    assert!(!lifetime_closed_before_spawn(reader.as_raw_fd()));
+    drop(writer);
+    assert!(lifetime_closed_before_spawn(reader.as_raw_fd()));
 }
 
 fn lifetime_eof() -> io::Result<bool> {
@@ -604,8 +669,12 @@ fn move_above_stdio(fd: OwnedFd) -> io::Result<OwnedFd> {
 }
 
 fn send_start_error(control: &mut File, error: &io::Error) {
+    write_start_error(control, CONTROL_ERROR, error);
+}
+
+fn write_start_error(control: &mut File, kind: u8, error: &io::Error) {
     let mut record = [0; 5];
-    record[0] = CONTROL_ERROR;
+    record[0] = kind;
     record[1..].copy_from_slice(&error.raw_os_error().unwrap_or(libc::EIO).to_le_bytes());
     let _ = control.write_all(&record);
 }
@@ -617,14 +686,46 @@ fn write_start_ok(control: &mut File, child_pid: u32) -> io::Result<()> {
     control.write_all(&record)
 }
 
-fn read_start(control: &mut impl Read) -> io::Result<u32> {
+fn read_start(
+    control: &mut impl Read,
+    check: Option<&dyn Fn() -> io::Result<()>>,
+) -> io::Result<u32> {
     let mut record = [0; 5];
-    control.read_exact(&mut record)?;
+    if let Some(check) = check {
+        let mut pending = &mut record[..];
+        while !pending.is_empty() {
+            check()?;
+            match control.read(pending) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(count) => pending = &mut pending[count..],
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::Interrupted
+                            | io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                    ) => {}
+                Err(error) => return Err(error),
+            }
+        }
+    } else {
+        control.read_exact(&mut record)?;
+    }
     match record[0] {
         CONTROL_OK => Ok(u32::from_le_bytes(record[1..].try_into().unwrap())),
-        CONTROL_ERROR => Err(io::Error::from_raw_os_error(i32::from_le_bytes(
-            record[1..].try_into().unwrap(),
-        ))),
+        CONTROL_ERROR | CONTROL_EXEC_ERROR => {
+            let code = i32::from_le_bytes(record[1..].try_into().unwrap());
+            if check.is_some()
+                && record[0] == CONTROL_EXEC_ERROR
+                && matches!(
+                    code,
+                    libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::ENOEXEC
+                )
+            {
+                return Err(io::Error::new(io::ErrorKind::NotFound, SshUnavailable));
+            }
+            Err(io::Error::from_raw_os_error(code))
+        }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "runtime guardian sent an invalid start record",

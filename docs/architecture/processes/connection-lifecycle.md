@@ -19,6 +19,8 @@ known values but must mark them as not fresh.
 - `RelayStateSource.start()` / `.stop()`
 - `RelayState.producer_connected()` / `.producer_disconnected()`
 - the relay's periodic stale-window check
+- `check_managed_connection` / `cancel_managed_connection` - one-shot
+  Managed SSH form diagnostic, separate from the HUD lifecycle below
 
 ## Flow
 
@@ -129,6 +131,22 @@ For an already-running TF using the old hook, install the new bundle and run
 MUD is unnecessary to restore a matching checkpoint. Without one (including
 after a reboot), the feed waits for character identity from GMCP.
 
+## One-shot Managed SSH diagnostic
+
+The diagnostic does not start a `RelayStateSource`, change HUD state, or
+authorize any action. It uses the entered Managed login to read `/state`
+over a temporary SSH stream. A WebSocket upgrade alone is not success: the
+native check validates versioned `hello` and `status` and requires a valid
+snapshot with non-null context to report live. `down`, `stale`, and no usable
+state are separate from transport/protocol failures. Retained values and
+snapshot timestamps are not freshness evidence; unchanged accepted
+observations can keep a feed live.
+
+The result describes the checked relay at that moment, not the intended
+character, future freshness, or the active gameplay path. See the
+[runtime boundary](managed-runtime.md#desktop-tunnel-boundary) for ownership,
+deadline and cancellation.
+
 ## HUD presentation states
 
 `freshnessOf()` in `apps/desktop/src/lib/hud/model.ts` classifies the pipeline;
@@ -180,6 +198,8 @@ a reconnect storm when the relay returns.
   supervision
 - `apps/desktop/src-tauri/src/tunnel.rs` - SSH-consumer port classification,
   argv, reconnect failure and owned-child shutdown
+- `apps/desktop/src-tauri/src/managed_check/` - bounded, read-only Managed
+  diagnostic independent of gameplay state and action streams
 - `apps/desktop/test/model.test.ts` - seq reset, reconnect display rule
 - `services/relay/tests/test_state.py` - feed transitions
 - `services/relay/tests/test_server.py`, `test_subscriber_backpressure.py`, and
@@ -228,3 +248,5 @@ Published `v0.4.1` artifacts later passed the same recovery on a clean
 directly-addressed VPS, with the same TF process and context kept across a
 relay/feed/gateway restart and one action consumer. Slice 25 is complete. See
 `docs/status.md`.
+This historical verification does not cover the one-shot diagnostic. Its
+evidence is tracked separately in [Slice 29 status](../../status.md#slice-29---connection-onboarding).

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
 
 const invoke = vi.hoisted(() => vi.fn());
 
@@ -7,7 +8,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import {
+  cancelManagedConnection,
+  checkManagedConnection,
   loadConnectionSettings,
+  managedCheckPending,
   saveConnectionSettings,
   watchConnectionDiagnostics,
 } from '../src/lib/tunnel.ts';
@@ -27,6 +31,7 @@ afterEach(() => {
   setTauriRuntime(false);
   invoke.mockReset();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe('watchConnectionDiagnostics', () => {
@@ -169,5 +174,52 @@ describe('native connection settings', () => {
         remoteUrl: 'wss://new.example/state',
       },
     });
+  });
+});
+
+describe('Managed connection check bridge', () => {
+  it('does not start a diagnostic outside Tauri', () => {
+    expect(checkManagedConnection({ sshTarget: 'configured-alias' })).toBeNull();
+    expect(get(managedCheckPending)).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('continues the session sequence and locks until the original command retires', async () => {
+    setTauriRuntime(true);
+    const sequence = new Map([['imp.managed-check-sequence', '950']]);
+    vi.stubGlobal('sessionStorage', {
+      getItem: (name: string) => sequence.get(name) ?? null,
+      setItem: (name: string, value: string) => sequence.set(name, value),
+    });
+    const pending = Promise.withResolvers<string>();
+    invoke
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('live');
+
+    const alias = { sshTarget: 'Configured.Alias' };
+    const first = checkManagedConnection(alias)!;
+    expect(first.requestId).toBe(951);
+    expect(get(managedCheckPending)).toBe(true);
+    expect(checkManagedConnection(alias)).toBeNull();
+    await cancelManagedConnection(first.requestId);
+    expect(get(managedCheckPending)).toBe(true);
+    expect(invoke.mock.calls).toEqual([
+      ['check_managed_connection', { requestId: 951, destination: alias }],
+      ['cancel_managed_connection', { requestId: 951 }],
+    ]);
+
+    pending.resolve('cancelled');
+    await expect(first.result).resolves.toBe('cancelled');
+    expect(get(managedCheckPending)).toBe(false);
+
+    const server = { sshDestination: { host: 'mud.fixture.invalid', username: 'player', port: 2222 } };
+    const second = checkManagedConnection(server)!;
+    await expect(second.result).resolves.toBe('live');
+    expect(invoke).toHaveBeenLastCalledWith('check_managed_connection', {
+      requestId: 952,
+      destination: server,
+    });
+    expect(sequence).toEqual(new Map([['imp.managed-check-sequence', '952']]));
   });
 });

@@ -17,6 +17,7 @@ vi.mock('@tauri-apps/api/window', async (importOriginal) => ({
 import App from '../src/App.svelte';
 import { createRuntimeClients } from '../src/lib/config.ts';
 import type { ConnectionSettings, ConnectionSettingsUpdate } from '../src/lib/tunnel.ts';
+import { waitForDomTransition } from './dom-transition.ts';
 
 let app: object | undefined;
 const sockets: FixtureSocket[] = [];
@@ -172,6 +173,7 @@ it.each([
       expect(target.querySelector('button[type="submit"]')).toBeNull();
     }
 
+    expect(native.invoke.mock.calls.some(([command]) => command === 'check_managed_connection')).toBe(false);
     expect(sockets).toHaveLength(0);
     expect(native.invoke).not.toHaveBeenCalledWith('node_status');
     expect(native.invoke).not.toHaveBeenCalledWith('tunnel_status');
@@ -180,7 +182,9 @@ it.each([
   }
 });
 
-it('saving through App → Hud → ConnectionDialog keeps the active Direct client until restart', async () => {
+it('saving through App → Hud → ConnectionDialog keeps the active Direct client until restart', async ({
+  signal,
+}) => {
   vi.stubEnv('VITE_IMP_SOURCE', 'relay');
   Object.defineProperty(globalThis, '__TAURI_INTERNALS__', { configurable: true, value: {} });
   localStorage.setItem('imp.display-mode', 'expanded');
@@ -196,12 +200,14 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   const replacementToken = 'A'.repeat(43);
   let rejectReplacementOnce = true;
   const rawFailure = `Native save details: ${replacementToken}`;
+  const check = Promise.withResolvers<string>();
   native.invoke.mockImplementation(async (command: string, args?: { update: ConnectionSettingsUpdate }) => {
     if (command === 'connection_config') {
       return { mode: 'direct', stateUrl: direct.remoteUrl, authenticationToken: token };
     }
     if (command === 'connection_settings')
       return { running: direct, saved, pendingRestart: saved !== direct };
+    if (command === 'check_managed_connection') return check.promise;
     if (command === 'save_connection_settings') {
       if (args?.update.mode === 'direct') {
         if (args.update.pairingToken === undefined) {
@@ -290,6 +296,27 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   await click('input[name="remote-method"][value="managed"]');
   await input('ssh-host', SSH_DESTINATION.host);
   await input('ssh-username', SSH_DESTINATION.username);
+  const storage = Object.entries(localStorage);
+  await click('button[name="check-managed-connection"]');
+  const invocation = native.invoke.mock.calls.find(([command]) => command === 'check_managed_connection');
+  const requestId = invocation?.[1]?.requestId;
+  expect(native.invoke).toHaveBeenLastCalledWith('check_managed_connection', {
+    requestId,
+    destination: { sshDestination: SSH_DESTINATION },
+  });
+  expect(document.querySelector('#managed-check-status')?.textContent).toBe('Checking connection…');
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  check.resolve('live');
+  await waitForDomTransition(() => !document.querySelector('button[name="cancel-managed-check"]'), signal);
+  expect(document.querySelector('#managed-check-status')?.textContent).toBe(
+    'The remote Imp node reported live state during this check.',
+  );
+  expect(Object.entries(localStorage)).toEqual(storage);
+  expect(saved.remoteUrl).toBe(replacementUrl);
+  expect(sockets).toEqual([socket]);
+  expect(start).toHaveBeenCalledOnce();
+  expect(stop).toHaveBeenCalledTimes(initialStops);
+  expect(socket.close).not.toHaveBeenCalled();
   await submit();
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toEqual([
     [
@@ -304,7 +331,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   await click('button[aria-describedby="discard-direct-warning"]');
   await vi.waitFor(() => {
     flushSync();
-    expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
+    expect(document.querySelector('.saved-message')?.textContent).toContain('Saved. Restart Imp');
   });
 
   expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', {
@@ -314,7 +341,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     3,
   );
   expect(native.invoke.mock.calls.filter(([command]) => command === 'connection_config')).toHaveLength(1);
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
+  expect(document.querySelector('.saved-message')?.textContent).toContain('Saved. Restart Imp');
   expect(sockets).toHaveLength(1);
   expect(start).toHaveBeenCalledOnce();
   expect(stop).toHaveBeenCalledTimes(initialStops);

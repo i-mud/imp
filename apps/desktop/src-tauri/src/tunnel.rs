@@ -446,22 +446,31 @@ pub(crate) fn ssh_command(destination: &ManagedDestination, local_port: u16) -> 
         .arg("ServerAliveCountMax=3")
         .arg("-L")
         .arg(format!("127.0.0.1:{local_port}:127.0.0.1:{NODE_PORT}"));
+    if matches!(destination, ManagedDestination::Server(_)) {
+        strict_host_key_args(&mut command);
+    }
+    ssh_destination_args(&mut command, destination);
+    command
+}
 
+pub(crate) fn strict_host_key_args(command: &mut Command) {
+    command.args([
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "UpdateHostKeys=no",
+        "-o",
+        "VerifyHostKeyDNS=no",
+        "-o",
+        "NoHostAuthenticationForLocalhost=no",
+    ]);
+}
+
+pub(crate) fn ssh_destination_args(command: &mut Command, destination: &ManagedDestination) {
     let host = match destination {
         ManagedDestination::Alias(alias) => alias,
         ManagedDestination::Server(destination) => {
-            command.args([
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "-o",
-                "UpdateHostKeys=no",
-                "-o",
-                "VerifyHostKeyDNS=no",
-                "-o",
-                "NoHostAuthenticationForLocalhost=no",
-                "-l",
-                &destination.username,
-            ]);
+            command.args(["-l", &destination.username]);
             if let Some(port) = destination.port {
                 command.arg("-p").arg(port.to_string());
             }
@@ -469,8 +478,6 @@ pub(crate) fn ssh_command(destination: &ManagedDestination, local_port: u16) -> 
         }
     };
     command.arg("--").arg(host);
-
-    command
 }
 
 fn spawn_ssh(

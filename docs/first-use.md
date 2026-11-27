@@ -20,6 +20,13 @@ actions footer. Use **Expanded** to check your setup.
    during ordinary play. Old values alone don't count. This is the final setup
    checkpoint; you don't need to create an alert or action.
 
+In a current source build, Managed SSH's **Check connection** checks the
+entered login and remote relay without saving or changing the running HUD
+connection. It isn't one of the setup checkpoints above. If you change the
+route, still save, quit from the tray and reopen Imp, then confirm the intended
+character's vitals update in play. The published v0.7.0 installer instead
+uses the [terminal preflight](../deploy/ssh.md#terminal-preflight).
+
 In either layout, hover over the status dot beside the character name:
 
 - **Connection saved** with a restart prompt: Quit Imp from the tray and
