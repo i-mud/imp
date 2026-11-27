@@ -41,9 +41,10 @@ function readDirectStateUrl(value: string): string {
 }
 
 function configuredSource(): string {
-  return (
-    import.meta.env.VITE_IMP_SOURCE ?? (import.meta.env.TAURI_ENV_PLATFORM === undefined ? 'mock' : 'relay')
-  );
+  if (import.meta.env.TAURI_ENV_PLATFORM !== undefined || '__TAURI_INTERNALS__' in globalThis) {
+    return 'relay';
+  }
+  return import.meta.env.VITE_IMP_SOURCE ?? 'mock';
 }
 
 function configuredRelayUrl(): string {
@@ -74,7 +75,7 @@ interface RelayConnection {
 }
 
 export function relayConnectionFromNative(
-  native: RuntimeConnectionConfig,
+  native: Extract<RuntimeConnectionConfig, { mode: 'local' | 'direct' }>,
   localStateUrl?: string,
 ): RelayConnection {
   if (native.mode === 'local') {
@@ -95,10 +96,13 @@ export function relayConnectionFromNative(
   };
 }
 
-export interface AppRuntime {
-  readonly source: StateSource;
-  readonly actionSink: ActionSink;
-}
+export type AppRuntime =
+  | { readonly source: StateSource; readonly actionSink: ActionSink; readonly setupState?: never }
+  | {
+      readonly source?: never;
+      readonly actionSink?: never;
+      readonly setupState: 'unconfigured' | 'unavailable';
+    };
 
 export async function createRuntimeClients(): Promise<AppRuntime> {
   const sourceKind = configuredSource();
@@ -115,7 +119,16 @@ export async function createRuntimeClients(): Promise<AppRuntime> {
   }
 
   const native = await loadConnectionConfig();
-  const connection = relayConnectionFromNative(native);
+  if (native?.mode !== 'local' && native?.mode !== 'direct') {
+    return { setupState: native?.mode === 'unconfigured' ? 'unconfigured' : 'unavailable' };
+  }
+
+  let connection: RelayConnection;
+  try {
+    connection = relayConnectionFromNative(native);
+  } catch {
+    return { setupState: 'unavailable' };
+  }
 
   const authentication =
     connection.authenticationToken === undefined

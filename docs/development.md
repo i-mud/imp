@@ -225,6 +225,23 @@ stay alive and to provision `%LOCALAPPDATA%\Imp\mudlet\versions\<version>`,
 including the helper, runtime, and `Imp.mpackage`, from the separately
 installed `mudlet-bundle` resource.
 
+With `-CheckConnectionUi`, the harness drives the **installed production
+executable**. It requests a private WebView2 data folder and a loopback-only
+debugger through the child process environment. [Elevated WebView2 hosts can
+ignore those overrides](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security#for-an-elevated-host-app-use-appropriate-override-flags).
+On a disposable GitHub-hosted Windows runner, the harness can compare that
+launch with the same executable using temporary `imp-desktop.exe`-specific
+machine policies. It checks the listener owner before attaching and removes
+its policy values on exit. Never enable debugging in the shipped binary.
+
+The UI phases exercise first use, deferral and relaunch, Local, both forms
+of External (explicit and legacy), Managed, Direct, invalid-file recovery,
+and the distinction between the running connection and edits saved for the
+next launch. Credential checks use synthetic tokens. Managed and Direct use
+a reserved loopback endpoint; the harness refuses SSH routing overrides. It
+requires the desktop-owned node on 8787 and refuses occupied 8787–8789.
+Passing this gate is not evidence of remote authentication or live game data.
+
 The installed desktop runs under the real application identifier from
 `tauri.conf.json`, so it would load that identifier's settings (Direct URL and
 pairing token, SSH target) and WebView data. The script therefore requires a

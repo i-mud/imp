@@ -1,5 +1,5 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type * as WindowApi from '@tauri-apps/api/window';
 import type * as CoreApi from '@tauri-apps/api/core';
 
@@ -32,6 +32,17 @@ class FixtureSocket extends EventTarget {
     sockets.push(this);
   }
 }
+
+beforeEach(() => {
+  vi.stubGlobal('WebSocket', FixtureSocket);
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+});
 
 afterEach(async () => {
   if (app) await unmount(app);
@@ -72,16 +83,91 @@ async function submit() {
   });
 }
 
+it.each([
+  ['absent configuration', 'unconfigured', 'Set up connection'],
+  ['unavailable configuration', 'unavailable', 'Review connection settings'],
+  ['rejected connection bridge', 'rejected', 'Review connection settings'],
+  ['missing connection bridge', 'missing', 'Review connection settings'],
+])('starts without a consumer for %s', async (_, config, entryLabel) => {
+  vi.stubEnv('VITE_IMP_SOURCE', config === 'missing' ? 'mock' : undefined);
+  vi.stubEnv('TAURI_ENV_PLATFORM', 'windows');
+  const interval = vi.spyOn(globalThis, 'setInterval');
+  if (config !== 'missing') vi.stubGlobal('__TAURI_INTERNALS__', {});
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === 'connection_config') {
+      if (config === 'rejected') throw new Error('private bridge failure detail');
+      return { mode: config, stateUrl: null, authenticationToken: null };
+    }
+    if (command === 'connection_settings') {
+      if (config === 'unavailable') throw new Error('private settings file detail');
+      return { running: null, saved: null, pendingRestart: false };
+    }
+    if (command === 'save_connection_settings') {
+      return {
+        running: null,
+        saved: { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false },
+        pendingRestart: true,
+      };
+    }
+    throw new Error(`Unexpected native command: ${command}`);
+  });
+  const target = document.createElement('div');
+  target.id = 'app';
+  document.body.append(target);
+  try {
+    const runtime = await createRuntimeClients();
+    expect(runtime).toEqual({ setupState: config === 'unconfigured' ? 'unconfigured' : 'unavailable' });
+    expect(interval).not.toHaveBeenCalled();
+    app = mount(App, { target, props: runtime });
+    await tick();
+    expect(target.querySelector('.vitals, .compact-primary, .action-bar')).toBeNull();
+    expect(target.textContent).not.toContain('private bridge failure detail');
+    const entry = [...target.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === entryLabel,
+    );
+    expect(entry).toBeDefined();
+    expect(target.querySelector('[aria-label="Settings"]')).not.toBeNull();
+    expect(native.invoke.mock.calls).toEqual(config === 'missing' ? [] : [['connection_config']]);
+
+    if (config === 'unconfigured') {
+      await click('[data-connection-setup-trigger]');
+      await vi.waitFor(() => {
+        expect(target.querySelector('input[name="client-location"][value="local"]')).not.toBeNull();
+      });
+      await click('input[name="client-location"][value="local"]');
+      await click('button[type="submit"]');
+      await vi.waitFor(() => {
+        flushSync();
+        expect(target.querySelector('button[type="submit"]:disabled')).toBeNull();
+      });
+      expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', { update: { mode: 'local' } });
+      expect(target.textContent).toContain('Saved. Restart Imp');
+      expect(target.querySelector('.vitals, .compact-primary, .action-bar')).toBeNull();
+      await click('[aria-label="Close connection settings"]');
+      expect(target.textContent).toContain('Restart Imp to use the saved connection.');
+      expect(target.querySelector('[data-connection-setup-trigger]')).toBeNull();
+    } else if (config === 'unavailable') {
+      await click('[aria-label="Settings"]');
+      await click('[data-connection-manager-trigger]');
+      await vi.waitFor(() => {
+        expect(target.querySelector('[role="alert"]')?.textContent).toContain(
+          'Could not load native connection settings',
+        );
+      });
+      expect(target.textContent).not.toContain('private settings file detail');
+      expect(target.querySelector('button[type="submit"]')).toBeNull();
+    }
+
+    expect(sockets).toHaveLength(0);
+    expect(native.invoke).not.toHaveBeenCalledWith('node_status');
+    expect(native.invoke).not.toHaveBeenCalledWith('tunnel_status');
+  } finally {
+    interval.mockRestore();
+  }
+});
+
 it('saving through App → Hud → ConnectionDialog keeps the active Direct client until restart', async () => {
   vi.stubEnv('VITE_IMP_SOURCE', 'relay');
-  vi.stubGlobal('WebSocket', FixtureSocket);
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      observe() {}
-      disconnect() {}
-    },
-  );
   Object.defineProperty(globalThis, '__TAURI_INTERNALS__', { configurable: true, value: {} });
   localStorage.setItem('imp.display-mode', 'expanded');
   const token = 'x'.repeat(43);
@@ -92,6 +178,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     hasPairingToken: true,
   };
   const replacementUrl = 'wss://replacement.fixture.invalid/state';
+  let saved = direct;
   const replacementToken = 'A'.repeat(43);
   let rejectReplacementOnce = true;
   const rawFailure = `Native save details: ${replacementToken}`;
@@ -99,7 +186,8 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     if (command === 'connection_config') {
       return { mode: 'direct', stateUrl: direct.remoteUrl, authenticationToken: token };
     }
-    if (command === 'connection_settings') return direct;
+    if (command === 'connection_settings')
+      return { running: direct, saved, pendingRestart: saved !== direct };
     if (command === 'save_connection_settings') {
       if (args?.update.mode === 'direct') {
         if (args.update.pairingToken === undefined) {
@@ -109,14 +197,17 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
           rejectReplacementOnce = false;
           throw rawFailure;
         }
-        return { ...direct, remoteUrl: replacementUrl };
+        saved = { ...direct, remoteUrl: replacementUrl };
+      } else {
+        saved = { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false };
       }
-      return { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false };
+      return { running: direct, saved, pendingRestart: true };
     }
     throw new Error(`Unexpected native command: ${command}`);
   });
 
   const runtime = await createRuntimeClients();
+  if (runtime.setupState !== undefined) throw new Error('Expected a running Direct consumer.');
   const start = vi.spyOn(runtime.source, 'start');
   const stop = vi.spyOn(runtime.source, 'stop');
   const target = document.createElement('div');
@@ -131,6 +222,8 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   const initialStops = stop.mock.calls.length;
   expect(start).toHaveBeenCalledOnce();
   expect(socket.url).toBe(direct.remoteUrl);
+  const feedLabel = document.querySelector('.indicator')?.getAttribute('aria-label');
+  expect(feedLabel).toBe('Connecting to relay');
 
   await click('[aria-label="Settings"]');
   const connectionTrigger = document.querySelector('[data-connection-manager-trigger]');
@@ -139,16 +232,24 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   expect(document.querySelector('[role="dialog"][aria-labelledby="connection-dialog-title"]')).not.toBeNull();
   await vi.waitFor(() => {
     flushSync();
-    expect(document.querySelector('input[name="connection-mode"][value="local"]')).not.toBeNull();
+    expect(document.querySelector('input[name="client-location"][value="remote"]')).not.toBeNull();
   });
+  expect(document.body.textContent).toContain('In use');
+  expect(document.body.textContent).not.toContain('Saved for next launch');
+  expect(document.querySelector<HTMLInputElement>('input[name="client-location"]:checked')?.value).toBe(
+    'remote',
+  );
+  expect(document.querySelector<HTMLInputElement>('input[name="remote-method"]:checked')?.value).toBe(
+    'direct',
+  );
+  await click('input[name="client-location"][value="remote"]');
+  await click('input[name="remote-method"][value="direct"]');
   expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
   await input('url', replacementUrl);
   await submit();
-  expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', {
-    update: { mode: 'direct', remoteUrl: replacementUrl },
-  });
+  expect(native.invoke).not.toHaveBeenCalledWith('save_connection_settings', expect.anything());
   expect(document.querySelector('[role="alert"]')?.textContent).toBe(
-    'Enter the pairing token for this endpoint or restore the saved URL.',
+    'Enter the pairing token for this endpoint.',
   );
   expect(document.querySelector('[role="status"]')).toBeNull();
   await input('url', direct.remoteUrl);
@@ -167,14 +268,14 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   await submit();
   expect(document.querySelector('[role="alert"]')).toBeNull();
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
+  expect(document.body.textContent).toContain('Saved for next launch');
   expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
   expect(document.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(replacementUrl);
   expect(socket.url).toBe(direct.remoteUrl);
 
-  await click('input[name="connection-mode"][value="local"]');
+  await click('input[name="client-location"][value="local"]');
   await submit();
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toEqual([
-    ['save_connection_settings', { update: { mode: 'direct', remoteUrl: replacementUrl } }],
     [
       'save_connection_settings',
       { update: { mode: 'direct', remoteUrl: replacementUrl, pairingToken: replacementToken } },
@@ -192,7 +293,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
 
   expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', { update: { mode: 'local' } });
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toHaveLength(
-    4,
+    3,
   );
   expect(native.invoke.mock.calls.filter(([command]) => command === 'connection_config')).toHaveLength(1);
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
@@ -201,13 +302,20 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   expect(stop).toHaveBeenCalledTimes(initialStops);
   expect(socket.close).not.toHaveBeenCalled();
 
-  await click('.form-actions button:last-child');
+  await click('[aria-label="Close connection settings"]');
   expect(connectionTrigger!.isConnected).toBe(false);
   expect(document.querySelector('[aria-label="Imp settings"]')).not.toBeNull();
   const returnedTrigger = document.querySelector('[data-connection-manager-trigger]');
   expect(returnedTrigger).not.toBeNull();
   expect(returnedTrigger).not.toBe(connectionTrigger);
   await vi.waitFor(() => expect(document.activeElement).toBe(returnedTrigger));
+  expect(document.querySelector('.indicator')?.getAttribute('aria-label')).toBe(feedLabel);
+  await click('[data-connection-manager-trigger]');
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Saved for next launch'));
+  expect(document.body.textContent).toContain('In use');
+  expect(document.body.textContent).toContain(direct.remoteUrl);
+  expect(document.body.textContent).not.toContain(replacementUrl);
+  await click('[aria-label="Close connection settings"]');
   // The retained real client still authenticates with its original runtime credential after saving.
   flushSync(() => socket.dispatchEvent(new Event('open')));
   expect(socket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ type: 'auth', token }));

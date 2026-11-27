@@ -36,6 +36,11 @@ export type RuntimeConnectionConfig =
       readonly mode: 'direct';
       readonly stateUrl: string;
       readonly authenticationToken: string;
+    }
+  | {
+      readonly mode: 'unconfigured' | 'unavailable';
+      readonly stateUrl: null;
+      readonly authenticationToken: null;
     };
 
 export type ConnectionMode = 'external' | 'local' | 'managed' | 'direct';
@@ -45,6 +50,12 @@ export interface ConnectionSettings {
   readonly sshTarget: string;
   readonly remoteUrl: string;
   readonly hasPairingToken: boolean;
+}
+
+export interface ConnectionSettingsState {
+  readonly running: ConnectionSettings | null;
+  readonly saved: ConnectionSettings | null;
+  readonly pendingRestart: boolean;
 }
 
 export interface ConnectionSettingsUpdate {
@@ -80,19 +91,27 @@ function isTauriRuntime(): boolean {
 /**
  * Returns the renderer-facing native connection tuple.
  *
- * Outside Tauri there is no native configuration, so browser development
- * behaves like the existing local relay path.
+ * Browser relay development has no native configuration. A missing or failed
+ * bridge in the desktop build must not fall back to the development endpoint.
  */
 export async function loadConnectionConfig(): Promise<RuntimeConnectionConfig> {
   if (!isTauriRuntime()) {
     return {
-      mode: 'local',
+      mode: import.meta.env.TAURI_ENV_PLATFORM === undefined ? 'local' : 'unavailable',
       stateUrl: null,
       authenticationToken: null,
     };
   }
 
-  return invoke<RuntimeConnectionConfig>('connection_config');
+  try {
+    return await invoke<RuntimeConnectionConfig>('connection_config');
+  } catch {
+    return {
+      mode: 'unavailable',
+      stateUrl: null,
+      authenticationToken: null,
+    };
+  }
 }
 
 /**
@@ -102,10 +121,10 @@ export async function loadConnectionConfig(): Promise<RuntimeConnectionConfig> {
  * Browser/mock development has no native settings store, so it reports null
  * rather than invoking a Tauri command.
  */
-export async function loadConnectionSettings(): Promise<ConnectionSettings | null> {
+export async function loadConnectionSettings(): Promise<ConnectionSettingsState | null> {
   if (!isTauriRuntime()) return null;
 
-  return invoke<ConnectionSettings>('connection_settings');
+  return invoke<ConnectionSettingsState>('connection_settings');
 }
 
 /**
@@ -113,12 +132,14 @@ export async function loadConnectionSettings(): Promise<ConnectionSettings | nul
  *
  * This intentionally does not mutate the current runtime transport.
  */
-export async function saveConnectionSettings(update: ConnectionSettingsUpdate): Promise<ConnectionSettings> {
+export async function saveConnectionSettings(
+  update: ConnectionSettingsUpdate,
+): Promise<ConnectionSettingsState> {
   if (!isTauriRuntime()) {
     throw new Error('Native connection settings are unavailable outside Tauri.');
   }
 
-  return invoke<ConnectionSettings>('save_connection_settings', { update });
+  return invoke<ConnectionSettingsState>('save_connection_settings', { update });
 }
 
 /**

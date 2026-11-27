@@ -477,12 +477,80 @@ describe.each(['expanded', 'compact'] as const)('%s panel shortcuts', (mode) => 
   });
 });
 
-it('shows actionable guidance after an empty Managed SSH target is rejected', async () => {
-  vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
+it.each(['expanded', 'compact'] as const)('dismisses and reopens first-use setup in %s', async (mode) => {
+  const load = vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
+    running: null,
+    saved: null,
+    pendingRestart: false,
+  });
+  const save = vi.spyOn(tunnel, 'saveConnectionSettings');
+  saveDisplayMode(mode);
+  const props = { setupState: 'unconfigured' } as const;
+  hud = mount(Hud, { target: document.body, props });
+  flushSync();
+
+  expect(document.querySelector('.vitals, .compact-primary, .indicator')).toBeNull();
+  const setup = control('[data-connection-setup-trigger]');
+  expect(setup.textContent).toBe('Set up connection');
+  keyboardActivate(setup);
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Where does your MUD client run?'));
+  expect(document.querySelector('[name="client-location"]:checked')).toBeNull();
+  click(shortcut('Close connection settings'));
+  await expectFocus(control('[data-connection-setup-trigger]'));
+
+  const dismiss = [...document.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Not now',
+  )!;
+  keyboardActivate(dismiss);
+  await expectFocus(shortcut('Settings'));
+  expect(document.querySelector('[data-connection-setup-trigger]')).toBeNull();
+  expect(document.body.textContent).toContain('Settings → Connection → Manage');
+  expect(save).not.toHaveBeenCalled();
+
+  await unmount(hud);
+  hud = mount(Hud, { target: document.body, props });
+  flushSync();
+  expect(document.querySelector('[data-connection-setup-trigger]')).toBeNull();
+  expect(load).toHaveBeenCalledOnce();
+  keyboardActivate(shortcut('Settings'));
+  keyboardActivate(shortcut('Manage connection'));
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Where does your MUD client run?'));
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(save).not.toHaveBeenCalled();
+});
+
+it('keeps recovery accessible for unavailable settings even after dismissing first-use setup', async () => {
+  const error = 'Imp could not read tunnel.json. Restore a valid file or move it aside, then restart Imp.';
+  vi.spyOn(tunnel, 'loadConnectionSettings').mockRejectedValue(error);
+  const save = vi.spyOn(tunnel, 'saveConnectionSettings');
+  localStorage.setItem('imp.connection-setup-dismissed', 'true');
+  hud = mount(Hud, { target: document.body, props: { setupState: 'unavailable' } });
+  flushSync();
+
+  expect(document.body.textContent).toContain('Connection settings unavailable');
+  expect(document.body.textContent).not.toContain('Relay unavailable');
+  expect(document.querySelector('.vitals, .compact-primary, .indicator')).toBeNull();
+  const recovery = control('[data-connection-setup-trigger]');
+  expect(recovery.textContent).toBe('Review connection settings');
+  keyboardActivate(recovery);
+  await vi.waitFor(() => expect(control('.connection-dialog [role="alert"]').textContent).toBe(error));
+  expect(document.querySelector('button[type="submit"]')).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+  click(shortcut('Close connection settings'));
+  await expectFocus(control('[data-connection-setup-trigger]'));
+});
+
+it('shows actionable guidance when native settings reject a Managed SSH target', async () => {
+  const external: tunnel.ConnectionSettings = {
     mode: 'external',
     sshTarget: '',
     remoteUrl: '',
     hasPairingToken: false,
+  };
+  vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
+    running: external,
+    saved: external,
+    pendingRestart: false,
   });
   const save = vi
     .spyOn(tunnel, 'saveConnectionSettings')
@@ -490,18 +558,21 @@ it('shows actionable guidance after an empty Managed SSH target is rejected', as
   mountHud('expanded');
   click(shortcut('Settings'));
   click(control('[data-connection-manager-trigger]'));
+  await vi.waitFor(() => click(control('input[name="client-location"][value="remote"]')));
   await vi.waitFor(() => click(control('input[value="managed"]')));
+  // The dialog rejects blank targets itself; this covers the native-rejection mapping in Hud.
+  input(control<HTMLInputElement>('input[type="text"]'), 'avatar');
   click(control('button[type="submit"]'));
   await vi.waitFor(() =>
     expect(control('.connection-dialog [role="alert"]').textContent).toBe('Enter your SSH target.'),
   );
-  expect(save).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: '' });
+  expect(save).toHaveBeenCalledExactlyOnceWith({ mode: 'managed', sshTarget: 'avatar' });
   expect(document.querySelector('.connection-dialog [role="status"]')).toBeNull();
 });
 
 it('ignores a Connection load from a dismissed manager after reopening', async () => {
-  const stale = Promise.withResolvers<tunnel.ConnectionSettings | null>();
-  const current = Promise.withResolvers<tunnel.ConnectionSettings | null>();
+  const stale = Promise.withResolvers<tunnel.ConnectionSettingsState | null>();
+  const current = Promise.withResolvers<tunnel.ConnectionSettingsState | null>();
   vi.spyOn(tunnel, 'loadConnectionSettings')
     .mockReturnValueOnce(stale.promise)
     .mockReturnValueOnce(current.promise);
@@ -518,10 +589,12 @@ it('ignores a Connection load from a dismissed manager after reopening', async (
   expect(control('.connection-dialog').textContent).toContain('Loading connection settings');
   expect(document.querySelector('.connection-dialog [role="alert"]')).toBeNull();
 
-  current.resolve({ mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false });
+  const local = { mode: 'local', sshTarget: '', remoteUrl: '', hasPairingToken: false } as const;
+  current.resolve({ running: local, saved: local, pendingRestart: false });
   await current.promise;
   await tick();
-  expect(control<HTMLInputElement>('input[name="connection-mode"][value="local"]').checked).toBe(true);
+  expect(control('input[name="client-location"][value="local"]')).toBeDefined();
+  expect(control<HTMLInputElement>('input[name="client-location"][value="local"]').checked).toBe(true);
 });
 
 it('keeps only display, theme, and Connection management in Settings', () => {

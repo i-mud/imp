@@ -67,9 +67,11 @@ operator through a separate trusted channel before accepting it.
    This must succeed without a prompt. Fix SSH access before configuring Imp.
    If your login always needs a prompt, use [External SSH](#external-ssh).
 
-3. In Imp, open **Settings → Connection → Manage**. Select **Managed**, enter
-   `imp-vps` in **SSH target**, and select **Save**. Use **Quit Imp** in the tray,
-   then reopen Imp to apply the change.
+3. In Imp, select **Set up connection** or open **Settings → Connection →
+   Manage**. Choose **On another computer or server → Use my server login**.
+   In [v0.5.4](../docs/install-windows.md#published-v054), open the manager via
+   Settings and select **Managed** instead. Enter `imp-vps` in **SSH target**
+   and select **Save**. Use **Quit Imp** in the tray, then reopen Imp.
 
 ## External SSH
 
@@ -91,11 +93,16 @@ accepting it. Stop if the key is unexpected or has changed. Answer any
 authentication prompts in that terminal and keep it open. Press **Ctrl+C**
 there to stop your forward.
 
-An unchanged fresh install uses **External**; no save or restart is needed.
-If you already saved External, reopen Imp unless you've done so since saving.
-If you're switching from another mode, choose **External** in
-**Settings → Connection → Manage**, select **Save**, then use **Quit Imp** in
-the tray and reopen Imp.
+In Imp, select **Set up connection** or open **Settings → Connection →
+Manage**. Choose **On another computer or server → Advanced → Use my own SSH
+tunnel** and select **Save**. Use **Quit Imp** in the tray and reopen Imp to
+apply the change. If you already saved External SSH, restart only if you
+haven't reopened Imp since saving.
+
+In [v0.5.4](../docs/install-windows.md#published-v054), an unchanged fresh
+install already uses **External**. If switching from another mode in that
+release, choose **External** in **Settings → Connection → Manage**, then
+save, quit and reopen Imp.
 
 ## Tunnel ownership and ports
 

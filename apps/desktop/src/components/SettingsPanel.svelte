@@ -76,6 +76,7 @@
       <button
         class="manage-btn"
         type="button"
+        aria-label="Manage connection"
         data-connection-manager-trigger
         onclick={(event) => {
           event.stopPropagation();

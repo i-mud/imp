@@ -264,10 +264,22 @@ Runtime diagnostics preserve the same UI boundary. Local mode reads
 diagnostics; Direct WSS uses its socket lifecycle. Components still receive only
 the existing connection/freshness presentation.
 
-Native connection configuration remains in the historical application-config
-`tunnel.json`. `ConnectionConfigStore` exposes a renderer-safe projection:
-mode, SSH target, Direct URL, and only whether a Direct pairing token exists.
-Reading settings does not return the existing token.
+Native consumer configuration remains in the historical application-config
+`tunnel.json`. If the file is absent, startup leaves it absent and the
+desktop's state and action consumers are disabled. If an existing file is
+unreadable or invalid, startup also disables the consumers, reports settings
+unavailable rather than first use, and does not overwrite the file. A valid
+legacy configuration without `mode` is still External, not unconfigured.
+The local node and Mudlet package provisioning remain independent of the
+consumer choice.
+
+`ConnectionConfigStore` exposes renderer-safe summaries of the startup
+selection and the saved settings: mode, SSH target, Direct URL, and whether
+a Direct token exists. Reads through the settings API never return the
+token or a digest. The native store compares the saved configuration with
+its startup selection, including the actual credential; only the pending
+flag is exposed for this comparison. A token-only replacement on the same
+endpoint therefore requires a restart even when the summaries look alike.
 
 Writes are canonical by mode. Local and External clear unrelated transport
 material; Managed requires a non-empty trimmed SSH target; Direct requires the
@@ -292,12 +304,16 @@ token. A supplied token is always validated as a replacement; saving on the
 desktop does not rotate the server credential.
 
 Configuration persistence stages a complete replacement before replacing
-`tunnel.json`; failed validation or persistence leaves the previous usable
-configuration intact.
+`tunnel.json`; failed validation or persistence leaves the previous
+configuration intact. An invalid or unreadable configuration is not writable
+through the manager. Dismissing first-use setup writes only a HUD preference,
+not connection settings.
 
-Runtime clients and supervisors are constructed during Tauri setup. Saving
-settings changes the next application start only; it does not hot-swap the
-running source, action sink, node, gateway, or SSH supervisor.
+Native setup selects the running transport and constructs its supervisors.
+The renderer uses that selection, not mutable saved settings, to construct
+its state and action consumers. A save changes the next application start
+only; it does not hot-swap the running source, action sink, node, gateway,
+or SSH supervisor.
 
 ## Native desktop lifetime ownership
 

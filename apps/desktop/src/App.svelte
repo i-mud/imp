@@ -2,25 +2,28 @@
   import { onMount } from 'svelte';
 
   import Hud from './components/Hud.svelte';
-  import type { ActionSink } from './lib/action/types.ts';
-  import { HudStore, type TextSourceListener } from './lib/hud/store.svelte.ts';
-  import type { StateSource } from './lib/source/types.ts';
+  import type { AppRuntime } from './lib/config.ts';
+  import { HudStore } from './lib/hud/store.svelte.ts';
 
-  let {
-    source,
-    actionSink,
-  }: {
-    source: StateSource;
-    actionSink: ActionSink;
-  } = $props();
-
-  const store = new HudStore();
-  const subscribeText = (listener: TextSourceListener) => store.subscribeText(listener);
+  let { source, actionSink, setupState }: AppRuntime = $props();
+  let store = $state.raw<HudStore>();
 
   onMount(() => {
-    store.attach(source);
-    return () => store.detach();
+    if (source === undefined) return;
+    const activeStore = new HudStore();
+    activeStore.attach(source);
+    store = activeStore;
+    return () => activeStore.detach();
   });
 </script>
 
-<Hud model={store.model} {actionSink} {subscribeText} />
+{#if setupState}
+  <Hud {setupState} />
+{:else if store && actionSink}
+  {@const activeStore = store}
+  <Hud
+    model={activeStore.model}
+    {actionSink}
+    subscribeText={(listener) => activeStore.subscribeText(listener)}
+  />
+{/if}

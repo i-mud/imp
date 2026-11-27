@@ -30,10 +30,10 @@ describe('native segmented radio semantics', () => {
     expect(body).toMatch(/<input type="radio" name="theme" value="light" checked/);
   });
 
-  it('labels native connection choices in one named group', () => {
+  it('labels native connection location choices without selecting a route', () => {
     const { body } = render(ConnectionDialog, {
       props: {
-        settings: { mode: 'external', sshTarget: '', remoteUrl: '', hasPairingToken: false },
+        settings: { running: null, saved: null, pendingRestart: false },
         loadError: null,
         saveError: null,
         onsave: async () => true,
@@ -41,15 +41,15 @@ describe('native segmented radio semantics', () => {
       },
     });
 
-    expect(body).toMatch(/role="radiogroup" aria-label="Connection mode"/);
-    for (const name of ['External', 'Local', 'Managed', 'Direct']) {
+    expect(body).toMatch(/<legend[^>]*>Where does your MUD client run\?<\/legend>/);
+    for (const name of ['On this computer', 'On another computer or server']) {
       expect(body).toMatch(
         new RegExp(
-          `<label[^>]*>\\s*<input type="radio" name="connection-mode"[^>]*>\\s*<span[^>]*>${name}<\\/span>`,
+          `<label[^>]*>\\s*<input type="radio" name="client-location"[^>]*>\\s*<span[^>]*>${name}<\\/span>`,
         ),
       );
     }
-    expect(body).toMatch(/value="external" checked/);
+    expect(body).not.toMatch(/name="client-location"[^>]*checked/);
   });
 
   it('associates alert trigger labels with native radios and selects Vitals', () => {

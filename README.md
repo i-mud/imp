@@ -17,6 +17,9 @@ the installed Windows app or live gameplay._
 
 Use Imp only on computers where you trust the other users and programs. This applies to your Windows PC and any server running Imp.
 
+The guides distinguish the new **Set up connection** flow in source builds
+from [connection setup in the published v0.5.4 release](docs/install-windows.md#published-v054).
+
 ### Local Mudlet on Windows
 
 - **My MUD client runs on this computer.** Follow the [Mudlet on Windows quick start](docs/quickstart/mudlet-windows.md). You don't need a server.

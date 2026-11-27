@@ -12,11 +12,15 @@ Imp service does not require them to sign in.
 2. Install Imp and open it once. This creates `%LOCALAPPDATA%\Imp\mudlet\Imp.mpackage`.
 3. In the Mudlet profile you want to use, open **Package Manager** and install
    that file. Import it once per profile you want to use with Imp.
-4. In Imp, open **Settings → Connection → Manage**. If you're switching from
-   **Direct**, read the [credential-removal warning](../../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
-   before saving. On a fresh install, choose **Local**, select **Save**, then
-   use **Quit Imp** in the tray and reopen Imp. If you previously saved Local,
-   reopen Imp if you haven't done so since saving; otherwise skip this step.
+4. In Imp, select **Set up connection**, or open **Settings → Connection →
+   Manage** if you dismissed the prompt. Choose **On this computer**; no
+   connection details are needed. In [v0.5.4](../install-windows.md#published-v054),
+   open **Settings → Connection → Manage** and choose **Local** instead.
+   If switching from Direct, read the
+   [credential-removal warning](../../deploy/direct-wss.md#existing-direct-credentials-and-recovery)
+   before saving. If you haven't saved Local yet, select **Save**. To apply a
+   saved change, use **Quit Imp** in the tray and reopen Imp. If Local is
+   already in use, skip the save and restart.
 5. Enable GMCP in Mudlet and log into your MUD. Bring the intended profile to
    the foreground.
 6. Check that Imp shows your character and that your vitals visibly update

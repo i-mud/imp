@@ -22,23 +22,50 @@ session don't establish that.
   Imp still won't open, [report](#report-a-problem-safely) whether it failed at
   install or launch and the sanitized error text, if any.
 
+## Imp says the connection is not set up
+
+- **Meaning:** In builds with the new first-launch experience, Imp has no
+  saved connection and is not trying to reach a relay. Dismissing the setup
+  prompt doesn't pick a connection.
+- **Check and recover:** Select **Set up connection** or go to
+  **Settings → Connection → Manage**, then follow the
+  [Windows connection guide](install-windows.md#configure-the-connection).
+  This prompt isn't present in [v0.5.4](install-windows.md#published-v054).
+
+## Connection settings are unavailable
+
+- **Meaning:** If Imp couldn't read or validate an existing configuration
+  at startup, it does not use a default route or overwrite the file.
+- **Check and recover:** Select **Review connection settings**. If the
+  existing file is unreadable or invalid, quit Imp from the tray.
+  Restore a known-good configuration or move the existing file aside,
+  keeping it private, then reopen Imp. See
+  [configuration file locations](../deploy/operator-reference.md#desktop-configuration-files-for-diagnostics).
+  Moving the file aside leaves Imp unconfigured; set up the connection again
+  only when you have the required details. In particular, you'll need both
+  the URL and token to set up Direct again.
+- **Stop:** If you can't recover the file or required details safely,
+  [report](#report-a-problem-safely) the sanitized error, not the file.
+
 ## Server login works but Imp won't connect
 
 - **Meaning:** An interactive SSH login doesn't prove port forwarding, the Imp
   relay, or the separate Direct WSS path works.
-- **Check and recover:** Check how the desktop is configured under
-  **Settings → Connection → Manage** and use the matching route:
-  - **Managed:** Use the [Managed SSH preflight](../deploy/ssh.md#managed-ssh)
-    with the same SSH alias. Resolve any prompt in your own SSH client first;
-    Imp's Managed connection must work without prompts. Verify an unexpected
-    host key with the server operator before accepting anything.
-  - **External:** Make sure your own [SSH forward](../deploy/ssh.md#external-ssh)
-    is still running on `127.0.0.1:8789` and points to the right server's
-    loopback relay. A login window without that forward isn't enough.
-  - **Direct:** SSH is unrelated to this route. Check the public `wss://` URL
-    ending in `/state` and its trusted TLS certificate. Obtain the pairing token
-    from your server operator through a trusted private channel; see
-    [Direct WSS setup](../deploy/direct-wss.md).
+- **Check and recover:** In **Settings → Connection → Manage**, check the
+  connection **In use** (in v0.5.4, the selection shows what was last saved).
+  Follow the matching route:
+  - **Managed SSH (Use my server login):** Use the
+    [Managed SSH preflight](../deploy/ssh.md#managed-ssh) with the same SSH
+    alias. Resolve any prompts in your own SSH client first. Verify an
+    unexpected host key with the server operator.
+  - **External SSH (Use my own SSH tunnel):** Make sure your
+    [SSH forward](../deploy/ssh.md#external-ssh) is still running on
+    `127.0.0.1:8789` and points to the right server's loopback relay.
+    A login window without that forward isn't enough.
+  - **Direct WSS (Use remote Imp credentials):** SSH is unrelated. Check
+    the public `wss://` URL ending in `/state` and its trusted TLS certificate.
+    Obtain the pairing token from your server operator through a trusted
+    private channel; see [Direct WSS setup](../deploy/direct-wss.md).
 - **Stop:** If the chosen path fails its checks, ask the server operator. Don't
   bypass host-key or TLS checks, replace an unknown process using a port, or
   expose the loopback relay to make the connection work. See [operator checks](#operator-checks).
@@ -128,21 +155,24 @@ session don't establish that.
 
 ## Connection settings don't take effect
 
-- **Meaning:** The connection manager edits saved configuration, not the
-  running connection. Closing the dialog doesn't save or apply changes.
-- **Check and recover:** In **Settings → Connection → Manage**, choose the
-  intended mode and **Save**. After **Saved. Restart Imp to use this connection.**,
-  use **Quit Imp** in the Windows notification area, then reopen Imp. If you
-  already saved the intended settings, restart only if you haven't reopened
-  Imp since saving. The displayed selection is the saved one. When switching away
-  from Direct, **Remove credentials and save** deletes the locally stored
-  Direct URL and token; **Cancel** preserves the saved configuration. Before
-  confirming, make sure you can re-enter both if you intend to return to Direct.
-  This doesn't revoke the token on the server.
-- **Stop:** If saving fails, address the displayed validation error before
-  quitting. If the mode is correct after relaunch but is not live, follow the
-  matching connection or feed steps above. If the manager still cannot load
-  or save settings, [report](#report-a-problem-safely) the sanitized message.
+- **Meaning:** The manager edits saved settings, not the running connection.
+  **In use** is the running connection; **Saved for next launch** appears
+  only when a saved change still needs a restart. The published v0.5.4
+  release shows only the saved selection. Closing the dialog doesn't save
+  or apply changes.
+- **Check and recover:** If the intended route is already saved for next
+  launch, use **Quit Imp** in the Windows notification area and reopen Imp.
+  Otherwise, choose the intended route in **Settings → Connection → Manage**,
+  select **Save**, then quit and reopen Imp. When switching away from Direct,
+  **Remove credentials and save** deletes the locally stored Direct URL and
+  token; **Cancel** preserves the saved configuration. Before confirming,
+  make sure you can re-enter both if you intend to return to Direct. This
+  doesn't revoke the token on the server.
+- **Stop:** If a change doesn't save, address the displayed validation or
+  write error first. If the settings are unavailable, follow
+  [configuration recovery](#connection-settings-are-unavailable). If the correct
+  route is in use after relaunch but isn't live, follow the matching connection
+  or feed steps above.
 
 ## Imp says action delivery is uncertain
 

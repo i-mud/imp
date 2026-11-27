@@ -5,7 +5,7 @@
 //! state URL plus one pairing token owned by native application config.
 
 use std::fmt;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -15,6 +15,10 @@ use tempfile::NamedTempFile;
 use url::Url;
 
 use crate::tunnel::SSH_FORWARD_PORT;
+
+const UNAVAILABLE_ERROR: &str =
+    "Imp could not read tunnel.json. Restore a valid file or move it aside, then restart Imp.";
+const CHANGED_ERROR: &str = "Connection settings changed on disk. Restart Imp before saving again.";
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -70,6 +74,8 @@ impl fmt::Debug for TunnelConfig {
 pub enum RuntimeConnectionMode {
     Local,
     Direct,
+    Unconfigured,
+    Unavailable,
 }
 
 /// The only transport configuration exposed to the renderer.
@@ -99,6 +105,14 @@ pub struct ConnectionSettings {
     pub has_pairing_token: bool,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionSettingsStatus {
+    pub running: Option<ConnectionSettings>,
+    pub saved: Option<ConnectionSettings>,
+    pub pending_restart: bool,
+}
+
 /// One requested settings update.
 ///
 /// `pairing_token: None` means "preserve the existing Direct token" and is
@@ -116,7 +130,36 @@ pub struct ConnectionSettingsUpdate {
     pub pairing_token: Option<String>,
 }
 
-type PersistConfig = fn(&Path, &TunnelConfig) -> Result<(), String>;
+type PersistConfig = fn(&Path, &TunnelConfig, bool) -> Result<(), String>;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoadedConfig {
+    Configured(TunnelConfig),
+    Unconfigured,
+    Unavailable,
+}
+
+impl LoadedConfig {
+    fn configured(&self) -> Option<&TunnelConfig> {
+        match self {
+            Self::Configured(config) => Some(config),
+            Self::Unconfigured | Self::Unavailable => None,
+        }
+    }
+
+    pub fn runtime_connection_config(&self) -> RuntimeConnectionConfig {
+        let mode = match self {
+            Self::Configured(config) => return config.runtime_connection_config(),
+            Self::Unconfigured => RuntimeConnectionMode::Unconfigured,
+            Self::Unavailable => RuntimeConnectionMode::Unavailable,
+        };
+        RuntimeConnectionConfig {
+            mode,
+            state_url: None,
+            authentication_token: None,
+        }
+    }
+}
 
 /// Owns the persisted desktop transport configuration.
 ///
@@ -125,43 +168,65 @@ type PersistConfig = fn(&Path, &TunnelConfig) -> Result<(), String>;
 /// configuration.
 pub struct ConnectionConfigStore {
     path: PathBuf,
-    config: Mutex<TunnelConfig>,
+    running: LoadedConfig,
+    // Until the first successful save, running also describes the saved file.
+    next: Mutex<Option<TunnelConfig>>,
     persist: PersistConfig,
 }
 
 impl ConnectionConfigStore {
-    pub fn new(path: PathBuf, config: TunnelConfig) -> Self {
+    pub fn new(path: PathBuf, running: LoadedConfig) -> Self {
         Self {
             path,
-            config: Mutex::new(config),
+            running,
+            next: Mutex::new(None),
             persist: persist_config,
         }
     }
 
-    #[cfg(test)]
-    fn with_persist(path: PathBuf, config: TunnelConfig, persist: PersistConfig) -> Self {
-        Self {
-            path,
-            config: Mutex::new(config),
-            persist,
+    pub fn settings(&self) -> Result<ConnectionSettingsStatus, String> {
+        let next = self.next.lock();
+        let saved = next.as_ref().or_else(|| self.running.configured());
+        self.check_saved(saved)?;
+        Ok(self.summarize(saved))
+    }
+
+    pub fn save(
+        &self,
+        update: ConnectionSettingsUpdate,
+    ) -> Result<ConnectionSettingsStatus, String> {
+        let mut next = self.next.lock();
+        let saved = next.as_ref().or_else(|| self.running.configured());
+        self.check_saved(saved)?;
+        let updated = saved.unwrap_or(&TunnelConfig::default()).updated(update)?;
+        (self.persist)(&self.path, &updated, saved.is_none())?;
+        let status = self.summarize(Some(&updated));
+        *next = Some(updated);
+        Ok(status)
+    }
+
+    fn check_saved(&self, saved: Option<&TunnelConfig>) -> Result<(), String> {
+        if self.running == LoadedConfig::Unavailable {
+            return Err(UNAVAILABLE_ERROR.into());
+        }
+        match load(&self.path) {
+            LoadedConfig::Unavailable => Err(UNAVAILABLE_ERROR.into()),
+            disk if disk.configured() == saved => Ok(()),
+            _ => Err(CHANGED_ERROR.into()),
         }
     }
 
-    pub fn settings(&self) -> ConnectionSettings {
-        self.config.lock().connection_settings()
-    }
-
-    pub fn save(&self, update: ConnectionSettingsUpdate) -> Result<ConnectionSettings, String> {
-        let mut current = self.config.lock();
-        let updated = current.updated(update).map_err(str::to_owned)?;
-
-        // Do not replace the in-memory configuration unless the durable write
-        // succeeds. A failed save therefore leaves both views on the previous
-        // usable configuration.
-        (self.persist)(&self.path, &updated)?;
-        *current = updated;
-
-        Ok(current.connection_settings())
+    fn summarize(&self, saved: Option<&TunnelConfig>) -> ConnectionSettingsStatus {
+        let running = self.running.configured();
+        ConnectionSettingsStatus {
+            running: running.map(TunnelConfig::connection_settings),
+            saved: saved.map(TunnelConfig::connection_settings),
+            pending_restart: match (running, saved) {
+                (Some(running), Some(saved)) => !running.same_route(saved),
+                (None, None) => false,
+                _ => true,
+            },
+        }
     }
 }
 
@@ -212,6 +277,23 @@ impl TunnelConfig {
                 remote_url: self.remote_url.clone(),
                 has_pairing_token: !self.pairing_token.is_empty(),
             },
+        }
+    }
+
+    fn same_route(&self, other: &Self) -> bool {
+        if self.mode != other.mode {
+            return false;
+        }
+        match self.mode {
+            TunnelMode::External | TunnelMode::Local => true,
+            TunnelMode::Managed => self.ssh_target.trim() == other.ssh_target.trim(),
+            TunnelMode::Direct => {
+                self.pairing_token == other.pairing_token
+                    && (self.remote_url == other.remote_url
+                        || Url::parse(&other.remote_url).is_ok_and(|url| {
+                            same_direct_endpoint(&self.remote_url, &other.remote_url, &url)
+                        }))
+            }
         }
     }
 
@@ -330,7 +412,7 @@ fn same_direct_endpoint(saved: &str, requested: &str, requested_url: &Url) -> bo
             && Url::parse(saved).is_ok_and(|saved_url| &saved_url == requested_url))
 }
 
-fn persist_config(path: &Path, config: &TunnelConfig) -> Result<(), String> {
+fn persist_config(path: &Path, config: &TunnelConfig, create: bool) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "connection settings path has no parent directory".to_owned())?;
@@ -362,46 +444,69 @@ fn persist_config(path: &Path, config: &TunnelConfig) -> Result<(), String> {
         .sync_all()
         .map_err(|error| format!("failed to sync staged connection settings: {error}"))?;
 
-    // The staged file has already been synced. Replacement is the commit
-    // point: after it succeeds, do not perform another fallible operation and
-    // risk reporting failure after the previous configuration is gone.
-    staged
-        .persist(path)
-        .map_err(|error| format!("failed to replace connection settings: {}", error.error))?;
+    // Publish atomically after syncing. A first save must not clobber a file
+    // that appeared after the absence check (including another Imp instance).
+    if create {
+        staged.persist_noclobber(path).map_err(|error| {
+            if error.error.kind() == ErrorKind::AlreadyExists {
+                CHANGED_ERROR.to_owned()
+            } else {
+                format!("failed to create connection settings: {}", error.error)
+            }
+        })?;
+    } else {
+        staged
+            .persist(path)
+            .map_err(|error| format!("failed to replace connection settings: {}", error.error))?;
+    }
 
     Ok(())
 }
 
-/// Reads `path`, or writes and returns the external-mode default the first
-/// time so the file is discoverable and documents its own shape. A malformed
-/// or invalid file falls back to the safe external default rather than
-/// blocking startup or starting a partially configured direct transport.
-pub fn load_or_init(path: &Path) -> TunnelConfig {
-    if let Ok(text) = std::fs::read_to_string(path) {
-        return match serde_json::from_str::<TunnelConfig>(&text) {
-            Ok(config) => match validate(&config) {
-                Ok(()) => config,
-                Err(reason) => {
-                    eprintln!(
-                        "imp: invalid tunnel config at {}: {reason}; using external mode",
-                        path.display()
-                    );
-                    TunnelConfig::default()
-                }
-            },
-            Err(error) => {
-                eprintln!(
-                    "imp: invalid tunnel config at {}: {error}; using external mode",
-                    path.display()
-                );
-                TunnelConfig::default()
-            }
-        };
+/// Reads only. Only a genuinely absent path can enter first-time setup.
+pub fn load(path: &Path) -> LoadedConfig {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(metadata)
+            if metadata.file_type().is_symlink()
+                && std::fs::metadata(path).is_ok_and(|target| target.is_file()) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound && has_existing_directory(path) => {
+            return LoadedConfig::Unconfigured;
+        }
+        _ => return LoadedConfig::Unavailable,
     }
 
-    let config = TunnelConfig::default();
-    let _ = persist_config(path, &config);
-    config
+    // serde's derived struct deserializer also accepts positional arrays.
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return LoadedConfig::Unavailable;
+    };
+    if text.trim_start().starts_with('{') {
+        if let Ok(config) = serde_json::from_str(&text) {
+            if validate(&config).is_ok() {
+                return LoadedConfig::Configured(config);
+            }
+        }
+    }
+    LoadedConfig::Unavailable
+}
+
+fn has_existing_directory(path: &Path) -> bool {
+    // A dangling parent link can also make the leaf return NotFound.
+    for parent in path
+        .ancestors()
+        .skip(1)
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        match std::fs::symlink_metadata(parent) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return std::fs::metadata(parent).is_ok_and(|target| target.is_dir());
+            }
+            Ok(metadata) => return metadata.is_dir(),
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -411,28 +516,147 @@ mod tests {
     const VALID_TOKEN: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     #[test]
-    fn missing_file_defaults_to_external_and_is_written() {
-        let dir = tempdir();
-        let path = dir.join("tunnel.json");
+    fn missing_file_stays_absent_until_explicit_save_and_relaunch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing-parent/tunnel.json");
+        let loaded = load(&path);
 
-        let config = load_or_init(&path);
+        assert_inactive(&loaded, RuntimeConnectionMode::Unconfigured, "unconfigured");
+        assert!(!path.parent().unwrap().exists());
+        let store = ConnectionConfigStore::new(path.clone(), loaded);
+        let status = store.settings().unwrap();
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({ "running": null, "saved": null, "pendingRestart": false })
+        );
+        assert!(!path.parent().unwrap().exists());
+        assert_eq!(
+            store
+                .save(direct_update("wss://imp.example/state", None))
+                .unwrap_err(),
+            "direct pairing token is required"
+        );
+        assert!(!path.parent().unwrap().exists());
 
-        assert_eq!(config.mode, TunnelMode::External);
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("\"external\""));
-        std::fs::remove_dir_all(&dir).ok();
+        let status = store.save(local_update()).unwrap();
+        assert!(status.running.is_none());
+        assert_eq!(status.saved.unwrap().mode, TunnelMode::Local);
+        assert!(status.pending_restart);
+        assert_inactive(
+            &store.running,
+            RuntimeConnectionMode::Unconfigured,
+            "unconfigured",
+        );
+
+        let restarted = ConnectionConfigStore::new(path.clone(), load(&path));
+        let status = restarted.settings().unwrap();
+        assert!(!status.pending_restart);
+        assert_eq!(status.running, status.saved);
+        assert_eq!(status.running.unwrap().mode, TunnelMode::Local);
     }
 
     #[test]
-    fn malformed_file_falls_back_to_default_without_panicking() {
-        let dir = tempdir();
-        let path = dir.join("tunnel.json");
-        std::fs::write(&path, "{not json").unwrap();
+    fn unavailable_file_is_preserved_and_stays_unavailable_until_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        for original in [
+            b"{not json pairing-token".as_slice(),
+            b"[]",
+            b"[\"external\"]",
+            b"null",
+            b"{\"mode\":\"unknown\"}",
+            b"\xff",
+        ] {
+            std::fs::write(&path, original).unwrap();
+            let loaded = load(&path);
+            assert_inactive(&loaded, RuntimeConnectionMode::Unavailable, "unavailable");
+            let store = ConnectionConfigStore::new(path.clone(), loaded);
+            assert_eq!(store.settings().unwrap_err(), UNAVAILABLE_ERROR);
+            assert_eq!(store.save(local_update()).unwrap_err(), UNAVAILABLE_ERROR);
+            assert_eq!(std::fs::read(&path).unwrap(), original);
 
-        let config = load_or_init(&path);
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(store.save(local_update()).unwrap_err(), UNAVAILABLE_ERROR);
+            assert!(!path.exists());
+        }
+    }
 
-        assert_eq!(config, TunnelConfig::default());
-        std::fs::remove_dir_all(&dir).ok();
+    #[test]
+    fn directory_at_config_path_is_not_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        std::fs::create_dir(&path).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        assert_eq!(store.settings().unwrap_err(), UNAVAILABLE_ERROR);
+        assert_eq!(store.save(local_update()).unwrap_err(), UNAVAILABLE_ERROR);
+        assert!(path.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_link_is_not_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let target = dir.path().join("missing.json");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        assert_eq!(store.settings().unwrap_err(), UNAVAILABLE_ERROR);
+        assert_eq!(store.save(local_update()).unwrap_err(), UNAVAILABLE_ERROR);
+        assert_eq!(std::fs::read_link(path).unwrap(), target);
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_parent_link_is_not_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("config");
+        let target = dir.path().join("missing");
+        std::os::unix::fs::symlink(&target, &parent).unwrap();
+        let path = parent.join("nested/tunnel.json");
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        assert_eq!(store.save(local_update()).unwrap_err(), UNAVAILABLE_ERROR);
+        assert_eq!(std::fs::read_link(parent).unwrap(), target);
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn existing_external_and_legacy_omitted_mode_keep_the_forward() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        for text in [r#"{"mode":"external"}"#, "{}"] {
+            std::fs::write(&path, text).unwrap();
+            let loaded = load(&path);
+            let config = loaded.configured().unwrap();
+            assert_eq!(config.mode, TunnelMode::External);
+            let runtime = loaded.runtime_connection_config();
+            assert_eq!(runtime.mode, RuntimeConnectionMode::Local);
+            assert_eq!(
+                runtime.state_url,
+                Some(format!("ws://127.0.0.1:{SSH_FORWARD_PORT}/state"))
+            );
+            assert!(runtime.authentication_token.is_none());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        }
+    }
+
+    fn assert_inactive(loaded: &LoadedConfig, mode: RuntimeConnectionMode, wire_mode: &str) {
+        assert!(loaded.configured().is_none());
+        let runtime = loaded.runtime_connection_config();
+        assert_eq!(runtime.mode, mode);
+        assert_eq!(
+            serde_json::to_value(runtime).unwrap(),
+            serde_json::json!({ "mode": wire_mode, "stateUrl": null, "authenticationToken": null })
+        );
+    }
+
+    fn local_update() -> ConnectionSettingsUpdate {
+        ConnectionSettingsUpdate {
+            mode: TunnelMode::Local,
+            ssh_target: String::new(),
+            remote_url: String::new(),
+            pairing_token: None,
+        }
     }
 
     #[test]
@@ -441,7 +665,9 @@ mod tests {
         let path = dir.join("tunnel.json");
         std::fs::write(&path, r#"{"mode":"local"}"#).unwrap();
 
-        let config = load_or_init(&path);
+        let LoadedConfig::Configured(config) = load(&path) else {
+            panic!("expected configured Local mode");
+        };
 
         assert_eq!(
             config,
@@ -496,7 +722,9 @@ mod tests {
         let path = dir.join("tunnel.json");
         std::fs::write(&path, r#"{"mode":"managed","sshTarget":"avatar"}"#).unwrap();
 
-        let config = load_or_init(&path);
+        let LoadedConfig::Configured(config) = load(&path) else {
+            panic!("expected configured Managed SSH mode");
+        };
 
         assert_eq!(
             config,
@@ -522,7 +750,9 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_or_init(&path);
+        let LoadedConfig::Configured(config) = load(&path) else {
+            panic!("expected configured Direct WSS mode");
+        };
 
         assert_eq!(config.mode, TunnelMode::Direct);
         assert_eq!(config.remote_url, "wss://imp.example/state");
@@ -551,7 +781,9 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_or_init(&path);
+        let LoadedConfig::Configured(config) = load(&path) else {
+            panic!("expected configured Direct WSS mode");
+        };
 
         assert_eq!(config.mode, TunnelMode::Direct);
         assert_eq!(config.remote_url, "wss://imp.example/imp/state");
@@ -571,7 +803,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(load_or_init(&path), TunnelConfig::default());
+        assert_eq!(load(&path), LoadedConfig::Unavailable);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -594,7 +826,7 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(load_or_init(&path), TunnelConfig::default());
+            assert_eq!(load(&path), LoadedConfig::Unavailable);
         }
 
         std::fs::remove_dir_all(&dir).ok();
@@ -610,7 +842,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(load_or_init(&path), TunnelConfig::default());
+        assert_eq!(load(&path), LoadedConfig::Unavailable);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -656,7 +888,7 @@ mod tests {
         let path = dir.join("tunnel.json");
         std::fs::write(&path, r#"{"mode":"managed","sshTarget":"   "}"#).unwrap();
 
-        assert_eq!(load_or_init(&path), TunnelConfig::default());
+        assert_eq!(load(&path), LoadedConfig::Unavailable);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -817,7 +1049,7 @@ mod tests {
         }
     }
 
-    fn failing_persist(_path: &Path, _config: &TunnelConfig) -> Result<(), String> {
+    fn failing_persist(_path: &Path, _config: &TunnelConfig, _create: bool) -> Result<(), String> {
         Err("simulated persistence failure".into())
     }
 
@@ -832,9 +1064,9 @@ mod tests {
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
-        persist_config(&path, &existing).unwrap();
+        persist_config(&path, &existing, true).unwrap();
 
-        let store = ConnectionConfigStore::new(path.clone(), existing);
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
         let settings = store
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::Managed,
@@ -843,6 +1075,9 @@ mod tests {
                 pairing_token: Some(VALID_TOKEN.into()),
             })
             .unwrap();
+        assert_eq!(settings.running.unwrap().mode, TunnelMode::Direct);
+        assert!(settings.pending_restart);
+        let settings = settings.saved.unwrap();
 
         assert_eq!(settings.mode, TunnelMode::Managed);
         assert_eq!(settings.ssh_target, "avatar");
@@ -876,9 +1111,9 @@ mod tests {
             remote_url: String::new(),
             pairing_token: String::new(),
         };
-        persist_config(&path, &existing).unwrap();
+        persist_config(&path, &existing, true).unwrap();
 
-        let store = ConnectionConfigStore::new(path.clone(), existing);
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
         store
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::External,
@@ -907,9 +1142,9 @@ mod tests {
         let path = dir.join("tunnel.json");
 
         let existing = TunnelConfig::default();
-        persist_config(&path, &existing).unwrap();
+        persist_config(&path, &existing, true).unwrap();
 
-        let store = ConnectionConfigStore::new(path.clone(), existing);
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
         store
             .save(ConnectionSettingsUpdate {
                 mode: TunnelMode::Direct,
@@ -936,24 +1171,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tunnel.json");
         let existing = direct_config("wss://imp.example/state", VALID_TOKEN);
-        persist_config(&path, &existing).unwrap();
-        let store = ConnectionConfigStore::new(path.clone(), existing);
+        persist_config(&path, &existing, true).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
 
         for url in [
             "wss://imp.example/state",
             "wss://IMP.example:443/proxy/../state",
         ] {
             let settings = store.save(direct_update(url, None)).unwrap();
-            assert_eq!(settings.remote_url, url);
-            assert!(settings.has_pairing_token);
-            assert_eq!(store.settings(), settings);
-            for settings in [settings, store.settings()] {
-                let json = serde_json::to_value(settings).unwrap();
-                assert!(json.get("pairingToken").is_none());
-                assert!(!json.to_string().contains(VALID_TOKEN));
-            }
-            assert_eq!(load_or_init(&path), direct_config(url, VALID_TOKEN));
-            assert_eq!(*store.config.lock(), direct_config(url, VALID_TOKEN));
+            assert_eq!(settings.saved.as_ref().unwrap().remote_url, url);
+            assert!(settings.saved.as_ref().unwrap().has_pairing_token);
+            assert!(!settings.pending_restart);
+            assert_eq!(store.settings().unwrap(), settings);
+            let json = serde_json::to_value(settings).unwrap();
+            assert!(json["running"].get("pairingToken").is_none());
+            assert!(json["saved"].get("pairingToken").is_none());
+            assert!(!json.to_string().contains(VALID_TOKEN));
+            assert_eq!(
+                load(&path),
+                LoadedConfig::Configured(direct_config(url, VALID_TOKEN)),
+            );
         }
     }
 
@@ -962,9 +1199,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tunnel.json");
         let existing = direct_config("wss://xn--bcher-kva.example/imp/state", VALID_TOKEN);
-        persist_config(&path, &existing).unwrap();
+        persist_config(&path, &existing, true).unwrap();
         let before = std::fs::read(&path).unwrap();
-        let store = ConnectionConfigStore::new(path.clone(), existing.clone());
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
         let changed = "direct pairing token is required when changing the remote URL";
 
         for (url, token, error) in [
@@ -1012,7 +1249,7 @@ mod tests {
                 "{url}"
             );
             assert_eq!(std::fs::read(&path).unwrap(), before);
-            assert_eq!(*store.config.lock(), existing);
+            assert!(store.next.lock().is_none());
         }
     }
 
@@ -1023,14 +1260,16 @@ mod tests {
         let original = "wss://old.example/state";
         let new = "wss://new.example/state";
         let existing = direct_config(original, VALID_TOKEN);
-        persist_config(&path, &existing).unwrap();
-        let store = ConnectionConfigStore::new(path.clone(), existing);
-        let stale = store.settings();
+        persist_config(&path, &existing, true).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        let stale = store.settings().unwrap().saved.unwrap();
 
         let replacement = URL_SAFE_NO_PAD.encode([1; 32]);
         store.save(direct_update(new, Some(&replacement))).unwrap();
-        assert_eq!(*store.config.lock(), direct_config(new, &replacement));
-        assert_eq!(load_or_init(&path), direct_config(new, &replacement));
+        assert_eq!(
+            load(&path),
+            LoadedConfig::Configured(direct_config(new, &replacement)),
+        );
         let before = std::fs::read(&path).unwrap();
 
         assert_eq!(
@@ -1040,14 +1279,22 @@ mod tests {
             "direct pairing token is required when changing the remote URL"
         );
         assert_eq!(std::fs::read(&path).unwrap(), before);
-        assert_eq!(*store.config.lock(), direct_config(new, &replacement));
+        assert_eq!(
+            load(&path),
+            LoadedConfig::Configured(direct_config(new, &replacement)),
+        );
 
         store.save(direct_update(new, None)).unwrap();
-        assert_eq!(load_or_init(&path), direct_config(new, &replacement));
+        assert_eq!(
+            load(&path),
+            LoadedConfig::Configured(direct_config(new, &replacement)),
+        );
 
         store.save(direct_update(new, Some(VALID_TOKEN))).unwrap();
-        assert_eq!(*store.config.lock(), direct_config(new, VALID_TOKEN));
-        assert_eq!(load_or_init(&path), direct_config(new, VALID_TOKEN));
+        assert_eq!(
+            load(&path),
+            LoadedConfig::Configured(direct_config(new, VALID_TOKEN)),
+        );
     }
 
     #[test]
@@ -1056,11 +1303,12 @@ mod tests {
         let path = dir.join("tunnel.json");
 
         let existing = direct_config("wss://old.example/state", VALID_TOKEN);
-        persist_config(&path, &existing).unwrap();
+        persist_config(&path, &existing, true).unwrap();
 
         let before = std::fs::read_to_string(&path).unwrap();
-        let store =
-            ConnectionConfigStore::with_persist(path.clone(), existing.clone(), failing_persist);
+        let mut store = ConnectionConfigStore::new(path.clone(), load(&path));
+        store.persist = failing_persist;
+        let status = store.settings().unwrap();
         let replacement = URL_SAFE_NO_PAD.encode([1; 32]);
         let error = store
             .save(direct_update("wss://new.example/state", Some(&replacement)))
@@ -1068,9 +1316,83 @@ mod tests {
 
         assert_eq!(error, "simulated persistence failure");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-        assert_eq!(*store.config.lock(), existing);
+        assert_eq!(store.settings().unwrap(), status);
+        assert!(store.next.lock().is_none());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pending_restart_detects_token_only_and_endpoint_only_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let original = "wss://imp.example/state";
+        let existing = direct_config(original, VALID_TOKEN);
+        persist_config(&path, &existing, true).unwrap();
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        let token = URL_SAFE_NO_PAD.encode([1; 32]);
+
+        let status = store.save(direct_update(original, Some(&token))).unwrap();
+        assert_eq!(status.running, status.saved);
+        assert!(status.pending_restart);
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(!json.contains(VALID_TOKEN));
+        assert!(!json.contains(&token));
+        assert!(!json.contains("pairingToken"));
+
+        let status = store
+            .save(direct_update(
+                "wss://imp.example/prefix/state",
+                Some(VALID_TOKEN),
+            ))
+            .unwrap();
+        assert!(status.pending_restart);
+        assert_eq!(status.running.unwrap().remote_url, original);
+
+        let status = store
+            .save(direct_update(original, Some(VALID_TOKEN)))
+            .unwrap();
+        assert!(!status.pending_restart);
+    }
+
+    #[test]
+    fn store_never_replaces_an_unexpected_file_before_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        let original = r#"{"mode":"external"}"#;
+        std::fs::write(&path, original).unwrap();
+        assert_eq!(store.save(local_update()).unwrap_err(), CHANGED_ERROR);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        std::fs::write(&path, "{unreadable").unwrap();
+        assert_eq!(store.settings().unwrap_err(), UNAVAILABLE_ERROR);
+        assert_eq!(store.save(local_update()).unwrap_err(), UNAVAILABLE_ERROR);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{unreadable");
+
+        let changed = r#"{"mode":"managed","sshTarget":"avatar"}"#;
+        std::fs::write(&path, changed).unwrap();
+        assert_eq!(store.settings().unwrap_err(), CHANGED_ERROR);
+        assert_eq!(store.save(local_update()).unwrap_err(), CHANGED_ERROR);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), changed);
+    }
+
+    #[test]
+    fn first_persist_preserves_a_file_created_after_the_absence_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let mut store = ConnectionConfigStore::new(path.clone(), load(&path));
+        store.persist = |path, config, create| {
+            std::fs::write(path, r#"{"mode":"external"}"#).unwrap();
+            persist_config(path, config, create)
+        };
+        assert_eq!(store.save(local_update()).unwrap_err(), CHANGED_ERROR);
+        assert!(store.next.lock().is_none());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"mode":"external"}"#,
+        );
     }
 
     #[test]
@@ -1084,7 +1406,7 @@ mod tests {
             remote_url: String::new(),
             pairing_token: String::new(),
         };
-        persist_config(&path, &old).unwrap();
+        persist_config(&path, &old, true).unwrap();
 
         let replacement = TunnelConfig {
             mode: TunnelMode::Managed,
@@ -1092,7 +1414,7 @@ mod tests {
             remote_url: String::new(),
             pairing_token: String::new(),
         };
-        persist_config(&path, &replacement).unwrap();
+        persist_config(&path, &replacement, false).unwrap();
 
         let persisted: TunnelConfig =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -1114,7 +1436,7 @@ mod tests {
             remote_url: "wss://imp.example/state".into(),
             pairing_token: VALID_TOKEN.into(),
         };
-        persist_config(&path, &config).unwrap();
+        persist_config(&path, &config, true).unwrap();
 
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
