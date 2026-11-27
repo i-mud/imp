@@ -47,6 +47,9 @@ Selected by:
   use the separate consumer endpoint on `127.0.0.1:8789`. Direct WSS supplies
   its `wss:` state URL and transient renderer authentication token from native
   application configuration.
+  A structured Managed SSH destination changes native SSH argument selection
+  only. The renderer still connects to a fixed loopback address for both
+  observation and actions, without authenticating the listener's owner.
 - `VITE_IMP_RELAY_URL` remains a local/custom relay override. Direct WSS
   never reads a pairing token or remote URL from a build-time `VITE_*` value.
 

@@ -47,6 +47,7 @@ claims belong in `status.md` and the relevant architecture documents.
 | Slice 26 - Installation reliability and onboarding                          | Complete    | No slice marker; accepted in `v0.4.6`         |
 | Slice 27 - HUD layout and usability polish                                  | Complete    | No slice marker; final acceptance in `v0.5.3` |
 | [Slice 28 - External Alpha Readiness](#slice-28---external-alpha-readiness) | In progress | No slice marker                               |
+| [Slice 29 - Connection onboarding](#slice-29---connection-onboarding)       | In progress | No slice marker                               |
 
 Slice numbers and milestone tags are development-history markers. They have no
 relationship to release versions. Release versions are derived independently
@@ -60,7 +61,7 @@ in `v0.4.0` and was accepted on published artifacts, with a DNS preflight fix in
 `v0.4.1`, plus retained follow-ups. Slice 26 is complete: published `v0.4.6`
 was accepted with TinyFugue 5.2.4. Slice 27 is complete with three separate
 installed Windows acceptance passes on published `v0.5.1`, `v0.5.2`, and
-`v0.5.3`. Slice 28 is active; later candidates remain provisional.
+`v0.5.3`. Slices 28 and 29 have separate open evidence gates.
 
 ## ✅ Slice 1 - Bootstrap baseline
 
@@ -1076,6 +1077,71 @@ work, not to pre-commit to a first-run redesign.
 
 See [implementation status](status.md#slice-28--external-alpha-readiness)
 for observed evidence and what remains unverified.
+
+## Slice 29 - Connection onboarding
+
+The onboarding audit (29.0), [player quick starts](https://github.com/i-mud/imp/pull/65),
+[reference docs](https://github.com/i-mud/imp/pull/67), and [intent-based
+connection dialog](https://github.com/i-mud/imp/pull/68) established the baseline.
+[Direct credential-to-endpoint binding](https://github.com/i-mud/imp/pull/66)
+landed separately and is unchanged by Guided SSH.
+
+### 29.3 - Guided SSH
+
+**PR1: server-login fields for Managed SSH.** Keep existing Managed gameplay,
+alias handling, and save/restart behavior; remove the need to create an alias
+for a supported server address and established, noninteractive login. Compare
+against the 29.0 onboarding baseline: this does not simplify SSH authentication,
+verify forwarding in the UI, change remote installation, or remove the restart.
+
+**PR2 proposal: check an unsaved login without changing the running connection.**
+Use the same validated structured settings and target host policy to start
+one foreground system `ssh -W 127.0.0.1:8787` process. Use its stdin/stdout
+for one read-only WebSocket to `/state`: no desktop listener, no adopted forward,
+no remote command, and no `/action` or `/ingest` requests. Never save the form,
+change the active route, or retry. Give the check a short overall deadline
+(proposed: five seconds, including login and relay frames), with cancellation on
+request, dialog close, or edited login details. Close the stream and clean up
+the owned process on every outcome; discard late results for the old form.
+Use safe diagnostics without exposing raw frames, SSH config, or credentials.
+
+Validate the real [protocol](../packages/protocol/SPEC.md#messages) frames:
+versioned `hello` and `status`, not just a WebSocket upgrade or `/healthz`.
+Use a valid `snapshot` with non-null context alongside current `status.feed`
+to distinguish a live feed from a reachable relay with `down`, `stale`, or
+no usable state. Snapshot timestamps and retained values do not prove freshness:
+unchanged observations can keep the feed live. Report only what the relay
+showed during the check. A slow login or path can cause a timeout; it does
+not prove the relay is down. The check would not
+prove the player's character is correct, that gameplay will stay live, that
+the separate Managed forward can bind, or that state and actions will use the
+same backend after Save. Confirm the intended character's vitals update during
+play.
+
+Acceptance for PR2 would use the production relay with a synthetic producer
+on a disposable SSH server and native Windows/Linux clients. Cover verified
+login on a configured SSH port, host-key rejection, unauthorized identity,
+forwarding denial, missing backend, invalid protocol, and real live, stale,
+down, and retained-state cases. Cover deadline, cancellation, changed inputs
+and late replies, process cleanup, and isolation from an occupied `8789` and
+an existing session. Check that no listener is created, settings and gameplay
+don't change, and no action is sent. This is fixture evidence, not published
+artifact or player acceptance.
+
+**Strict gameplay transport is deferred.** Keep
+[the negative evidence from #69–71](status.md#slice-29---connection-onboarding)
+as production blockers, not as transport passes. A future design must prove
+listener conflict refusal and end-to-end endpoint attribution for state and
+every action, including cancellation, backend replacement, port reuse, and no
+action replay; it must meet the latency, stream isolation, and teardown gates
+on Windows and Unix before replacing the current route.
+
+The other onboarding increments remain separate: 29.4 Direct connection codes
+beyond credential binding, 29.5 live switching, 29.6 remote install simplification,
+and 29.7 published-artifact acceptance and independent onboarding. Verify the
+matching published Windows installer and server bundle through ordinary play,
+then record independent outcomes on each priority route. Those gates and the
+[Slice 28 pilot conditions](#slice-28---external-alpha-readiness) are unchanged.
 
 ## Candidate work
 

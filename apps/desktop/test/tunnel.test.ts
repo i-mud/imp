@@ -118,7 +118,8 @@ describe('native connection settings', () => {
 
     const saved = {
       mode: 'managed',
-      sshTarget: 'avatar',
+      sshTarget: '',
+      sshDestination: { host: 'mud.example.org', username: 'player' },
       remoteUrl: '',
       hasPairingToken: false,
     };
@@ -127,7 +128,7 @@ describe('native connection settings', () => {
     await expect(
       saveConnectionSettings({
         mode: 'managed',
-        sshTarget: 'avatar',
+        sshDestination: { host: 'mud.example.org', username: 'player' },
       }),
     ).resolves.toEqual({
       running: null,
@@ -138,7 +139,7 @@ describe('native connection settings', () => {
     expect(invoke).toHaveBeenCalledWith('save_connection_settings', {
       update: {
         mode: 'managed',
-        sshTarget: 'avatar',
+        sshDestination: { host: 'mud.example.org', username: 'player' },
       },
     });
   });

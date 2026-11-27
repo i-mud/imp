@@ -8,7 +8,7 @@ actions footer. Use **Expanded** to check your setup.
 
 1. **Installed:** The bottom of **Settings** shows the running Imp version.
    Check that it matches the version you installed.
-   In source builds with the new Connection dialog, **Connection not set up**
+   In v0.6.0 and later, **Connection not set up**
    means no route has been saved. Select **Set up connection**, or choose
    **Not now** and return via **Settings → Connection → Manage**. See the
    [Windows connection guide](install-windows.md#configure-the-connection)

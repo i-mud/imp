@@ -334,7 +334,13 @@ describe.each(['expanded', 'compact'] as const)('%s panel shortcuts', (mode) => 
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('returns to routed Settings after closing Connection management', async () => {
+  it('returns to routed Settings and discards unsaved server login in the Connection manager', async () => {
+    vi.spyOn(tunnel, 'loadConnectionSettings').mockResolvedValue({
+      running: null,
+      saved: null,
+      pendingRestart: false,
+    });
+    const save = vi.spyOn(tunnel, 'saveConnectionSettings');
     mountHud(mode);
     keyboardActivate(shortcut('Alerts'));
     keyboardActivate(shortcut('Settings'));
@@ -342,10 +348,18 @@ describe.each(['expanded', 'compact'] as const)('%s panel shortcuts', (mode) => 
     const entry = control('[data-connection-manager-trigger]', control(selector));
     click(entry);
     expect(entry.isConnected).toBe(false);
+    await vi.waitFor(() => click(control('input[name="client-location"][value="remote"]')));
+    click(control('input[name="remote-method"][value="managed"]'));
+    input(control<HTMLInputElement>('input[name="ssh-host"]'), 'unsaved.example.org');
     click(shortcut('Close connection settings'));
     const returned = control('[data-connection-manager-trigger]', control(selector));
     expectShortcuts('Settings');
     await expectFocus(returned);
+    click(returned);
+    await vi.waitFor(() => click(control('input[name="client-location"][value="remote"]')));
+    click(control('input[name="remote-method"][value="managed"]'));
+    expect(control<HTMLInputElement>('input[name="ssh-host"]').value).toBe('');
+    expect(save).not.toHaveBeenCalled();
   });
 
   const exitDialog = '[role="alertdialog"]';
@@ -561,7 +575,8 @@ it('shows actionable guidance when native settings reject a Managed SSH target',
   await vi.waitFor(() => click(control('input[name="client-location"][value="remote"]')));
   await vi.waitFor(() => click(control('input[value="managed"]')));
   // The dialog rejects blank targets itself; this covers the native-rejection mapping in Hud.
-  input(control<HTMLInputElement>('input[type="text"]'), 'avatar');
+  click(control('button[name="ssh-representation"]'));
+  input(control<HTMLInputElement>('input[name="ssh-target"]'), 'avatar');
   click(control('button[type="submit"]'));
   await vi.waitFor(() =>
     expect(control('.connection-dialog [role="alert"]').textContent).toBe('Enter your SSH target.'),

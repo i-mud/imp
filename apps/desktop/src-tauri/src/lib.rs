@@ -125,11 +125,17 @@ pub fn run() {
                 LoadedConfig::Configured(config) => match config.mode {
                     TunnelMode::External => TunnelSupervisor::external(),
                     TunnelMode::Local => TunnelSupervisor::inactive(),
-                    TunnelMode::Managed => TunnelSupervisor::managed(
-                        config.ssh_target.clone(),
-                        SSH_FORWARD_PORT,
-                        Arc::clone(&runtime_owner),
-                    ),
+                    TunnelMode::Managed => match config.managed_destination() {
+                        Ok(destination) => TunnelSupervisor::managed(
+                            destination,
+                            SSH_FORWARD_PORT,
+                            Arc::clone(&runtime_owner),
+                        ),
+                        Err(error) => {
+                            eprintln!("imp: invalid managed tunnel destination: {error}");
+                            TunnelSupervisor::inactive()
+                        }
+                    },
                     TunnelMode::Direct => TunnelSupervisor::direct(),
                 },
                 LoadedConfig::Unconfigured | LoadedConfig::Unavailable => {
