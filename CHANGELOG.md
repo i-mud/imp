@@ -10,6 +10,12 @@ public release versions.
 
 No changes yet.
 
+## [0.6.0] - 2026-11-27
+
+### Features
+
+- simplify connection setup around player intent ([6e680ec](https://github.com/i-mud/imp/commit/6e680ecdeb6047b93188797b52fcb06d61a1fa64))
+
 ## [0.5.4] - 2026-11-26
 
 ### Bug Fixes
