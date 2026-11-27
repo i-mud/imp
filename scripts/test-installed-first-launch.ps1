@@ -230,17 +230,16 @@ function Wait-FixtureGone {
     throw 'Fixture listener, desktop or isolated WebView survived exit'
 }
 
-function Start-Desktop([string]$Log, [bool]$UseEnvironment) {
+function Start-Desktop([string]$Log, [bool]$UseEnvironment, [ref]$Process) {
     Assert-RuntimePortsFree
     try {
         if ($UseEnvironment) {
             $env:WEBVIEW2_USER_DATA_FOLDER = $WebView
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $WebViewArgs
         }
-        $Process = Start-Process $Exe -PassThru -RedirectStandardError $Log
-        # Redirection otherwise returns a Process without an open handle.
-        $null = $Process.Handle
-        return $Process
+        $Process.Value = Start-Process $Exe -PassThru -RedirectStandardError $Log
+        # Record ownership before taking the handle or restoring the environment can fail.
+        $null = $Process.Value.Handle
     } finally {
         if ($UseEnvironment) {
             Remove-Item Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
@@ -249,50 +248,75 @@ function Start-Desktop([string]$Log, [bool]$UseEnvironment) {
 }
 
 function Start-FixtureDesktop([string]$Log) {
-    if (!$CheckConnectionUi) { return Start-Desktop $Log $false }
-    # Same-context env-only launch first; the policy is a hosted-CI-only fallback.
-    $Process = Start-Desktop $Log (!$PolicyActive)
-    if (Wait-DebugListener $Process 15) {
-        if (!$PolicyActive -and !$script:EvidenceShown) {
-            $script:EvidenceShown = $true
-            $null = Write-LaunchEvidence 'env-only' $Process $true
+    $Process = $null
+    try {
+        # Same-context env-only launch first; the policy is a hosted-CI-only fallback.
+        Start-Desktop $Log ($CheckConnectionUi -and !$PolicyActive) ([ref]$Process)
+        if (!$CheckConnectionUi) { return $Process }
+        if (Wait-DebugListener $Process 15) {
+            if (!$PolicyActive -and !$script:EvidenceShown) {
+                $script:EvidenceShown = $true
+                $null = Write-LaunchEvidence 'env-only' $Process $true
+            }
+            return $Process
         }
-        return $Process
-    }
-    $Label = if ($PolicyActive) { 'policy' } else { 'env-only' }
-    $Evidence = Write-LaunchEvidence $Label $Process (!$PolicyActive)
-    $Fallback = !$PolicyActive -and $Elevated -and $env:IMP_ACCEPTANCE_RUNNER -eq 'github-hosted' -and $Evidence.HostHigh
-    Stop-FixtureDesktop $Process $Log
-    if (!$Fallback) { throw 'Expected a loopback WebView2 debugger; no supported fallback applies here' }
-    if (!$Process.HasExited) { throw 'Installed desktop is still running after cleanup' }
-    Wait-FixtureGone
-    Enable-WebViewPolicy
-    $Process = Start-Desktop $Log $false
-    $Listening = Wait-DebugListener $Process 15
-    $null = Write-LaunchEvidence 'policy' $Process $false
-    if (!$Listening) {
+        $Label = if ($PolicyActive) { 'policy' } else { 'env-only' }
+        $Evidence = Write-LaunchEvidence $Label $Process (!$PolicyActive)
+        $Fallback = !$PolicyActive -and $Elevated -and $env:IMP_ACCEPTANCE_RUNNER -eq 'github-hosted' -and $Evidence.HostHigh
+        if (!$Fallback) { throw 'Expected a loopback WebView2 debugger; no supported fallback applies here' }
         Stop-FixtureDesktop $Process $Log
-        throw 'Expected a loopback WebView2 debugger after the executable-scoped policy launch'
+        if (!$Process.HasExited) { throw 'Installed desktop is still running after cleanup' }
+        $Process = $null
+        Wait-FixtureGone
+        Enable-WebViewPolicy
+        Start-Desktop $Log $false ([ref]$Process)
+        $Listening = Wait-DebugListener $Process 15
+        $null = Write-LaunchEvidence 'policy' $Process $false
+        if (!$Listening) { throw 'Expected a loopback WebView2 debugger after the executable-scoped policy launch' }
+        return $Process
+    } catch {
+        # A return transfers ownership to the caller; until then, cleanup belongs here.
+        if ($Process) { Stop-FixtureDesktop $Process $Log }
+        throw
     }
-    return $Process
 }
 
 function Stop-FixtureDesktop($Process, [string]$Log) {
     # Descendant handles are captured while the parent links still exist, then waited on and, if
     # needed, stopped through those exact handles rather than by a possibly stale PID.
-    $Owned = if ($CheckConnectionUi) { @(Get-OwnedWebViews $Process) } else { @() }
-    if (!$Process.HasExited) {
-        try { $Process.Kill() } catch { if (!$Process.HasExited) { Write-Error $_ -ErrorAction Continue } }
-        if (!$Process.WaitForExit(10000)) { Write-Error 'Installed desktop did not stop' -ErrorAction Continue }
+    $Owned = @()
+    if ($CheckConnectionUi) {
+        try { $Owned = @(Get-OwnedWebViews $Process) } catch {
+            $script:FixtureCleanupFailed = $true
+            Write-Warning 'Could not enumerate owned WebView2 processes; stopping the desktop through its captured handle' -WarningAction Continue
+        }
+    }
+    try {
+        if (!$Process.HasExited) { $Process.Kill() }
+    } catch {
+        Write-Warning 'Could not request desktop termination; checking its exit' -WarningAction Continue
+    }
+    try {
+        if (!$Process.WaitForExit(10000)) { throw 'Desktop exit timeout' }
+    } catch {
+        $script:FixtureCleanupFailed = $true
+        Write-Warning 'Could not verify installed desktop exit' -WarningAction Continue
     }
     $Deadline = [DateTime]::UtcNow.AddSeconds(10)
     foreach ($Child in $Owned) {
-        $Remaining = [Math]::Max(0, ($Deadline - [DateTime]::UtcNow).TotalMilliseconds)
-        if (!$Child.WaitForExit([int]$Remaining)) {
-            Write-Error 'An owned WebView2 process outlived the desktop; stopping it' -ErrorAction Continue
-            try { $Child.Kill() } catch { if (!$Child.HasExited) { Write-Error $_ -ErrorAction Continue } }
+        try {
+            $Remaining = [Math]::Max(0, ($Deadline - [DateTime]::UtcNow).TotalMilliseconds)
+            if (!$Child.WaitForExit([int]$Remaining)) {
+                Write-Warning 'An owned WebView2 process outlived the desktop; stopping it' -WarningAction Continue
+                try { $Child.Kill() } catch { if (!$Child.HasExited) { throw } }
+                if (!$Child.WaitForExit(1000)) { throw 'WebView2 exit timeout' }
+            }
+        } catch {
+            $script:FixtureCleanupFailed = $true
+            Write-Warning 'Could not verify owned WebView2 exit' -WarningAction Continue
+        } finally {
+            $Child.Dispose()
         }
-        $Child.Dispose()
     }
     Remove-Item $Log -ErrorAction SilentlyContinue
 }
@@ -332,6 +356,7 @@ function Assert-OwnedNode([string]$Log) {
 }
 
 $Completed = $false
+$FixtureCleanupFailed = $false
 try {
 $Setup = Start-Process (Resolve-Path $Installer).Path -ArgumentList '/S' -Wait -PassThru
 if ($Setup.ExitCode) { throw "Installer exited with $($Setup.ExitCode)" }
@@ -451,6 +476,7 @@ if ($CheckConnectionUi) {
 $Completed = $true
 } finally {
     $CleanupErrors = @()
+    if ($FixtureCleanupFailed) { $CleanupErrors += 'Could not verify all owned fixture processes exited' }
     if ($CheckConnectionUi) {
         try { Restore-WebViewPolicy } catch { $CleanupErrors += "WebView2 policy cleanup failed: $($_.Exception.Message)" }
         try { Wait-FixtureGone } catch { $CleanupErrors += $_.Exception.Message }
