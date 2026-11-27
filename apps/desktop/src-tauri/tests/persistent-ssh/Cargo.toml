@@ -1,0 +1,18 @@
+[package]
+name = "persistent-ssh"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+futures-util = { version = "0.3", features = ["sink"] }
+russh = { version = "=0.65.4", default-features = false, features = ["ring"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = "0.29"
+
+[target.'cfg(windows)'.dependencies]
+socket2 = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
