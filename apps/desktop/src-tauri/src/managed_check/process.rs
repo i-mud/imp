@@ -28,6 +28,8 @@ pub(super) fn run(
         cancelled,
         |_| {},
         |_| {},
+        #[cfg(feature = "runtime-acceptance")]
+        None,
     )
 }
 
@@ -37,15 +39,22 @@ pub(crate) fn run_fixture(
     destination: &ManagedDestination,
     deadline: Instant,
     cancelled: &AtomicBool,
-    program: &OsStr,
-    config: &OsStr,
+    (program, config): (&OsStr, &OsStr),
     on_spawn: impl FnOnce(u32),
     on_cleanup: impl FnOnce(Duration),
+    observation: Option<&mut SshObservation>,
 ) -> CheckOutcome {
     let command = ssh_command(destination, Some(config));
     let mut fixture = Command::new(program);
     fixture.args(command.get_args());
-    run_command(&fixture, deadline, cancelled, on_spawn, on_cleanup)
+    run_command(
+        &fixture,
+        deadline,
+        cancelled,
+        on_spawn,
+        on_cleanup,
+        observation,
+    )
 }
 
 fn ssh_command(destination: &ManagedDestination, config: Option<&OsStr>) -> Command {
@@ -90,6 +99,7 @@ fn run_command(
     cancelled: &AtomicBool,
     on_spawn: impl FnOnce(u32),
     on_cleanup: impl FnOnce(Duration),
+    #[cfg(feature = "runtime-acceptance")] mut observation: Option<&mut SshObservation>,
 ) -> CheckOutcome {
     let check = || stop_reason(cancelled.load(Ordering::Acquire), Instant::now(), deadline);
     if let Some(result) = check() {
@@ -109,8 +119,17 @@ fn run_command(
             Ok(child) => child,
             Err(error) => return spawn_outcome(error, check),
         };
+    #[cfg(feature = "runtime-acceptance")]
+    let mut transcript = None;
     let result = match catch_unwind(AssertUnwindSafe(|| {
-        let (result, cleanup_started) = match Duplex::new(&mut child, &owner, cancelled, deadline) {
+        let (result, cleanup_started) = match Duplex::new(
+            &mut child,
+            &owner,
+            cancelled,
+            deadline,
+            #[cfg(feature = "runtime-acceptance")]
+            observation.as_deref_mut(),
+        ) {
             Ok(mut stream) => {
                 on_spawn(stream.child.id());
                 let result = protocol::exchange(&mut stream, deadline);
@@ -119,25 +138,51 @@ fn run_command(
                 } else {
                     result
                 };
-                (
+                let outcome = (
                     check().unwrap_or(result),
                     stream.retirement_started.unwrap_or_else(Instant::now),
-                )
+                );
+                #[cfg(feature = "runtime-acceptance")]
+                if let Some(evidence) = stream.observation.as_deref_mut() {
+                    evidence.app_bytes = stream.received;
+                    transcript = stream
+                        .diagnostic
+                        .take()
+                        .map(|bytes| (bytes, stream.child.id()));
+                }
+                outcome
             }
             Err(_) => (CheckResult::ConnectionFailed, Instant::now()),
         };
 
-        let retired = retire(&owner, &mut child, cleanup_started + DIAGNOSTIC_CLEANUP);
+        let retired = retire(
+            &owner,
+            &mut child,
+            cleanup_started + DIAGNOSTIC_CLEANUP,
+            #[cfg(feature = "runtime-acceptance")]
+            observation.as_deref_mut(),
+        );
         on_cleanup(cleanup_started.elapsed());
         retired.then_some(result)
     })) {
         Ok(result) => result,
         Err(_) => {
             let _ = owner.begin_diagnostic_retirement(&mut child);
+            #[cfg(feature = "runtime-acceptance")]
+            if let Some(evidence) = observation.as_deref_mut() {
+                evidence
+                    .retirement
+                    .get_or_insert(("after_collection", "none"));
+            }
             None
         }
     };
-    finish_exchange(result, owner, child)
+    let outcome = finish_exchange(result, owner, child);
+    #[cfg(feature = "runtime-acceptance")]
+    if let (Some(evidence), Some((bytes, pid))) = (observation, transcript) {
+        evidence.inspect(&bytes, pid);
+    }
+    outcome
 }
 
 fn finish_exchange(
@@ -155,11 +200,25 @@ fn finish_exchange(
     }
 }
 
-fn retire(owner: &RuntimeOwner, child: &mut OwnedChild, deadline: Instant) -> bool {
+fn retire(
+    owner: &RuntimeOwner,
+    child: &mut OwnedChild,
+    deadline: Instant,
+    #[cfg(feature = "runtime-acceptance")] observation: Option<&mut SshObservation>,
+) -> bool {
     retire_owned(
         child,
         deadline,
-        |child| owner.begin_diagnostic_retirement(child),
+        |child| {
+            let result = owner.begin_diagnostic_retirement(child);
+            #[cfg(feature = "runtime-acceptance")]
+            if let Some(evidence) = observation {
+                evidence
+                    .retirement
+                    .get_or_insert(("after_collection", "none"));
+            }
+            result
+        },
         |child| owner.diagnostic_retired(child),
     )
 }
@@ -232,6 +291,8 @@ struct Duplex<'a> {
     owner: &'a RuntimeOwner,
     cancelled: &'a AtomicBool,
     deadline: Instant,
+    #[cfg(feature = "runtime-acceptance")]
+    observation: Option<&'a mut SshObservation>,
 }
 
 impl<'a> Duplex<'a> {
@@ -240,6 +301,7 @@ impl<'a> Duplex<'a> {
         owner: &'a RuntimeOwner,
         cancelled: &'a AtomicBool,
         deadline: Instant,
+        #[cfg(feature = "runtime-acceptance")] observation: Option<&'a mut SshObservation>,
     ) -> io::Result<Self> {
         let (Some(stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
@@ -262,6 +324,8 @@ impl<'a> Duplex<'a> {
             owner,
             cancelled,
             deadline,
+            #[cfg(feature = "runtime-acceptance")]
+            observation,
         })
     }
 
@@ -283,7 +347,29 @@ impl<'a> Duplex<'a> {
             if let Some(status) = self.child.try_wait()? {
                 // The Windows leader can exit before a descendant that holds its pipes.
                 self.retirement_started = Some(now);
-                self.owner.begin_diagnostic_retirement(self.child)?;
+                let retirement = self.owner.begin_diagnostic_retirement(self.child);
+                #[cfg(feature = "runtime-acceptance")]
+                if let Some(evidence) = self.observation.as_deref_mut() {
+                    let phase = if evidence.stdout.eof && evidence.stderr.eof {
+                        ("after_collection", "none")
+                    } else {
+                        (
+                            if evidence.stderr.touched {
+                                "during_collection"
+                            } else {
+                                "before_collection"
+                            },
+                            if retirement.is_ok() {
+                                "possible"
+                            } else {
+                                "unknown"
+                            },
+                        )
+                    };
+                    evidence.exit = Some(status);
+                    evidence.retirement.get_or_insert(phase);
+                }
+                retirement?;
                 self.exit = Some(status);
             }
         }
@@ -298,7 +384,12 @@ impl<'a> Duplex<'a> {
         let mut buffer = [0; STDERR_LIMIT];
         // A continually writing child cannot starve stdout or cancellation.
         for _ in 0..4 {
-            match pipe_read(&mut self.stderr, &mut buffer) {
+            let read = pipe_read(&mut self.stderr, &mut buffer);
+            #[cfg(feature = "runtime-acceptance")]
+            if let Some(evidence) = self.observation.as_deref_mut() {
+                evidence.stderr.observe(&read, true);
+            }
+            match read {
                 Ok(0) => {
                     self.stderr_eof = true;
                     break;
@@ -309,6 +400,10 @@ impl<'a> Duplex<'a> {
                             transcript.extend_from_slice(&buffer[..count]);
                         } else {
                             self.diagnostic = None;
+                            #[cfg(feature = "runtime-acceptance")]
+                            if let Some(evidence) = self.observation.as_deref_mut() {
+                                evidence.stderr_overflow = true;
+                            }
                         }
                     }
                 }
@@ -335,7 +430,12 @@ impl<'a> Duplex<'a> {
                     return None;
                 }
                 if self.stderr_eof {
-                    return ssh_fatal(self.diagnostic.as_deref()?, self.child.id());
+                    let diagnostic = self.diagnostic.as_deref()?;
+                    #[cfg(feature = "runtime-acceptance")]
+                    if let Some(evidence) = self.observation.as_deref_mut() {
+                        evidence.fatal_called = true;
+                    }
+                    return ssh_fatal(diagnostic, self.child.id());
                 }
             }
             pause(self.deadline);
@@ -347,7 +447,12 @@ impl Read for Duplex<'_> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         loop {
             self.pump()?;
-            match pipe_read(&mut self.stdout, bytes) {
+            let read = pipe_read(&mut self.stdout, bytes);
+            #[cfg(feature = "runtime-acceptance")]
+            if let Some(evidence) = self.observation.as_deref_mut() {
+                evidence.stdout.observe(&read, !bytes.is_empty());
+            }
+            match read {
                 Err(error) if retry(&error) => pause(self.deadline),
                 Ok(count) => {
                     self.received |= count != 0;
@@ -460,6 +565,152 @@ fn nonblocking(pipe: &File) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(feature = "runtime-acceptance")]
+#[derive(Default)]
+struct PipeObservation {
+    touched: bool,
+    eof: bool,
+    block: bool,
+    error: bool,
+}
+
+#[cfg(feature = "runtime-acceptance")]
+impl PipeObservation {
+    fn observe(&mut self, read: &io::Result<usize>, nonempty: bool) {
+        self.touched = true;
+        match read {
+            Ok(0) if nonempty => self.eof = true,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => self.block = true,
+            Err(error) if !retry(error) => self.error = true,
+            _ => {}
+        }
+    }
+}
+
+#[cfg(feature = "runtime-acceptance")]
+#[derive(Default)]
+pub(crate) struct SshObservation {
+    stdout: PipeObservation,
+    stderr: PipeObservation,
+    stderr_overflow: bool,
+    app_bytes: bool,
+    exit: Option<ExitStatus>,
+    fatal_called: bool,
+    host_site: bool,
+    auth_site: bool,
+    stdio_site: bool,
+    preamble: bool,
+    final_record: Option<&'static str>,
+    prefix: Option<&'static str>,
+    retirement: Option<(&'static str, &'static str)>,
+}
+
+#[cfg(feature = "runtime-acceptance")]
+impl SshObservation {
+    fn inspect(&mut self, bytes: &[u8], pid: u32) {
+        let mut lines = bytes.split_inclusive(|byte| *byte == b'\n').peekable();
+        while let Some(raw) = lines.next() {
+            let line = std::str::from_utf8(raw)
+                .ok()
+                .and_then(|line| line.strip_suffix('\n'));
+            let mut kind = "malformed";
+            if let Some(line) = line.filter(|line| {
+                !line
+                    .strip_suffix('\r')
+                    .unwrap_or(line)
+                    .chars()
+                    .any(char::is_control)
+            }) {
+                kind = "unrelated";
+                let (level, record) = line
+                    .split_once(": ")
+                    .filter(|(level, _)| matches!(*level, "debug1" | "debug2" | "debug3"))
+                    .unwrap_or(("", line));
+                if let Some((site, message)) = ssh_record(record, pid) {
+                    self.host_site |= site == "sshconnect2.c:verify_host_key_callback";
+                    self.auth_site |= site == "sshconnect2.c:userauth";
+                    self.stdio_site |= site == "ssh.c:ssh_stdio_confirm";
+                    if (level, site) == ("debug2", "sshconnect2.c:userauth")
+                        && matches!(
+                            message,
+                            "we did not send a packet, disable method"
+                                | "we sent a publickey packet, wait for reply"
+                                | "we sent a password packet, wait for reply"
+                                | "we sent a keyboard-interactive packet, wait for reply"
+                                | "we sent a hostbased packet, wait for reply"
+                                | "we sent a gssapi-with-mic packet, wait for reply"
+                                | "we sent a none packet, wait for reply"
+                        )
+                    {
+                        kind = "vetted";
+                    }
+                }
+            }
+            if lines.peek().is_none() && kind != "vetted" {
+                // Test only the final line so a rejected prefix cannot hide an exact-PID fatal.
+                self.final_record = Some(match ssh_fatal(raw, pid) {
+                    Some(CheckResult::HostVerification) => "host_fatal",
+                    Some(CheckResult::Authentication) => "auth_fatal",
+                    Some(CheckResult::ForwardingUnavailable) => "stdio_fatal",
+                    _ => kind,
+                });
+            } else {
+                self.preamble |= kind == "vetted";
+                self.prefix = Some(match (self.prefix, kind) {
+                    (Some("malformed"), _) | (_, "malformed") => "malformed",
+                    (None | Some("vetted"), "vetted") => "vetted",
+                    _ => "unrelated",
+                });
+            }
+        }
+    }
+}
+
+#[cfg(feature = "runtime-acceptance")]
+impl std::fmt::Display for SshObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bit = u8::from;
+        f.write_str("ssh_observation")?;
+        for (name, pipe) in [("stdout", &self.stdout), ("stderr", &self.stderr)] {
+            write!(
+                f,
+                " {name}_eof={} {name}_block={} {name}_error={}",
+                bit(pipe.eof),
+                bit(pipe.block),
+                bit(pipe.error)
+            )?;
+        }
+        write!(
+            f,
+            " stderr_overflow={} app_bytes={} exit=",
+            bit(self.stderr_overflow),
+            bit(self.app_bytes)
+        )?;
+        match self.exit.map(|status| status.code()) {
+            None => f.write_str("unobserved")?,
+            Some(None) => f.write_str("no_code")?,
+            Some(Some(code)) => write!(f, "{code}")?,
+        }
+        let (retirement, interference) = self.retirement.unwrap_or(("none", "none"));
+        write!(
+            f,
+            concat!(
+                " fatal_called={} host_site={} auth_site={} stdio_site={} preamble={}",
+                " final={} prefix={} retirement={} interference={}"
+            ),
+            bit(self.fatal_called),
+            bit(self.host_site),
+            bit(self.auth_site),
+            bit(self.stdio_site),
+            bit(self.preamble),
+            self.final_record.unwrap_or("missing"),
+            self.prefix.unwrap_or("missing"),
+            retirement,
+            interference,
+        )
+    }
 }
 
 fn ssh_fatal(bytes: &[u8], pid: u32) -> Option<CheckResult> {
@@ -679,6 +930,8 @@ mod tests {
                         panic!("injected failure after spawn");
                     },
                     |_| {},
+                    #[cfg(feature = "runtime-acceptance")]
+                    None,
                 )
             },
         );
@@ -844,6 +1097,37 @@ mod tests {
             .collect();
         assert!(args.contains(&"StrictHostKeyChecking=yes"));
         assert_eq!(&args[args.len() - 2..], ["--", "fixture-alias"]);
+    }
+
+    #[cfg(feature = "runtime-acceptance")]
+    #[test]
+    fn observation_distinguishes_rejected_fatal_from_absent_fatal() {
+        let fatal = b"ssh.c:ssh_stdio_confirm():1887 (pid=42): stdio forwarding failed\n";
+        let preamble = b"debug2: sshconnect2.c:userauth():561 (pid=42): we sent a publickey packet, wait for reply\r\n";
+        let bytes = &[preamble.as_slice(), b"unvetted prefix\n", fatal].concat();
+        assert_eq!(ssh_fatal(bytes, 42), None);
+
+        let mut rejected = SshObservation::default();
+        rejected.inspect(bytes, 42);
+        assert!(rejected.auth_site && rejected.stdio_site && rejected.preamble);
+        assert_eq!(rejected.final_record, Some("stdio_fatal"));
+        assert_eq!(rejected.prefix, Some("unrelated"));
+
+        let mut wrong_pid = SshObservation::default();
+        wrong_pid.inspect(fatal, 41);
+        assert!(!wrong_pid.stdio_site);
+        assert_eq!(wrong_pid.final_record, Some("unrelated"));
+
+        let mut incomplete = SshObservation::default();
+        incomplete.inspect(&fatal[..fatal.len() - 1], 42);
+        assert!(!incomplete.stdio_site);
+        assert_eq!(incomplete.final_record, Some("malformed"));
+
+        let mut absent = SshObservation::default();
+        absent.inspect(preamble, 42);
+        assert!(absent.preamble && !absent.stdio_site);
+        assert_eq!(absent.final_record, None);
+        assert_eq!(absent.prefix, Some("vetted"));
     }
 
     #[test]

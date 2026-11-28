@@ -40,6 +40,29 @@ if os.name == "nt":
 
 
 EVIDENCE_LIMIT = 16 * 1024
+MANAGED_LOG_LIMIT = 64 * 1024
+OBSERVED_CASES = ("forwarding-denied", "relay-absent")
+MANAGED_RESULTS = (
+    "invalid_destination", "ssh_unavailable", "live", "stale", "down", "no_usable_state",
+    "host_verification", "authentication", "forwarding_unavailable", "invalid_protocol",
+    "timeout", "cancelled", "connection_failed", "busy", "retirement_unconfirmed",
+)
+SSH_OBSERVATION = re.compile(
+    r"ssh_observation stdout_eof=[01] stdout_block=[01] stdout_error=[01]"
+    r" stderr_eof=[01] stderr_block=[01] stderr_error=[01] stderr_overflow=[01] app_bytes=[01]"
+    r" exit=(unobserved|no_code|0|-?[1-9][0-9]{0,9})"
+    r" fatal_called=[01] host_site=[01] auth_site=[01] stdio_site=[01] preamble=[01]"
+    r" final=(?:missing|host_fatal|auth_fatal|stdio_fatal|unrelated|malformed)"
+    r" prefix=(?:missing|vetted|unrelated|malformed)"
+    r" retirement=(?:none|before_collection|during_collection|after_collection)"
+    r" interference=(?:none|possible|unknown)"
+)
+DIRECT_TARGET = rb"127\.0\.0\.1 port 8787"
+ORIGINATOR = rb"originator [!-~]{1,100} port [0-9]{1,5}, target " + DIRECT_TARGET
+AUTH_ACCEPTED = rb"Accepted publickey for ([a-zA-Z0-9._-]+) from 127\.0\.0\.1 port ([0-9]{1,5}) ssh2(?:: .+)?"
+SERVER_SESSION = rb"Connection from 127\.0\.0\.1 port ([0-9]{1,5}) on 127\.0\.0\.1 port [0-9]{1,5}"
+DIRECT_HEADER = rb"server_input_channel_open: ctype [!-~]+ rchan [0-9]+ win [0-9]+ max [0-9]+"
+DIRECT_CHANNEL = rb"channel ([0-9]+): new (?:direct-tcpip )?\[direct-tcpip\](?: \(inactive timeout: [0-9]+\))?"
 VERSION = rb"[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}(?:p[0-9]{1,3})?"
 PHASES = ("tools", "account-context", "key-generation", "key-acl", "server-config",
           "server-listener", "installed-alias", "independent-forward", "installed-listeners", "ready")
@@ -122,18 +145,122 @@ EVIDENCE = {
 }
 
 
-def evidence_lines(data):
+def evidence_lines(data, limit=EVIDENCE_LIMIT):
     # Match complete printable lines only; never render input from OpenSSH.
-    for line in data[:EVIDENCE_LIMIT].split(b"\n")[:-1]:
+    for line in data[:limit].split(b"\n")[:-1]:
         line = line.removesuffix(b"\r")
         if re.fullmatch(rb"[ -~]{1,512}", line):
             yield line
 
 
-def diagnostic_lines(data):
-    for line in evidence_lines(data):
+def diagnostic_lines(data, limit=EVIDENCE_LIMIT):
+    for line in evidence_lines(data, limit):
         yield re.sub(rb"^(?:debug[123]|error|fatal): ", b"", line).removesuffix(b" [preauth]")
 
+
+def client_observation(stdout):
+    observed = [line for line in stdout if line.startswith("ssh_observation")]
+    if len(observed) != 1 or not (match := SSH_OBSERVATION.fullmatch(observed[0])):
+        return None
+    code = match[1]
+    if code not in ("unobserved", "no_code") and not -0x80000000 <= int(code) <= 0x7FFFFFFF:
+        return None
+    return observed[0]
+
+
+def managed_server_evidence(data, username):
+    # One fresh client in this window; the independent connection issues no requests here.
+    login = username.encode("ascii").lower()
+    events = [line.removeprefix(b"user: " + login + b": ") for line in diagnostic_lines(data, MANAGED_LOG_LIMIT)]
+    sessions = [(i, match[1]) for i, line in enumerate(events) if (match := re.fullmatch(SERVER_SESSION, line))]
+    auth = [(i, match[1].lower(), match[2]) for i, line in enumerate(events)
+            if (match := re.fullmatch(AUTH_ACCEPTED, line))]
+    headers = [i for i, line in enumerate(events) if re.fullmatch(DIRECT_HEADER, line)]
+    request_prefix = b"server_request_direct_tcpip: "
+    targets = [(i, line[len(request_prefix):]) for i, line in enumerate(events)
+               if re.fullmatch(request_prefix + ORIGINATOR, line)]
+    if any(len(records) > 1 for records in (sessions, auth, headers, targets)):
+        return "log=ambiguous"
+    accepted = bool(auth and auth[0][1] == login)
+    correlated = (
+        accepted and sessions and headers and targets and sessions[0][1] == auth[0][2]
+        and sessions[0][0] < auth[0][0] < headers[0] < targets[0][0]
+        and events[headers[0]].startswith(b"server_input_channel_open: ctype direct-tcpip ")
+    )
+    scope = "session" if correlated else "case-window"
+    evidence = f"log=sampled scope={scope} publickey={'observed' if accepted else 'unobserved'}"
+    if not targets:
+        return evidence + " direct_tcpip=unobserved"
+
+    at, originator = targets[0]
+    events = events[at + 1:]
+    channels = [(i, match[1]) for i, line in enumerate(events) if (match := re.fullmatch(DIRECT_CHANNEL, line))]
+    denied = b"refused local port forward: " + originator in events or any(re.fullmatch(
+        rb"Received request from 127\.0\.0\.1 port "
+        + (auth[0][2] if scope == "session" else rb"[0-9]{1,5}")
+        + rb" to connect to host " + DIRECT_TARGET + rb", but the request was denied\.", line,
+    ) for line in events)
+    opened = b"send packet: type 91" in events
+    refused = b"send packet: type 92" in events
+    if len(channels) > 1 or (opened and refused):
+        return "log=ambiguous"
+    connected = closed = False
+    if channels:
+        at, channel_id = channels[0]
+        channel = b"channel " + channel_id + b": "
+        channel_events = events[at + 1:]
+        connected = channel + b"connected to 127.0.0.1 port 8787" in channel_events
+        if b"send packet: type 91" in channel_events:
+            after_open = channel_events[channel_events.index(b"send packet: type 91") + 1:]
+            closed = channel + b"rcvd close" in after_open or any(
+                re.fullmatch(channel + rb"send close(?: for remote id [0-9]+)?", line)
+                and b"send packet: type 97" in after_open[i + 1:] for i, line in enumerate(after_open)
+            )
+    failed = any(re.fullmatch(rb"(?:connect_to " + DIRECT_TARGET + rb": failed\.|connect to "
+                              + DIRECT_TARGET + rb" failed: .+)", line) for line in events)
+    tcp = "unobserved" if connected == failed else "connected" if connected else "failed"
+    return (
+        f"{evidence} direct_tcpip=observed policy_denial={'observed' if denied else 'unobserved'} "
+        f"ssh_open={'accepted' if opened else 'refused' if refused else 'unobserved'} "
+        f"ssh_close={'observed' if closed else 'unobserved'} target_tcp={tcp}"
+    )
+
+
+def relay_listener_evidence():
+    try:
+        return "present" if listening(8787) else "absent"
+    except (OSError, ValueError, struct.error):
+        return "unavailable"
+
+
+@contextmanager
+def observe_managed_server(log, label, username):
+    before = relay_listener_evidence() if label == "relay-absent" else None
+    try:
+        start = log.seek(0, os.SEEK_END)
+        log.seek(max(0, start - 1))
+        boundary = not start or log.read(1) == b"\n"
+    except OSError:
+        start = None
+    try:
+        yield
+    finally:
+        after = relay_listener_evidence() if before is not None else None
+        evidence = "log=unavailable"
+        if start is not None:
+            try:
+                log.seek(start)
+                data = log.read(MANAGED_LOG_LIMIT + 1)
+            except OSError:
+                pass
+            else:
+                if len(data) > MANAGED_LOG_LIMIT:
+                    evidence = "log=limit-exceeded"
+                else:
+                    evidence = managed_server_evidence(data if boundary else data.partition(b"\n")[2], username)
+        if before is not None:
+            evidence += f" relay_listener_before={before} relay_listener_after={after}"
+        print(f"{sys.platform} {label}: sshd_observation {evidence}", flush=True)
 
 def classify_evidence(data, side):
     found = set()
@@ -489,6 +616,7 @@ class WindowsStartup:
     def __init__(self, installed_root=None):
         self.installed_root = installed_root
         self.correct_independent = None
+        self.managed_log = None
         self.summary = {"phase": "tools", "config": "not-checked", "observation": "error"}
         for side in EVIDENCE:
             self.summary[side] = ["unidentified"]
@@ -863,7 +991,10 @@ LogLevel DEBUG3
         finally:
             startup.observe("server", log, root=root, login=identity)
         startup.summary["config"] = "accepted"
-    with tempfile.TemporaryFile() as log:
+    # Read through an independent handle; seeking sshd's inherited writer can move its write offset.
+    with tempfile.NamedTemporaryFile() as log, os.fdopen(
+        os.open(log.name, os.O_RDONLY | os.O_BINARY | os.O_TEMPORARY), "rb",
+    ) as reader:
         process = None
         try:
             with startup.stage("server-listener"):
@@ -875,7 +1006,7 @@ LogLevel DEBUG3
                 nonlocal fingerprint
                 paths = {role: root / name for role, name in PERMISSION_ROLES.items()}
                 _, reports, _ = permission_reports(
-                    evidence_tail(log), paths, os.environ.get("ProgramData"),
+                    evidence_tail(reader), paths, os.environ.get("ProgramData"),
                     prove_authorized=lambda path: same_authorized_file(root, path),
                 )
                 report = reports.get("authorized-keys")
@@ -887,12 +1018,14 @@ LogLevel DEBUG3
                 return fingerprint is not None
 
             startup.correct_independent = correct
+            startup.managed_log = reader
             yield username, port, jump_target, permit, [sys.executable, "-u", str(ENDPOINT)]
         finally:
             startup.correct_independent = None
+            startup.managed_log = None
             try:
                 if startup.summary["phase"] != "ready":
-                    startup.observe("server", log, root=root, login=identity, server_process=process)
+                    startup.observe("server", reader, root=root, login=identity, server_process=process)
             finally:
                 if process is not None:
                     stop(process)
@@ -995,15 +1128,32 @@ def endpoint(command, mode, log_path):
 
 
 def check(harness, root, label, config, destination, expected, audit, *, control=None,
-          ssh_stall=None, occupied=None):
+          ssh_stall=None, occupied=None, server_observation=None):
     audit_path, release = audit if audit is not None else (None, None)
     killed_at = None
     log_path = root / f"{label}.stdout"
     error_path = root / f"{label}.stderr"
+    observe = label in OBSERVED_CASES
+
+    def read_stdout():
+        if not observe:
+            return lines(log_path)
+        with log_path.open("rb") as file:
+            data = file.read(EVIDENCE_LIMIT + 1)
+        if len(data) > EVIDENCE_LIMIT:
+            return [""]
+        complete = data.split(b"\n")
+        return [line.removesuffix(b"\r").decode("ascii", errors="replace") for line in complete[:-1]] + (
+            [""] if complete[-1] else []
+        )
+
     started = time.monotonic()
-    with log_path.open("wb") as log, error_path.open("wb") as error:
+    with log_path.open("wb") as log, error_path.open("wb") as error, ExitStack() as observation:
+        if server_observation is not None:
+            observation.enter_context(server_observation)
         process = subprocess.Popen(
-            [harness, "managed-check", openssh("ssh"), config, json.dumps(destination)],
+            [harness, "managed-check", openssh("ssh"), config, json.dumps(destination)]
+            + (["--observe-ssh"] if observe else []),
             cwd=root, env=ENV, stdin=subprocess.PIPE, stdout=log, stderr=error,
         )
         try:
@@ -1037,7 +1187,7 @@ def check(harness, root, label, config, destination, expected, audit, *, control
                         release()
 
                 if expected is not None:
-                    wait_until(lambda: any(line.startswith("result ") for line in lines(log_path)),
+                    wait_until(lambda: any(line.startswith("result ") for line in read_stdout()),
                                f"{label} result")
                 elapsed = time.monotonic() - started
                 if not process.stdin.closed:
@@ -1046,13 +1196,26 @@ def check(harness, root, label, config, destination, expected, audit, *, control
                 assert (result == 0) == (control != "kill"), (label, result)
                 if exited is not None:
                     wait_until(exited, f"{label} exact SSH exit")
-            stdout = lines(log_path)
+            observation.close()
+            stdout = read_stdout()
             result_lines = [line for line in stdout if line.startswith("result ")]
             cleanup_lines = [line for line in stdout if line.startswith("cleanup_us ")]
+            if observe:
+                client = client_observation(stdout)
+                actual = result_lines[0][7:] if len(result_lines) == 1 else None
+                actual = actual if actual in MANAGED_RESULTS else "unobserved"
+                print(f"{sys.platform} {label}: {client or 'ssh_observation missing-or-invalid'} result={actual}",
+                      flush=True)
+                assert client is not None, f"{label} expected one valid SSH observation"
+                stdout.remove(client)
+                assert all(re.fullmatch(r"(?:pid|cleanup_us) [0-9]{1,39}", line) for line in stdout
+                           if not line.startswith("result ")), f"{label} unexpected harness output"
             assert all(line.startswith(("pid ", "result ", "cleanup_us ")) for line in stdout), (
                 label, "unexpected harness output",
             )
-            assert result_lines == ([f"result {expected}"] if expected else []), (label, result_lines)
+            assert result_lines == ([f"result {expected}"] if expected else []), (
+                label, actual if observe else result_lines,
+            )
             assert len(cleanup_lines) == (killed_at is None), (label, "missing or extra retirement measurement")
             assert not error_path.stat().st_size, f"{label} leaked diagnostic stderr"
             if expected == "timeout":
@@ -1102,8 +1265,10 @@ def exercise(harness, root, server, startup=None):
             }}
             with ExitStack() as endpoints:
                 audit = endpoints.enter_context(endpoint(backend, mode, root / f"{label}.audit")) if mode else None
+                observation = (observe_managed_server(startup.managed_log, label, username)
+                               if startup and label in OBSERVED_CASES else None)
                 check(harness, root, label, config, destination, expected, audit,
-                      control=control, ssh_stall=ssh_stall, occupied=occupied)
+                      control=control, ssh_stall=ssh_stall, occupied=occupied, server_observation=observation)
             assert (config.read_bytes(), known_hosts.read_bytes()) == original, f"{label} changed SSH files"
 
     assert not listening(8789), "stock diagnostic port must be free before the fixture"
