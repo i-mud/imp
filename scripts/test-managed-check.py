@@ -50,6 +50,16 @@ PERMISSION_ROLES = {
 PERMISSION_SNAPSHOT_ROLES = ("authorized-keys", "host-key", "client-key")
 PERMISSION_PATH_FORMS = ("drive", "openssh-realpath", "extended-length", "cygdrive", "program-data",
                          "repeated-separators", "other")
+PERMISSION_LOCATIONS = ("within-fixture-root", "fixture-directory-component", "outside-fixture-root", "relative")
+PERMISSION_BASENAMES = (*PERMISSION_ROLES, "default-admin-key-list", "other")
+PERMISSION_SHAPE_LIMIT = 4
+INSPECTOR_SCRIPT_STATUSES = ("completed", "invalid-request", "fixture-root-unavailable", "fixture-root-redirected",
+                             "descriptor-api-unavailable", "current-token-unavailable")
+INSPECTOR_STATUSES = (*INSPECTOR_SCRIPT_STATUSES, "execution-policy", "process-failed", "launch-failed",
+                      "timed-out", "invalid-output")
+DESCRIPTOR_STATUSES = ("read", "unavailable", "missing", "file-unavailable", "not-ordinary-file",
+                       "access-denied", "native-read-failed", "descriptor-decode-failed",
+                       "descriptor-enumeration-failed", "invalid-output")
 PERMISSION_REPORTS = {
     "rejected-ace": rb"Bad permissions\. Try removing permissions for user: .+? "
                     rb"(?:\((?P<sid>S-1(?:-[0-9]{1,20}){2,16})\) )?on file (?P<path>.+)\.",
@@ -164,8 +174,28 @@ def permission_reports(data, paths, program_data=None):
         return path, "other"
 
     known = {windows_path(str(path))[0]: role for role, path in paths.items()}
+    fixture_root = windows_path(str(paths["fixture-directory"]))[0] if "fixture-directory" in paths else None
+    fixture_component = ntpath.basename(fixture_root) if fixture_root else None
+    basenames = {
+        **{ntpath.basename(name): role for role, name in PERMISSION_ROLES.items() if name != "."},
+        "administrators_authorized_keys": "default-admin-key-list",
+    }
+
+    def path_shape(path):
+        components = ntpath.splitdrive(path)[1].strip("\\").split("\\")
+        if not ntpath.isabs(path):
+            location = "relative"
+        elif fixture_root and path.startswith(fixture_root.rstrip("\\") + "\\"):
+            location = "within-fixture-root"
+        elif fixture_component and fixture_component in components[:-1]:
+            location = "fixture-directory-component"
+        else:
+            location = "outside-fixture-root"
+        return basenames.get(ntpath.basename(path), "other"), location, min(len(components), 16)
+
     templates = set()
     reports = {}
+    unmatched = []
     for line in diagnostic_lines(data):
         for reason, pattern in PERMISSION_REPORTS.items():
             if match := re.fullmatch(pattern, line):
@@ -176,47 +206,85 @@ def permission_reports(data, paths, program_data=None):
                     if (role := known.get(path)) and (role not in reports or reason == "rejected-ace"):
                         sid = groups.get("sid")
                         reports[role] = {"reason": reason, "pathForm": form, "sid": sid.decode("ascii") if sid else None}
+                    if not role and len(unmatched) < PERMISSION_SHAPE_LIMIT:
+                        basename, location, count = path_shape(path)
+                        shape = {"template": reason, "pathForm": form, "basename": basename,
+                                 "location": location, "components": count}
+                        if shape not in unmatched:
+                            unmatched.append(shape)
                 break
-    return sorted(templates), reports
-def inspect_permissions(root, login, server_process, templates, reports):
+    return sorted(templates), reports, unmatched
+
+
+def inspect_permissions(root, login, server_process, templates, reports, unmatched):
     executable = openssh("sshd").parent.parent / "WindowsPowerShell" / "v1.0" / "powershell.exe"
     pid = server_process.pid if server_process is not None and server_process.poll() is None else None
     roles = reports.keys() or PERMISSION_SNAPSHOT_ROLES
     paths = {role: reports.get(role, {}).get("sid") for role in roles}
     request = {"root": str(root), "login": login, "serverPid": pid, "paths": paths, "limit": ACE_LIMIT}
+    result = {}
+    status = "invalid-output"
     try:
-        with tempfile.TemporaryFile() as output:
-            subprocess.run(
-                [executable, "-NoProfile", "-NonInteractive", "-File", SCRIPTS / "inspect-managed-check-acl.ps1"],
-                input=json.dumps(request).encode("ascii"), stdout=output, stderr=subprocess.DEVNULL,
-                check=True, timeout=10,
-            )
-            output.seek(0)
-            data = output.read(EVIDENCE_LIMIT + 1)
-        result = json.loads(data) if len(data) <= EVIDENCE_LIMIT else None
-    except (OSError, ValueError, RecursionError, subprocess.SubprocessError):
-        result = None
-    if not isinstance(result, dict):
-        result = {}
+        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as error:
+            try:
+                subprocess.run(
+                    [executable, "-NoProfile", "-NonInteractive", "-File", SCRIPTS / "inspect-managed-check-acl.ps1"],
+                    input=json.dumps(request).encode("ascii"), stdout=output, stderr=error,
+                    check=True, timeout=10,
+                )
+            except subprocess.CalledProcessError:
+                error.seek(0)
+                diagnostic = error.read(EVIDENCE_LIMIT).lower()
+                status = "execution-policy" if (
+                    b"pssecurityexception" in diagnostic or b"running scripts is disabled" in diagnostic
+                    or b"not digitally signed" in diagnostic
+                ) else "process-failed"
+            else:
+                output.seek(0)
+                data = output.read(EVIDENCE_LIMIT + 1)
+                payload = json.loads(data) if len(data) <= EVIDENCE_LIMIT else None
+                if isinstance(payload, dict) and payload.get("status") in INSPECTOR_SCRIPT_STATUSES:
+                    status = payload["status"]
+                    result = payload
+    except subprocess.TimeoutExpired:
+        status = "timed-out"
+    except OSError:
+        status = "launch-failed"
+    except (ValueError, RecursionError):
+        pass
     identities = result.get("identities", {})
-    descriptors = result.get("descriptors", {})
+    files = result.get("files", {})
     permissions = {
         "templates": templates,
+        "unmatched": unmatched,
+        "inspector": status,
         "identities": {role: identities.get(role) if isinstance(identities, dict) else None for role in IDENTITY_ROLES},
         "files": {
             role: {
                 "reason": reports.get(role, {}).get("reason"),
                 "pathForm": reports.get(role, {}).get("pathForm"),
-                "descriptor": descriptors.get(role) if isinstance(descriptors, dict) else None,
+                "status": "unavailable",
+                "descriptor": None,
             }
             for role in roles
         },
     }
+    if status == "completed" and isinstance(files, dict) and files.keys() == set(roles):
+        for role, file in files.items():
+            if isinstance(file, dict) and file.keys() == {"status", "descriptor"}:
+                permissions["files"][role].update(file)
+            else:
+                permissions["files"][role]["status"] = "invalid-output"
+                permissions["inspector"] = "invalid-output"
+    elif status == "completed":
+        permissions["inspector"] = "invalid-output"
     try:
         render_permissions(permissions)
     except (AttributeError, KeyError, TypeError, ValueError):
+        permissions["inspector"] = "invalid-output"
         permissions["identities"] = dict.fromkeys(IDENTITY_ROLES)
         for report in permissions["files"].values():
+            report["status"] = "unavailable"
             report["descriptor"] = None
     return permissions
 
@@ -238,7 +306,7 @@ def render_permissions(permissions):
             return value
         raise ValueError
 
-    fields(permissions, "templates", "identities", "files")
+    fields(permissions, "templates", "unmatched", "inspector", "identities", "files")
     templates = permissions["templates"]
     if not isinstance(templates, list) or not 1 <= len(templates) <= len(PERMISSION_REPORTS) or any(
         template not in PERMISSION_REPORTS for template in templates
@@ -249,7 +317,24 @@ def render_permissions(permissions):
     fields(identities, *IDENTITY_ROLES)
     if not isinstance(files, dict) or not files or not files.keys() <= PERMISSION_ROLES.keys():
         raise ValueError
+    if permissions["inspector"] not in INSPECTOR_STATUSES:
+        raise ValueError
     output = ["  permission templates: " + ",".join(templates)]
+    output.append(f"  permission inspector: {permissions['inspector']}")
+    unmatched = permissions["unmatched"]
+    if not isinstance(unmatched, list) or len(unmatched) > PERMISSION_SHAPE_LIMIT:
+        raise ValueError
+    for shape in unmatched:
+        fields(shape, "template", "pathForm", "basename", "location", "components")
+        if (shape["template"] not in templates or shape["pathForm"] not in PERMISSION_PATH_FORMS
+                or shape["basename"] not in PERMISSION_BASENAMES or shape["location"] not in PERMISSION_LOCATIONS):
+            raise ValueError
+        count = number(shape["components"], 16)
+        output.append(
+            f"  unmatched permission path: template={shape['template']}; form={shape['pathForm']}; "
+            f"basename-role={shape['basename']}; location={shape['location']}; "
+            f"components={'16+' if count == 16 else count}"
+        )
     unattributed = all(isinstance(report, dict) and report.get("reason") is None for report in files.values())
     if unattributed:
         if set(files) != set(PERMISSION_SNAPSHOT_ROLES):
@@ -260,7 +345,7 @@ def render_permissions(permissions):
         for role in IDENTITY_ROLES
     ) + "; auth-child-token=not-observed")
     for role, report in files.items():
-        fields(report, "reason", "pathForm", "descriptor")
+        fields(report, "reason", "pathForm", "status", "descriptor")
         reason = report["reason"]
         form = report["pathForm"]
         if unattributed and reason is None and form is None:
@@ -270,8 +355,12 @@ def render_permissions(permissions):
         else:
             raise ValueError
         descriptor = report["descriptor"]
+        status = report["status"]
+        if status not in DESCRIPTOR_STATUSES or (status == "read") != (descriptor is not None):
+            raise ValueError
+        prefix += f"; descriptor-read={status}"
         if descriptor is None:
-            output.append(prefix + "; unavailable")
+            output.append(prefix)
             continue
         fields(descriptor, "owner", "control", "reportedSidMatches", "aceCount", "aces")
         owner = principals(descriptor["owner"]) if descriptor["owner"] is not None else "not-observed"
@@ -425,10 +514,10 @@ class WindowsStartup:
         self.summary.pop("permissions", None)
         if "key-permissions" in self.summary[side]:
             root = root.resolve()
-            templates, reports = permission_reports(
+            templates, reports, unmatched = permission_reports(
                 data, {role: root / name for role, name in PERMISSION_ROLES.items()}, os.environ.get("ProgramData"),
             )
-            self.summary["permissions"] = inspect_permissions(root, login, server_process, templates, reports)
+            self.summary["permissions"] = inspect_permissions(root, login, server_process, templates, reports, unmatched)
 
     def publish(self):
         if self.installed_root is None:

@@ -207,14 +207,14 @@ class StartupEvidenceTest(unittest.TestCase):
             "debug3: Bad owner on C:/fixture space/host_key.bak\n"
             "debug3: failed to retrieve the owner sid and dacl of file C:/fixture space/host_key with error code: 5"
         ).encode("ascii")
-        self.assertEqual(reports(data, paths), (["bad-ownership-or-modes", "rejected-ace", "rejected-owner"], {
+        self.assertEqual(reports(data, paths)[:2], (["bad-ownership-or-modes", "rejected-ace", "rejected-owner"], {
             "authorized-keys": {"reason": "rejected-ace", "pathForm": "extended-length", "sid": sid},
             "host-key": {"reason": "rejected-owner", "pathForm": "drive", "sid": None},
             "fixture-directory": {"reason": "bad-ownership-or-modes", "pathForm": "drive", "sid": None},
         }))
         self.assertEqual(reports(
             b"error: Could not open authorized keys 'C:/Fixture Space/authorized_keys': Permission denied\n", paths,
-        ), (["access-denied"], {"authorized-keys": {"reason": "access-denied", "pathForm": "drive", "sid": None}}))
+        ), (["access-denied"], {"authorized-keys": {"reason": "access-denied", "pathForm": "drive", "sid": None}}, []))
         self.assertFalse(reports(data, {"authorized-keys": r"C:\another\authorized_keys"})[1])
 
     def test_permission_templates_do_not_turn_labels_or_aliases_into_path_attribution(self):
@@ -231,7 +231,7 @@ class StartupEvidenceTest(unittest.TestCase):
                     f"debug3: Bad owner on {path} [preauth]\r\n".encode(), paths, r"D:\ProgramData",
                 ), (["rejected-owner"], {"authorized-keys": {
                     "reason": "rejected-owner", "pathForm": form, "sid": None,
-                }}))
+                }}, []))
         self.assertEqual(reports(
             b"Authentication refused. [preauth]\r\n"
             b"debug1: Ignored authorized keys [preauth]\r\n"
@@ -239,7 +239,27 @@ class StartupEvidenceTest(unittest.TestCase):
             b"Ignored /cygdrive/e/ProgramData/Fixture Space/authorized_keys: bad ownership or modes\n"
             b"Bad owner on __PROGRAMDATA__/Fixture Space/authorized_keys\n",
             paths,
-        ), (["auth-strict-refused", "ignored-authorized-keys", "ignored-path-modes", "rejected-owner"], {}))
+        )[:2], (["auth-strict-refused", "ignored-authorized-keys", "ignored-path-modes", "rejected-owner"], {}))
+
+    def test_unmatched_permission_paths_emit_roles_and_shape_without_private_components(self):
+        reports = FIXTURE["permission_reports"]
+        paths = {"fixture-directory": r"D:\private-root", "authorized-keys": r"D:\private-root\authorized_keys"}
+        templates, attributed, shapes = reports((
+            b"Bad owner on D:/private-root/private-child/authorized_keys\n"
+            b"Bad owner on E:/extra-private/private-root/authorized_keys\n"
+            b"Bad owner on __PROGRAMDATA__/ssh/administrators_authorized_keys\n"
+            b"Bad owner on private-component/private-filename\n"
+            b"Bad owner on extra-unique-fifth\n"
+        ), paths, r"D:\ProgramData")
+        self.assertEqual(templates, ["rejected-owner"])
+        self.assertFalse(attributed)
+        self.assertEqual([(s["basename"], s["location"], s["components"]) for s in shapes], [
+            ("authorized-keys", "within-fixture-root", 3),
+            ("authorized-keys", "fixture-directory-component", 3),
+            ("default-admin-key-list", "outside-fixture-root", 3),
+            ("other", "relative", 2),
+        ])
+        self.assertNotIn("private-", json.dumps(shapes))
 
     def test_observation_correlates_a_sanitized_raw_descriptor_or_marks_it_unavailable(self):
         inspect = FIXTURE["inspect_permissions"]
@@ -263,8 +283,9 @@ class StartupEvidenceTest(unittest.TestCase):
                 f"on file {root / 'authorized_keys'}.\n"
             ).encode("ascii")
             payload = {
+                "status": "completed",
                 "identities": dict.fromkeys(owner, owner),
-                "descriptors": {"authorized-keys": descriptor},
+                "files": {"authorized-keys": {"status": "read", "descriptor": descriptor}},
             }
 
             expected_paths = {"authorized-keys": sid}
@@ -272,7 +293,7 @@ class StartupEvidenceTest(unittest.TestCase):
             def run(argv, **options):
                 self.assertEqual(argv[0].name, "powershell.exe")
                 self.assertEqual(argv[-1].name, "inspect-managed-check-acl.ps1")
-                self.assertEqual(options["stderr"], subprocess.DEVNULL)
+                self.assertIsNotNone(options["stderr"])
                 self.assertEqual(json.loads(options["input"]), {
                     "root": str(root), "login": login, "serverPid": 41,
                     "paths": expected_paths,
@@ -306,24 +327,60 @@ class StartupEvidenceTest(unittest.TestCase):
                 descriptor["untrusted"] = sid
                 startup.observe("server", io.BytesIO(data), root=root, login=login, server_process=process)
                 startup.publish()
-                self.assertIn("snapshot=after-rejection; unavailable", read_evidence(root))
+                self.assertIn("permission inspector: invalid-output", read_evidence(root))
                 self.assertNotIn(sid, (root / "startup-evidence.json").read_text(encoding="ascii"))
 
                 run_inspector.reset_mock()
                 expected_paths = dict.fromkeys(("authorized-keys", "host-key", "client-key"))
-                payload["descriptors"] = {role: {
+                payload["files"] = dict.fromkeys(expected_paths, {"status": "read", "descriptor": {
                     "owner": owner, "control": 0x9004, "aceCount": 0, "reportedSidMatches": None, "aces": [],
-                } for role in expected_paths}
+                }})
+                payload["files"]["client-key"] = {"status": "missing", "descriptor": None}
                 startup.observe("server", io.BytesIO(b"debug3: Bad owner on C:/outside/authorized_keys\n"),
                                 root=root, login=login, server_process=process)
                 startup.publish()
                 run_inspector.assert_called_once()
                 rendered = read_evidence(root)
                 self.assertIn("permission templates: rejected-owner", rendered)
+                self.assertIn("permission inspector: completed", rendered)
+                self.assertIn("basename-role=authorized-keys; location=outside-fixture-root", rendered)
                 self.assertIn("no known fixture path matched; snapshots are not attribution", rendered)
                 for role in expected_paths:
                     self.assertIn(f"descriptor {role}: rejection=not-attributed; snapshot=after-rejection", rendered)
+                self.assertIn("snapshot=after-rejection; descriptor-read=missing", rendered)
                 self.assertNotIn("C:/outside", rendered)
+
+    def test_inspector_classifies_failure_without_rendering_stderr_or_paths(self):
+        inspect = FIXTURE["inspect_permissions"]
+        marker = b"private inspector error"
+        startup = FIXTURE["WindowsStartup"]()
+
+        def run(argv, **options):
+            if error is None:
+                options["stdout"].write(output)
+                return
+            options["stderr"].write(output)
+            if error is OSError:
+                raise OSError(marker)
+            raise error(1, argv)
+
+        for error, output, status in (
+            (None, b'{"status":"fixture-root-unavailable"}', "fixture-root-unavailable"),
+            (None, marker, "invalid-output"),
+            (subprocess.CalledProcessError, marker + b" PSSecurityException", "execution-policy"),
+            (subprocess.CalledProcessError, marker, "process-failed"),
+            (subprocess.TimeoutExpired, marker, "timed-out"),
+            (OSError, marker, "launch-failed"),
+        ):
+            with self.subTest(status=status), patch.dict(inspect.__globals__, {
+                "openssh": lambda name: Path("System32/OpenSSH") / (name + ".exe"),
+            }), patch("subprocess.run", side_effect=run):
+                startup.summary["permissions"] = inspect(
+                    Path("private-root"), "private-login", None, ["rejected-owner"], {}, [],
+                )
+                rendered = FIXTURE["render_evidence"](startup.summary)
+                self.assertIn(f"permission inspector: {status}", rendered)
+                self.assertNotIn("private", rendered)
 
     def test_independent_relay_probe_requires_the_live_health_response(self):
         probe = FIXTURE["probe_relay"]

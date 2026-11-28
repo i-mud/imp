@@ -1,6 +1,15 @@
 # Invoked only by the hosted Managed fixture after an sshd permission rejection.
 $ErrorActionPreference = 'Stop'
-$request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+function Stop-Inspection($status) {
+    @{ status = $status } | ConvertTo-Json -Compress
+    exit
+}
+
+try {
+    $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+} catch {
+    Stop-Inspection 'invalid-request'
+}
 $names = @{
     'fixture-directory' = '.'
     'server-config' = 'sshd.config'
@@ -8,13 +17,21 @@ $names = @{
     'authorized-keys' = 'authorized_keys'
     'client-key' = 'client_key'
 }
-$root = Get-Item -LiteralPath $request.root -Force
+if (!$request.paths -or !$request.root -or $request.limit -lt 1 -or $request.limit -gt 12) {
+    Stop-Inspection 'invalid-request'
+}
+try {
+    $root = Get-Item -LiteralPath $request.root -Force
+} catch {
+    Stop-Inspection 'fixture-root-unavailable'
+}
 if (!$root.PSIsContainer -or ($root.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-    throw 'Expected an ordinary fixture directory'
+    Stop-Inspection 'fixture-root-redirected'
 }
 
 # Read the native self-relative descriptor without normalizing the DACL through FileSecurity.
-Add-Type -TypeDefinition @'
+try {
+    Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -35,6 +52,9 @@ public static class ImpFixtureSecurity {
     }
 }
 '@
+} catch {
+    Stop-Inspection 'descriptor-api-unavailable'
+}
 
 function Resolve-AccountSid($account) {
     try {
@@ -44,10 +64,16 @@ function Resolve-AccountSid($account) {
     }
 }
 
-$token = [Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+    $token = [Security.Principal.WindowsIdentity]::GetCurrent()
+} catch {
+    Stop-Inspection 'current-token-unavailable'
+}
 try {
     $tokenUser = $token.User.Value
     $tokenGroups = @($token.Groups | ForEach-Object { $_.Value })
+} catch {
+    Stop-Inspection 'current-token-unavailable'
 } finally {
     $token.Dispose()
 }
@@ -88,16 +114,23 @@ foreach ($role in 'token-user', 'login-user', 'sshd-listener-user') {
     $identities[$role] = $null
     if ($principals[$role]) { $identities[$role] = @(Get-PrincipalRoles $principals[$role]) }
 }
-$descriptors = @{}
+$files = @{}
 foreach ($path in $request.paths.PSObject.Properties) {
     $role = $path.Name
-    if (!$names.ContainsKey($role)) { throw 'Unexpected fixture role' }
-    $descriptors[$role] = $null
+    if (!$names.ContainsKey($role)) { Stop-Inspection 'invalid-request' }
+    $file = $files[$role] = @{ status = 'file-unavailable'; descriptor = $null }
     try {
         $item = Get-Item -LiteralPath (Join-Path $root.FullName $names[$role]) -Force
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        if (($role -eq 'fixture-directory') -ne $item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $file.status = 'not-ordinary-file'
+            continue
+        }
+        $file.status = 'native-read-failed'
         $bytes = [ImpFixtureSecurity]::Read($item.FullName)
+        $file.status = 'descriptor-decode-failed'
         $raw = [Security.AccessControl.RawSecurityDescriptor]::new($bytes, 0)
+        $file.status = 'descriptor-enumeration-failed'
         $dacl = $raw.DiscretionaryAcl
         $sid = $path.Value
         $matching = @()
@@ -124,16 +157,27 @@ foreach ($path in $request.paths.PSObject.Properties) {
             }
             if ($reported) { $matching += $entry } else { $other += $entry }
         }
-        $descriptors[$role] = @{
+        $descriptor = @{
             owner = $null
             control = [int]$raw.ControlFlags
-            aceCount = $(if ($null -ne $dacl) { $dacl.Count })
-            reportedSidMatches = $(if ($sid) { $matched })
+            aceCount = $null
+            reportedSidMatches = $null
             aces = @(($matching + $other) | Select-Object -First $request.limit | Sort-Object { $_.index })
         }
-        if ($raw.Owner) { $descriptors[$role].owner = @(Get-PrincipalRoles $raw.Owner.Value) }
+        # Empty PowerShell 5.1 subexpressions serialize as objects, not JSON null.
+        if ($null -ne $dacl) { $descriptor.aceCount = $dacl.Count }
+        if ($sid) { $descriptor.reportedSidMatches = $matched }
+        if ($raw.Owner) { $descriptor.owner = @(Get-PrincipalRoles $raw.Owner.Value) }
+        $file.descriptor = $descriptor
+        $file.status = 'read'
     } catch {
-        # Never emit the provider's exception, which can include paths and identities.
+        if ($file.status -eq 'file-unavailable' -and $_.Exception -is [Management.Automation.ItemNotFoundException]) {
+            $file.status = 'missing'
+        } elseif ($file.status -eq 'native-read-failed' -and
+                  $_.Exception.InnerException -is [ComponentModel.Win32Exception] -and
+                  $_.Exception.InnerException.NativeErrorCode -eq 5) {
+            $file.status = 'access-denied'
+        }
     }
 }
-@{ identities = $identities; descriptors = $descriptors } | ConvertTo-Json -Compress -Depth 7
+@{ status = 'completed'; identities = $identities; files = $files } | ConvertTo-Json -Compress -Depth 8
