@@ -17,6 +17,7 @@ payload. Imp treats all of it as adversarial input.
 | producer output                 | shared `publisher.py`, via protocol encoders                                     |
 | node ingest/action/helper       | `services/relay/src/imp_relay/protocol.py`                                       |
 | HUD state and action result     | `packages/protocol/src/decode.ts`                                                |
+| Managed SSH diagnostic state    | `apps/desktop/src-tauri/src/managed_check/protocol.rs`                           |
 | TinyFugue final action delivery | `action_consumer.py` plus the private exact-context marker and `/imp_send` fence |
 | Mudlet final action delivery    | Lua exact-context check immediately before `send(command, false)`                |
 
@@ -47,6 +48,15 @@ node's entire loopback port, not a route-filtered state/action capability.
 Host-local processes that can reach that listener can also reach `/ingest` and
 `/action-consumer` without an `Origin` header. SSH authenticates the transport;
 it does not add per-route authentication to the node.
+
+The separate Managed SSH diagnostic opens only `/state` on a temporary SSH
+stdio stream. Neither Imp nor its directly launched SSH client opens a
+listener for it. Any nested proxy or jump process must be configured by the
+operator for verified, noninteractive foreground operation without additional
+forwards or listeners; Imp cannot enforce this across arbitrary SSH
+configuration. The check does not change which endpoints are reachable
+through the existing gameplay forward, authenticate the node itself, or
+attribute future gameplay streams to the checked destination.
 
 `Origin` checks remain browser defense-in-depth. An `Origin` header is neither
 process identity nor authentication.
@@ -110,6 +120,11 @@ Desktop native runtime:
   follows `--`; the structured username and optional port are separate option
   values. Native validation rejects invalid structured fields and never puts
   MUD-derived values into SSH argv.
+- The Managed SSH check validates exactly one transient alias or structured
+  destination natively. It launches OpenSSH directly with fixed
+  `-W 127.0.0.1:8787`, not a shell, remote command, or caller-chosen forward
+  target. Strict target verification applies to both diagnostic login forms;
+  this does not change the alias gameplay options.
 - Each supervisor tracks and terminates only children it spawned. Existing
   listeners are never killed merely because they occupy a desired port.
 
@@ -196,7 +211,8 @@ weakening OpenSSH host verification remains out of bounds.
 ## Desktop process ownership
 
 Only runtime children created by this desktop instance enter native lifetime
-ownership: the same-host node, optional producer gateway, and Managed SSH.
+ownership: the same-host node, optional producer gateway, Managed SSH
+gameplay forward, and separate Managed check.
 Ownership comes from the spawn handle, never an executable-name, port, PID-file,
 or command-line search. Existing listeners, adopted SSH forwards, Mudlet-owned
 helpers, and VPS/systemd services remain outside this boundary.
@@ -227,6 +243,10 @@ direct: a rejected value may contain terminal escapes, and a log line is often
 read in a terminal.
 
 Malformed-line counts are logged so a broken feed is still visible.
+
+The Managed SSH check bounds what it reads and keeps SSH stderr, command
+arguments, protocol frames, credentials, and MUD state out of renderer
+results and logs. Only a fixed result category crosses the native boundary.
 
 Relay `serve()`, gateway `serve()`, and both gateway upstream `connect()` paths
 explicitly use the Imp-owned `imp_relay.websocket` logger. WebSocket DEBUG

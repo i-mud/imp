@@ -17,6 +17,7 @@ vi.mock('@tauri-apps/api/window', async (importOriginal) => ({
 import App from '../src/App.svelte';
 import { createRuntimeClients } from '../src/lib/config.ts';
 import type { ConnectionSettings, ConnectionSettingsUpdate } from '../src/lib/tunnel.ts';
+import { waitForDomTransition } from './dom-transition.ts';
 
 let app: object | undefined;
 const sockets: FixtureSocket[] = [];
@@ -50,9 +51,11 @@ afterEach(async () => {
   sockets.splice(0);
   document.body.replaceChildren();
   localStorage.clear();
+  sessionStorage.clear();
   Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__');
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.useRealTimers();
   native.invoke.mockReset();
   native.setSize.mockClear();
 });
@@ -172,6 +175,7 @@ it.each([
       expect(target.querySelector('button[type="submit"]')).toBeNull();
     }
 
+    expect(native.invoke.mock.calls.some(([command]) => command === 'check_managed_connection')).toBe(false);
     expect(sockets).toHaveLength(0);
     expect(native.invoke).not.toHaveBeenCalledWith('node_status');
     expect(native.invoke).not.toHaveBeenCalledWith('tunnel_status');
@@ -180,7 +184,9 @@ it.each([
   }
 });
 
-it('saving through App → Hud → ConnectionDialog keeps the active Direct client until restart', async () => {
+it('saving through App → Hud → ConnectionDialog keeps the active Direct client until restart', async ({
+  signal,
+}) => {
   vi.stubEnv('VITE_IMP_SOURCE', 'relay');
   Object.defineProperty(globalThis, '__TAURI_INTERNALS__', { configurable: true, value: {} });
   localStorage.setItem('imp.display-mode', 'expanded');
@@ -196,12 +202,14 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   const replacementToken = 'A'.repeat(43);
   let rejectReplacementOnce = true;
   const rawFailure = `Native save details: ${replacementToken}`;
+  const check = Promise.withResolvers<string>();
   native.invoke.mockImplementation(async (command: string, args?: { update: ConnectionSettingsUpdate }) => {
     if (command === 'connection_config') {
       return { mode: 'direct', stateUrl: direct.remoteUrl, authenticationToken: token };
     }
     if (command === 'connection_settings')
       return { running: direct, saved, pendingRestart: saved !== direct };
+    if (command === 'check_managed_connection') return check.promise;
     if (command === 'save_connection_settings') {
       if (args?.update.mode === 'direct') {
         if (args.update.pairingToken === undefined) {
@@ -290,6 +298,27 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   await click('input[name="remote-method"][value="managed"]');
   await input('ssh-host', SSH_DESTINATION.host);
   await input('ssh-username', SSH_DESTINATION.username);
+  const storage = Object.entries(localStorage);
+  await click('button[name="check-managed-connection"]');
+  const invocation = native.invoke.mock.calls.find(([command]) => command === 'check_managed_connection');
+  const requestId = invocation?.[1]?.requestId;
+  expect(native.invoke).toHaveBeenLastCalledWith('check_managed_connection', {
+    requestId,
+    destination: { sshDestination: SSH_DESTINATION },
+  });
+  expect(document.querySelector('#managed-check-status')?.textContent).toBe('Checking connection…');
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  check.resolve('live');
+  await waitForDomTransition(() => !document.querySelector('button[name="cancel-managed-check"]'), signal);
+  expect(document.querySelector('#managed-check-status')?.textContent).toBe(
+    'The remote Imp node reported live state during this check.',
+  );
+  expect(Object.entries(localStorage)).toEqual(storage);
+  expect(saved.remoteUrl).toBe(replacementUrl);
+  expect(sockets).toEqual([socket]);
+  expect(start).toHaveBeenCalledOnce();
+  expect(stop).toHaveBeenCalledTimes(initialStops);
+  expect(socket.close).not.toHaveBeenCalled();
   await submit();
   expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toEqual([
     [
@@ -304,7 +333,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   await click('button[aria-describedby="discard-direct-warning"]');
   await vi.waitFor(() => {
     flushSync();
-    expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
+    expect(document.querySelector('.saved-message')?.textContent).toContain('Saved. Restart Imp');
   });
 
   expect(native.invoke).toHaveBeenCalledWith('save_connection_settings', {
@@ -314,7 +343,7 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
     3,
   );
   expect(native.invoke.mock.calls.filter(([command]) => command === 'connection_config')).toHaveLength(1);
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved. Restart Imp');
+  expect(document.querySelector('.saved-message')?.textContent).toContain('Saved. Restart Imp');
   expect(sockets).toHaveLength(1);
   expect(start).toHaveBeenCalledOnce();
   expect(stop).toHaveBeenCalledTimes(initialStops);
@@ -367,4 +396,153 @@ it('saving through App → Hud → ConnectionDialog keeps the active Direct clie
   app = undefined;
   expect(stop).toHaveBeenCalledTimes(initialStops + 1);
   expect(socket.close).toHaveBeenCalledOnce();
+});
+
+it('keeps an active Direct action pending across a different destination check and a late retirement fault', async ({
+  signal,
+}) => {
+  vi.stubGlobal('__TAURI_INTERNALS__', {});
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  localStorage.setItem('imp.display-mode', 'expanded');
+  localStorage.setItem('imp.actions', JSON.stringify([{ id: 'look', label: 'Look', command: 'look' }]));
+  const direct: ConnectionSettings = {
+    mode: 'direct',
+    sshTarget: '',
+    remoteUrl: 'wss://active.fixture.invalid/state',
+    hasPairingToken: true,
+  };
+  const token = 'x'.repeat(43);
+  const normal = Promise.withResolvers<string>();
+  const fault = Promise.withResolvers<string>();
+  const checks = [normal.promise, fault.promise];
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === 'connection_config') {
+      return { mode: 'direct', stateUrl: direct.remoteUrl, authenticationToken: token };
+    }
+    if (command === 'connection_settings') return { running: direct, saved: direct, pendingRestart: false };
+    if (command === 'check_managed_connection') return checks.shift();
+    if (command === 'cancel_managed_connection') return;
+    throw new Error(`Unexpected native command: ${command}`);
+  });
+
+  const runtime = await createRuntimeClients();
+  app = mount(App, { target: document.body, props: runtime });
+  await tick();
+  expect(sockets).toHaveLength(1);
+  const state = sockets[0]!;
+  const context = { session: 'fixture', foreground: 1, connection: 1 };
+  flushSync(() => {
+    state.dispatchEvent(new Event('open'));
+    state.dispatchEvent(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'snapshot',
+          protocol: 2,
+          seq: 1,
+          at: 100,
+          context,
+          state: {
+            character: { name: 'Aria', hp: { current: 90, max: 100 }, mana: null, moves: null },
+            target: null,
+          },
+        }),
+      }),
+    );
+  });
+  await click('button[aria-label="Look"]');
+  expect(sockets).toHaveLength(2);
+  const action = sockets[1]!;
+  expect(action.url).toBe('wss://active.fixture.invalid/action');
+  action.dispatchEvent(new Event('open'));
+  expect(action.send.mock.calls).toEqual([
+    [JSON.stringify({ type: 'auth', token })],
+    [JSON.stringify({ type: 'action', protocol: 2, context, command: 'look' })],
+  ]);
+
+  async function openDraft() {
+    await click('[data-connection-manager-trigger]');
+    await waitForDomTransition(() => !!document.querySelector('input[name="remote-method"]'), signal);
+    await click('input[name="remote-method"][value="managed"]');
+    await input('ssh-host', SSH_DESTINATION.host);
+    await input('ssh-username', SSH_DESTINATION.username);
+  }
+
+  await click('[aria-label="Settings"]');
+  await openDraft();
+  await click('button[name="check-managed-connection"]');
+  expect(native.invoke).toHaveBeenLastCalledWith('check_managed_connection', {
+    requestId: expect.any(Number),
+    destination: { sshDestination: SSH_DESTINATION },
+  });
+  normal.resolve('live');
+  await waitForDomTransition(() => !document.querySelector('button[name="cancel-managed-check"]'), signal);
+  expect(document.querySelector('#managed-check-status')?.textContent).toContain('reported live state');
+  await click('[aria-label="Close connection settings"]');
+  await click('[aria-label="Close settings"]');
+  expect(document.querySelector<HTMLButtonElement>('button[aria-label="Look"]')?.disabled).toBe(true);
+  expect(document.querySelector('.action-feedback')?.textContent).toBe('Forwarding “Look”…');
+  expect(action.close).not.toHaveBeenCalled();
+
+  await click('[aria-label="Settings"]');
+  await openDraft();
+  await click('button[name="check-managed-connection"]');
+  const requestId = native.invoke.mock.lastCall?.[1]?.requestId;
+  await click('button[name="cancel-managed-check"]');
+  expect(document.querySelector('#managed-check-status')?.textContent).toBe('Cancelling check…');
+  await click('input[name="client-location"][value="local"]');
+  await click('[aria-label="Close connection settings"]');
+  expect(native.invoke.mock.calls.filter(([command]) => command === 'cancel_managed_connection')).toEqual([
+    ['cancel_managed_connection', { requestId }],
+  ]);
+  fault.resolve('retirement_unconfirmed');
+  await waitForDomTransition(() => !!document.querySelector('.connection-check-warning'), signal);
+  const warning = document.querySelector('.connection-check-warning');
+  expect(warning?.getAttribute('role')).toBe('alert');
+  expect(warning?.textContent).toContain('Quit and reopen Imp before checking or saving connections.');
+  await openDraft();
+  expect(document.querySelector('#managed-check-restart-required')?.textContent).toBe(warning?.textContent);
+  expect(document.querySelector('#managed-check-status')?.textContent).toBe('');
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  const checkButton = document.querySelector('button[name="check-managed-connection"]');
+  expect(checkButton?.getAttribute('aria-disabled')).toBe('true');
+  expect(checkButton?.getAttribute('aria-describedby')).toContain('managed-check-restart-required');
+  await click('button[name="check-managed-connection"]');
+  expect(native.invoke.mock.calls.filter(([command]) => command === 'check_managed_connection')).toHaveLength(
+    2,
+  );
+  await click('input[name="client-location"][value="local"]');
+  expect(document.querySelector('#managed-check-restart-required')).not.toBeNull();
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  flushSync(() =>
+    document
+      .querySelector('.connection-dialog form')!
+      .dispatchEvent(new Event('submit', { cancelable: true })),
+  );
+  expect(native.invoke.mock.calls.filter(([command]) => command === 'save_connection_settings')).toHaveLength(
+    0,
+  );
+  await click('[aria-label="Close connection settings"]');
+  await click('[aria-label="Close settings"]');
+
+  expect(document.querySelector('.action-feedback')?.textContent).toBe('Forwarding “Look”…');
+  action.dispatchEvent(
+    new MessageEvent('message', {
+      data: JSON.stringify({
+        type: 'action-result',
+        protocol: 2,
+        status: 'rejected',
+        detail: 'fixture action result',
+      }),
+    }),
+  );
+  await waitForDomTransition(
+    () =>
+      document.querySelector('.action-feedback')?.textContent ===
+      'Action was not forwarded: fixture action result',
+    signal,
+  );
+  expect(document.querySelector<HTMLButtonElement>('button[aria-label="Look"]')?.disabled).toBe(false);
+  expect(sockets).toEqual([state, action]);
+  expect(state.close).not.toHaveBeenCalled();
+  expect(action.close).toHaveBeenCalledOnce();
 });

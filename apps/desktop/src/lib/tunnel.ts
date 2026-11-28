@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { get, readonly, writable } from 'svelte/store';
 
 /**
  * Reads the desktop transport supervisor's diagnostic without exposing SSH,
@@ -77,6 +78,34 @@ export interface ConnectionSettingsUpdate {
   readonly pairingToken?: string;
 }
 
+export type ManagedCheckDestination =
+  { readonly sshTarget: string } | { readonly sshDestination: SshDestination };
+
+export type ManagedCheckResult =
+  | 'invalid_destination'
+  | 'ssh_unavailable'
+  | 'live'
+  | 'stale'
+  | 'down'
+  | 'no_usable_state'
+  | 'host_verification'
+  | 'authentication'
+  | 'forwarding_unavailable'
+  | 'invalid_protocol'
+  | 'timeout'
+  | 'cancelled'
+  | 'connection_failed'
+  | 'busy';
+
+const checkPending = writable(false);
+export const managedCheckPending = readonly(checkPending);
+export const RETIREMENT_UNCONFIRMED = 'retirement_unconfirmed';
+export const MANAGED_CHECK_RESTART_MESSAGE =
+  'Imp could not confirm that a connection check stopped. Quit and reopen Imp before checking or saving connections.';
+const checkRestartRequired = writable(false);
+export const managedCheckRestartRequired = readonly(checkRestartRequired);
+const MANAGED_CHECK_SEQUENCE_KEY = 'imp.managed-check-sequence';
+
 const POLL_INTERVAL_MS = 2_000;
 
 const DETAIL_BY_DIAGNOSTIC: Partial<Record<TunnelDiagnostic, string>> = {
@@ -146,8 +175,49 @@ export async function saveConnectionSettings(
   if (!isTauriRuntime()) {
     throw new Error('Native connection settings are unavailable outside Tauri.');
   }
+  if (get(checkRestartRequired)) throw RETIREMENT_UNCONFIRMED;
 
-  return invoke<ConnectionSettingsState>('save_connection_settings', { update });
+  try {
+    return await invoke<ConnectionSettingsState>('save_connection_settings', { update });
+  } catch (error) {
+    if (error === RETIREMENT_UNCONFIRMED) checkRestartRequired.set(true);
+    throw error;
+  }
+}
+
+export function checkManagedConnection(
+  destination: ManagedCheckDestination,
+): { requestId: number; result: Promise<ManagedCheckResult | typeof RETIREMENT_UNCONFIRMED> } | null {
+  if (!isTauriRuntime() || get(checkPending) || get(checkRestartRequired)) return null;
+
+  // Native stays up across WebView reloads; keep only the request counter in this session.
+  const requestId = Number(sessionStorage.getItem(MANAGED_CHECK_SEQUENCE_KEY)) + 1;
+  if (!Number.isSafeInteger(requestId) || requestId < 1) {
+    throw new Error('Invalid Managed connection check sequence.');
+  }
+  sessionStorage.setItem(MANAGED_CHECK_SEQUENCE_KEY, String(requestId));
+
+  checkPending.set(true);
+  const result = (async (): Promise<ManagedCheckResult | typeof RETIREMENT_UNCONFIRMED> => {
+    try {
+      const outcome = await invoke<ManagedCheckResult | typeof RETIREMENT_UNCONFIRMED>(
+        'check_managed_connection',
+        { requestId, destination },
+      );
+      if (outcome === RETIREMENT_UNCONFIRMED) checkRestartRequired.set(true);
+      return outcome;
+    } catch {
+      return 'connection_failed';
+    } finally {
+      // Cancellation only signals the check; the original command reports its retirement outcome.
+      checkPending.set(false);
+    }
+  })();
+  return { requestId, result };
+}
+
+export async function cancelManagedConnection(requestId: number): Promise<void> {
+  await invoke<void>('cancel_managed_connection', { requestId });
 }
 
 /**

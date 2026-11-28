@@ -17,6 +17,9 @@ on:
       - 'scripts/build-mudlet-package.py'
       - 'scripts/test-installed-first-launch.ps1'
       - 'scripts/test-installed-connection.mjs'
+      - 'scripts/managed-check-browser-fixture.mjs'
+      - 'scripts/test-managed-check*.py'
+      - 'scripts/test-structured-ssh.py'
       - 'scripts/check-version.mjs'
   push:
     branches: [main]
@@ -34,6 +37,9 @@ on:
       - 'scripts/build-mudlet-package.py'
       - 'scripts/test-installed-first-launch.ps1'
       - 'scripts/test-installed-connection.mjs'
+      - 'scripts/managed-check-browser-fixture.mjs'
+      - 'scripts/test-managed-check*.py'
+      - 'scripts/test-structured-ssh.py'
       - 'scripts/check-version.mjs'
   workflow_dispatch:
 
@@ -125,6 +131,27 @@ jobs:
       - name: Test native application
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features runtime-acceptance
 
+      - name: Prepare disposable OpenSSH server prerequisites
+        run: |
+          $OpenSsh = Join-Path $env:SystemRoot 'System32\OpenSSH'
+          if (!(Test-Path "$OpenSsh\sshd.exe")) {
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+          }
+          foreach ($Tool in 'ssh', 'ssh-keygen', 'sshd') {
+            if (!(Test-Path "$OpenSsh\$Tool.exe")) { throw "Missing Windows system OpenSSH $Tool" }
+          }
+
+      - name: Exercise Managed diagnostic with Windows OpenSSH
+        timeout-minutes: 5
+        env:
+          IMP_ACCEPTANCE_RUNNER: ${{ runner.environment }}
+        run: |
+          cargo build --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features runtime-acceptance --bin runtime-ownership-harness
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --locked --project services/relay python scripts/test-managed-check-evidence.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --locked --project services/relay python scripts/test-managed-check.py windows apps/desktop/src-tauri/target/debug/runtime-ownership-harness.exe
+
       - name: Build NSIS installer
         run: npm run tauri --workspace @imp/desktop -- build --bundles nsis
 
@@ -135,7 +162,7 @@ jobs:
         run: >-
           ./scripts/test-installed-first-launch.ps1
           -Installer (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*.exe).FullName
-          -CheckConnectionUi -ScreenshotDirectory "$env:RUNNER_TEMP/imp-connection-ui"
+          -CheckConnectionUi -CheckManagedDiagnostic -ScreenshotDirectory "$env:RUNNER_TEMP/imp-connection-ui"
 
       - name: Upload installed connection screenshots
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

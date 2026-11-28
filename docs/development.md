@@ -286,6 +286,31 @@ state and action paths without replay, and owned-process cleanup. They use
 synthetic gameplay data and do not establish published-artifact or independent
 human acceptance.
 
+Run the **Managed connection diagnostic** separately. Build the native harness
+as above, then run it against the disposable Linux OpenSSH server:
+
+```bash
+python scripts/test-managed-check.py container apps/desktop/src-tauri/target/debug/runtime-ownership-harness
+```
+
+From the Windows-native mirror in PowerShell:
+
+```powershell
+python scripts/test-managed-check.py container apps/desktop/src-tauri/target/debug/runtime-ownership-harness.exe
+```
+
+Both require system OpenSSH, Python 3.12+, Docker in Linux-container mode,
+and free loopback port 8789. The fixture uses isolated client configuration
+and ephemeral keys. It checks direct connections and a strict, non-interactive
+foreground ProxyJump, the read-only `/state` request, failure categories and
+cleanup, including with an independent SSH forward. It does not use a live
+MUD or operator SSH configuration.
+
+Windows hosted CI runs the same matrix against a disposable Windows OpenSSH
+server, without requiring Linux Docker. Its separate installed check requires
+a fresh profile with no user SSH config. It temporarily provisions a synthetic
+alias after the regular installed checks and removes it during cleanup.
+
 ## Server bundle checks
 
 Server build, release, and source workflows require `uv` and the locked

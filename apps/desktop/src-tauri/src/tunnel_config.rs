@@ -138,15 +138,7 @@ impl SshDestination {
         if !valid_ssh_host(&self.host) {
             return Err("Enter a DNS name, IPv4 address, or bare IPv6 address in Server.");
         }
-        let username_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-        if self.username.len() > 64
-            || !self.username.bytes().next().is_some_and(username_byte)
-            || !self
-                .username
-                .bytes()
-                .skip(1)
-                .all(|b| username_byte(b) || matches!(b, b'.' | b'-'))
-        {
+        if !valid_ssh_name(&self.username, 64) {
             return Err("Username must start with a letter, digit, or underscore and use at most 64 ASCII letters, digits, underscores, dots, or hyphens.");
         }
         if self.port == Some(0) {
@@ -154,6 +146,16 @@ impl SshDestination {
         }
         Ok(())
     }
+}
+
+fn valid_ssh_name(name: &str, max_len: usize) -> bool {
+    let name_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    name.len() <= max_len
+        && name.bytes().next().is_some_and(name_byte)
+        && name
+            .bytes()
+            .skip(1)
+            .all(|b| name_byte(b) || matches!(b, b'.' | b'-'))
 }
 
 fn valid_ssh_host(host: &str) -> bool {
@@ -186,6 +188,48 @@ fn valid_ssh_host(host: &str) -> bool {
 pub enum ManagedDestination {
     Alias(String),
     Server(SshDestination),
+}
+
+impl ManagedDestination {
+    pub(crate) fn from_check_input(value: serde_json::Value) -> Option<Self> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Input {
+            #[serde(default, deserialize_with = "present")]
+            ssh_target: Option<String>,
+            #[serde(default, deserialize_with = "present")]
+            ssh_destination: Option<SshDestination>,
+        }
+
+        if !value.is_object() {
+            return None;
+        }
+        let input: Input = serde_json::from_value(value).ok()?;
+        match (input.ssh_target, input.ssh_destination) {
+            (None, Some(destination)) => {
+                destination.validate().ok()?;
+                Some(Self::Server(destination))
+            }
+            (Some(target), None) => {
+                // This command permits a single SSH target, not URI or option syntax.
+                let trimmed = target.trim();
+                let host = match trimmed.split_once('@') {
+                    Some((username, host)) if valid_ssh_name(username, 64) => host,
+                    Some(_) => return None,
+                    None => trimmed,
+                };
+                if !valid_ssh_name(host, 253) && host.parse::<Ipv6Addr>().is_err() {
+                    return None;
+                }
+                Some(Self::Alias(if trimmed.len() == target.len() {
+                    target
+                } else {
+                    trimmed.to_owned()
+                }))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Debug for TunnelConfig {

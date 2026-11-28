@@ -2,12 +2,18 @@ import { flushSync, mount, tick, unmount, type ComponentProps } from 'svelte';
 import { fromStore, writable } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const invoke = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+
 import ConnectionDialog from '../src/components/ConnectionDialog.svelte';
-import type {
-  ConnectionSettings,
-  ConnectionSettingsState,
-  ConnectionSettingsUpdate,
+import {
+  managedCheckPending,
+  type ConnectionSettings,
+  type ConnectionSettingsState,
+  type ConnectionSettingsUpdate,
+  type ManagedCheckResult,
 } from '../src/lib/tunnel.ts';
+import { waitForDomTransition } from './dom-transition.ts';
 
 const DIRECT: ConnectionSettings = {
   mode: 'direct',
@@ -34,10 +40,21 @@ function connectionState(saved: ConnectionSettings | null): ConnectionSettingsSt
 }
 
 const mounted: object[] = [];
+const pendingChecks: ((result: ManagedCheckResult) => void)[] = [];
 afterEach(async () => {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   for (const component of mounted.splice(0)) await unmount(component);
+  const retired = Promise.withResolvers<void>();
+  const unsubscribe = managedCheckPending.subscribe((pending) => {
+    if (!pending) retired.resolve();
+  });
+  for (const resolve of pendingChecks.splice(0)) resolve('cancelled');
+  await retired.promise;
+  unsubscribe();
   document.body.replaceChildren();
+  invoke.mockReset();
+  vi.unstubAllGlobals();
+  sessionStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -332,7 +349,7 @@ describe('ConnectionDialog route editor', () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toBe(
       'Could not save native connection settings.',
     );
-    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(document.querySelector('.saved-message')).toBeNull();
     expect(document.querySelector('dl dd span')?.textContent).toBe(ALIAS.sshTarget);
     expect(field('ssh-host').value).toBe(host);
     expect(field('ssh-username').value).toBe(username);
@@ -342,7 +359,7 @@ describe('ConnectionDialog route editor', () => {
     const update = { mode: 'managed', sshDestination: SERVER_LOGIN.sshDestination };
     expect(onsave.mock.calls).toEqual([[update], [update]]);
     flushSync(() => settingsStore.set({ running: ALIAS, saved: SERVER_LOGIN, pendingRestart: true }));
-    expect(document.querySelector('[role="status"]')?.textContent?.trim()).toBe(
+    expect(document.querySelector('.saved-message')?.textContent?.trim()).toBe(
       'Saved. Restart Imp to use this connection.',
     );
     const summaries = [...document.querySelectorAll('dl > div')];
@@ -386,6 +403,242 @@ describe('ConnectionDialog route editor', () => {
   });
 });
 
+describe('ConnectionDialog Managed check', () => {
+  function deferredCheck() {
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    const check = Promise.withResolvers<ManagedCheckResult>();
+    pendingChecks.push(check.resolve);
+    invoke.mockReturnValueOnce(check.promise);
+    return check;
+  }
+
+  function status(): string | undefined {
+    return document.querySelector('#managed-check-status')?.textContent?.trim();
+  }
+
+  function waitForCheckResult(signal: AbortSignal): Promise<void> {
+    return waitForDomTransition(() => !document.querySelector('button[name="cancel-managed-check"]'), signal);
+  }
+
+  function waitForSaveEnabled(signal: AbortSignal): Promise<void> {
+    return waitForDomTransition(() => !!document.querySelector('button[type="submit"]:enabled'), signal);
+  }
+
+  it('offers a read-only check only for Managed and sends the unsaved structured destination', async ({
+    signal,
+  }) => {
+    const { onsave, settingsStore } = await setup(null);
+    expect(status()).toBeUndefined();
+    for (const mode of ['local', 'external', 'direct']) {
+      await choose(mode);
+      expect(document.querySelector('button[name="check-managed-connection"]')).toBeNull();
+    }
+    await choose('managed');
+    await fillServerLogin(' mud.fixture.invalid ', ' player ');
+    await input('ssh-port', '2222');
+    const check = deferredCheck();
+    const checkButton = button('Check connection');
+    expect(checkButton.type).toBe('button');
+    expect(checkButton.getAttribute('aria-describedby')).toBe('managed-check-help');
+    await click(checkButton);
+    const requestId = invoke.mock.calls[0]?.[1]?.requestId;
+    expect(Number.isSafeInteger(requestId) && requestId > 0).toBe(true);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('check_managed_connection', {
+      requestId,
+      destination: { sshDestination: { host: 'mud.fixture.invalid', username: 'player', port: 2222 } },
+    });
+    expect(status()).toBe('Checking connection…');
+    expect(button('Save').disabled).toBe(true);
+    await submit();
+    await click(checkButton);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(onsave).not.toHaveBeenCalled();
+
+    button('Cancel check').focus();
+    check.resolve('live');
+    await waitForCheckResult(signal);
+    expect(status()).toBe('The remote Imp node reported live state during this check.');
+    expect(document.activeElement).toBe(checkButton);
+    expect(document.querySelector('dd')?.textContent).toContain('No connection configured');
+    expect(document.querySelector('input[name="remote-method"]:checked')?.getAttribute('value')).toBe(
+      'managed',
+    );
+    expect(field('ssh-host').value).toBe(' mud.fixture.invalid ');
+    expect(document.body.textContent).not.toContain('Saved for next launch');
+    expect(onsave).not.toHaveBeenCalled();
+    const current = fromStore(settingsStore);
+    expect(current.current).toEqual(connectionState(null));
+    expect(button('Save').disabled).toBe(false);
+  });
+
+  it.each([
+    ['ssh-host', 'https://host.fixture.invalid'],
+    ['ssh-username', '-user'],
+    ['ssh-port', '65536'],
+    ['ssh-target', '-oProxyCommand=unexpected'],
+    ['ssh-target', 'ssh://host.fixture.invalid'],
+    ['ssh-target', 'player@host.fixture.invalid:22'],
+    ['ssh-target', 'player@other@host.fixture.invalid'],
+    ['ssh-target', ''],
+  ])('validates %s draft %j and focuses the invalid field before invoking', async (key, value) => {
+    const { onsave } = await setup(key === 'ssh-target' ? ALIAS : SERVER_LOGIN);
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    await input(key, value);
+    await click(button('Check connection'));
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onsave).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field(key));
+    expect(field(key).getAttribute('aria-invalid')).toBe('true');
+    expect(field(key).getAttribute('aria-describedby')).toContain('connection-field-error');
+    expect(document.querySelector('#connection-field-error')?.getAttribute('role')).toBe('alert');
+  });
+
+  it.for(['My_Host.v2-Alt', 'Player@My_Host.v2-Alt', 'Player@2001:db8::1', '2001:db8::1'])(
+    'passes the original case and spelling of a validated alias %s without migrating it',
+    async (target, { signal }) => {
+      const { onsave } = await setup(ALIAS);
+      await input('ssh-target', ` ${target} `);
+      const check = deferredCheck();
+      await click(button('Check connection'));
+      const requestId = invoke.mock.calls[0]?.[1]?.requestId;
+      expect(invoke).toHaveBeenCalledExactlyOnceWith('check_managed_connection', {
+        requestId,
+        destination: { sshTarget: target },
+      });
+      check.resolve('live');
+      await waitForCheckResult(signal);
+      expect(document.querySelector('dl dd span')?.textContent).toBe(ALIAS.sshTarget);
+      expect(onsave).not.toHaveBeenCalled();
+    },
+  );
+
+  it.for([
+    ['live', ''],
+    ['cancelled', 'Connection check cancelled.'],
+  ] as const)(
+    'keeps the save lock after cancel acknowledgement until native returns %s',
+    async ([result, message], { signal }) => {
+      const { onsave } = await setup(ALIAS);
+      const check = deferredCheck();
+      const cancel = Promise.withResolvers<void>();
+      invoke.mockReturnValueOnce(cancel.promise);
+      const checkButton = button('Check connection');
+      await click(checkButton);
+      const requestId = invoke.mock.calls[0]?.[1]?.requestId;
+      const cancelButton = button('Cancel check');
+      cancelButton.focus();
+      await click(cancelButton);
+      expect(document.activeElement).toBe(checkButton);
+      expect(status()).toBe('Cancelling check…');
+      expect(invoke).toHaveBeenLastCalledWith('cancel_managed_connection', { requestId });
+      cancel.resolve();
+      await cancel.promise;
+      await settle();
+      expect(button('Save').disabled).toBe(true);
+      await submit();
+      expect(onsave).not.toHaveBeenCalled();
+
+      check.resolve(result);
+      await waitForSaveEnabled(signal);
+      expect(status()).toBe(message);
+      expect(button('Save').disabled).toBe(false);
+    },
+  );
+
+  it.for(['edit', 'representation', 'mode'])(
+    'cancels on %s and never shows the retired result',
+    async (change, { signal }) => {
+      const { onsave } = await setup(ALIAS);
+      const check = deferredCheck();
+      await click(button('Check connection'));
+      const requestId = invoke.mock.calls[0]?.[1]?.requestId;
+      if (change === 'edit') await input('ssh-target', 'new-host');
+      if (change === 'representation') await click(button('Use server and username'));
+      if (change === 'mode') await choose('local');
+      expect(invoke).toHaveBeenLastCalledWith('cancel_managed_connection', { requestId });
+      expect(button('Save').disabled).toBe(true);
+      await submit();
+      expect(onsave).not.toHaveBeenCalled();
+      check.resolve('live');
+      await waitForSaveEnabled(signal);
+      expect(button('Save').disabled).toBe(false);
+      expect(status() ?? '').toBe('');
+      expect(document.body.textContent).not.toContain('reported live state');
+    },
+  );
+
+  it.for(['title close', 'footer close', 'Escape', 'destroy'])(
+    'retires a check across %s and reopens with a higher request id',
+    async (exit, { signal }) => {
+      const { onclose } = await setup(ALIAS);
+      const old = deferredCheck();
+      await click(button('Check connection'));
+      const previousId = invoke.mock.calls[0]?.[1]?.requestId;
+      if (exit === 'title close') {
+        await click(document.querySelector<HTMLButtonElement>('[aria-label="Close connection settings"]')!);
+      }
+      if (exit === 'footer close') await click(button('Close'));
+      if (exit === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      expect(onclose).toHaveBeenCalledTimes(exit === 'destroy' ? 0 : 1);
+      await unmount(mounted.pop()!);
+      expect(invoke.mock.calls).toHaveLength(2);
+      expect(invoke).toHaveBeenLastCalledWith('cancel_managed_connection', { requestId: previousId });
+
+      await setup(ALIAS);
+      expect(button('Save').disabled).toBe(true);
+      expect(status()).toBe('Finishing previous check…');
+      old.resolve('live');
+      await waitForSaveEnabled(signal);
+      expect(status()).toBe('');
+      expect(button('Save').disabled).toBe(false);
+      const current = deferredCheck();
+      await click(button('Check connection'));
+      expect(invoke).toHaveBeenLastCalledWith('check_managed_connection', {
+        requestId: previousId + 1,
+        destination: { sshTarget: ALIAS.sshTarget },
+      });
+      current.resolve('stale');
+      await waitForCheckResult(signal);
+      expect(status()).toContain('reported stale state');
+    },
+  );
+
+  it('uses safe result guidance and clears an old result on edit', async ({ signal }) => {
+    const { onsave } = await setup(ALIAS);
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    const outcomes = [
+      ['invalid_destination', 'Check the server login or SSH alias'],
+      ['ssh_unavailable', 'OpenSSH is unavailable'],
+      ['down', 'reported its feed is down'],
+      ['no_usable_state', 'No usable state was received'],
+      ['host_verification', 'Verify its host key in OpenSSH'],
+      ['authentication', 'Set up a key or SSH agent'],
+      ['forwarding_unavailable', 'SSH allows forwarding'],
+      ['invalid_protocol', 'not a supported Imp state feed'],
+      ['timeout', 'The check timed out'],
+      ['cancelled', 'Connection check cancelled.'],
+      ['busy', 'Another connection check is running'],
+      ['connection_failed', 'Could not check the connection'],
+      ['__proto__', 'Could not check the connection'],
+    ] as const;
+    for (const [result, message] of outcomes) {
+      invoke.mockResolvedValueOnce(result);
+      await click(button('Check connection'));
+      await waitForCheckResult(signal);
+      expect(status()).toContain(message);
+    }
+    invoke.mockRejectedValueOnce(new Error('private native details'));
+    await click(button('Check connection'));
+    await waitForCheckResult(signal);
+    expect(status()).toContain('Could not check the connection');
+    expect(document.body.textContent).not.toContain('private native details');
+    await input('ssh-target', 'changed-host');
+    expect(status()).toBe('');
+    expect(onsave).not.toHaveBeenCalled();
+  });
+});
+
 describe('ConnectionDialog credential-discard interactions', () => {
   it.each(['local', 'external', 'managed'])('requires explicit approval for Direct → %s', async (mode) => {
     const { onsave } = await setup();
@@ -410,7 +663,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
       mode === 'managed' ? { mode, sshDestination: { host: 'reviewed-host', username: 'player' } } : { mode },
     );
     expect(warning()).toBeNull();
-    expect(document.querySelector('[role="status"]')?.textContent).toContain('Connection settings saved.');
+    expect(document.querySelector('.saved-message')?.textContent).toContain('Connection settings saved.');
     await vi.waitFor(() => {
       flushSync();
       expect(document.activeElement).toBe(button('Save'));
@@ -474,7 +727,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
     deferred.resolve(true);
     await settle();
     expect(button('Save').disabled).toBe(false);
-    expect(document.querySelector('[role="status"]')).not.toBeNull();
+    expect(document.querySelector('.saved-message')).not.toBeNull();
   });
 
   it('mode changes invalidate approval and require a fresh warning', async () => {

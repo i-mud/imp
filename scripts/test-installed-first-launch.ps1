@@ -3,6 +3,7 @@ param(
     [int]$AliveSeconds = 15,
     [int]$ProvisionSeconds = 60,
     [switch]$CheckConnectionUi,
+    [switch]$CheckManagedDiagnostic,
     [string]$ScreenshotDirectory
 )
 
@@ -14,8 +15,12 @@ param(
 # loading or changing them. The optional UI step additionally requires Node 24 and is for a fresh
 # interactive Windows CI runner; it enables a temporary loopback-only WebView debugger.
 # Optional screenshots contain only the synthetic Managed forms in the isolated WebView.
+# The additional real-SSH scenario needs the stock Windows OpenSSH server on the disposable runner.
 $ErrorActionPreference = 'Stop'
 if ($ScreenshotDirectory -and !$CheckConnectionUi) { throw 'Screenshots require -CheckConnectionUi' }
+if ($CheckManagedDiagnostic -and (!$CheckConnectionUi -or $env:IMP_ACCEPTANCE_RUNNER -ne 'github-hosted')) {
+    throw 'Real SSH acceptance requires -CheckConnectionUi on a disposable GitHub-hosted Windows runner'
+}
 $Config = Get-Content (Join-Path $PSScriptRoot '..\apps\desktop\src-tauri\tauri.conf.json') -Raw |
     ConvertFrom-Json
 $Version = $Config.version
@@ -63,6 +68,7 @@ if ($CheckConnectionUi) {
     }
     $Elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($CheckManagedDiagnostic -and !$Elevated) { throw 'Real SSH acceptance needs the elevated disposable runner' }
     $PolicyActive = $false
     $CreatedPolicyKeys = @()
     Add-Type -Namespace Imp -Name Token -MemberDefinition @'
@@ -236,8 +242,15 @@ function Wait-FixtureGone {
     throw 'Fixture listener, desktop or isolated WebView survived exit'
 }
 
-function Start-Desktop([string]$Log, [bool]$UseEnvironment, [ref]$Process) {
-    Assert-RuntimePortsFree
+function Start-Desktop([string]$Log, [bool]$UseEnvironment, [ref]$Process, $ManagedFixture = $null) {
+    if ($ManagedFixture) {
+        $Listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8787, 8788, 8789 -ErrorAction SilentlyContinue)
+        if ($Listeners.Count -ne 2 -or ($Listeners.LocalPort -notcontains 8787) -or
+            ($Listeners.LocalPort -notcontains 8789) -or
+            ($Listeners | Where-Object { $_.LocalAddress -ne '127.0.0.1' -or $_.OwningProcess -ne $ManagedFixture.backendPid })) {
+            throw 'The two isolated Managed fixture listeners do not match the owned loopback backend'
+        }
+    } else { Assert-RuntimePortsFree }
     try {
         if ($UseEnvironment) {
             $env:WEBVIEW2_USER_DATA_FOLDER = $WebView
@@ -253,10 +266,10 @@ function Start-Desktop([string]$Log, [bool]$UseEnvironment, [ref]$Process) {
     }
 }
 
-function Start-FixtureDesktop([string]$Log, [ref]$App) {
+function Start-FixtureDesktop([string]$Log, [ref]$App, $ManagedFixture = $null) {
     # The caller's finally owns the process as soon as Start-Desktop assigns it.
     # Same-context env-only launch first; the policy is a hosted-CI-only fallback.
-    Start-Desktop $Log ($CheckConnectionUi -and !$PolicyActive) $App
+    Start-Desktop $Log ($CheckConnectionUi -and !$PolicyActive) $App $ManagedFixture
     if (!$CheckConnectionUi) { return }
     if (Wait-DebugListener $App.Value 15) {
         if (!$PolicyActive -and !$script:EvidenceShown) {
@@ -268,7 +281,7 @@ function Start-FixtureDesktop([string]$Log, [ref]$App) {
     $Label = if ($PolicyActive) { 'policy' } else { 'env-only' }
     $Evidence = Write-LaunchEvidence $Label $App.Value (!$PolicyActive)
     $Fallback = !$PolicyActive -and $Elevated -and $env:IMP_ACCEPTANCE_RUNNER -eq 'github-hosted' -and $Evidence.HostHigh
-    if (!$Fallback) { throw 'Expected a loopback WebView2 debugger; no supported fallback applies here' }
+    if (!$Fallback -or $ManagedFixture) { throw 'Expected a loopback WebView2 debugger; no supported fallback applies here' }
     Stop-FixtureDesktop $App.Value $Log
     if (!$App.Value.HasExited) { throw 'Installed desktop is still running after cleanup' }
     $App.Value = $null
@@ -320,7 +333,7 @@ function Stop-FixtureDesktop($Process, [string]$Log) {
     Remove-Item $Log -ErrorAction SilentlyContinue
 }
 
-function Invoke-ConnectionUi($Process, [string]$Phase, [int]$FixturePort = 0) {
+function Invoke-ConnectionUi($Process, [string]$Phase, [int]$FixturePort = 0, [string]$ManagedFixtureDirectory) {
     $Listeners = @(Wait-DebugListener $Process 15)
     if (!$Listeners) { throw 'Expected a loopback WebView2 debugger' }
     foreach ($Listener in $Listeners) {
@@ -335,6 +348,8 @@ function Invoke-ConnectionUi($Process, [string]$Phase, [int]$FixturePort = 0) {
     }
     $Arguments = @((Join-Path $PSScriptRoot 'test-installed-connection.mjs'), $DebugPort, $Phase, $TunnelConfig, $FixturePort)
     if ($ScreenshotDirectory) { $Arguments += $ScreenshotDirectory }
+    elseif ($ManagedFixtureDirectory) { $Arguments += '-' }
+    if ($ManagedFixtureDirectory) { $Arguments += $ManagedFixtureDirectory, $Process.Id }
     & $Node @Arguments
     if ($LASTEXITCODE) { throw [IO.InvalidDataException]::new("Installed connection UI phase failed: $Phase") }
 }
@@ -354,6 +369,118 @@ function Assert-OwnedNode([string]$Log) {
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $Deadline)
     throw 'Installed desktop did not own the local node listener'
+}
+
+function Test-InstalledManagedDiagnostic([int]$BlockedPort) {
+    Wait-FixtureGone
+    $Scratch = (New-Item -ItemType Directory -Path (Join-Path $env:TEMP ('imp-managed-check-' + [guid]::NewGuid()))).FullName
+    # OpenSSH's fixture requires an empty root. Start-Process creates its redirection files before Python starts.
+    $Directory = (New-Item -ItemType Directory -Path (Join-Path $Scratch 'fixture')).FullName
+    $ManifestPath = Join-Path $Directory 'manifest.json'
+    $Log = Join-Path $Scratch 'desktop.log'
+    $Fixture = $Desktop = $Manifest = $Observer = $Uv = $null
+    $Passed = $false
+    try {
+        $Uv = (Get-Command uv.exe).Source
+        $Fixture = Start-Process -FilePath $Uv -WorkingDirectory (Split-Path $PSScriptRoot) -ArgumentList @(
+            'run --locked --project services/relay python -u scripts/test-managed-check.py installed',
+            ('"{0}"' -f $Directory)
+        ) -PassThru -RedirectStandardOutput (Join-Path $Scratch 'fixture.out') -RedirectStandardError (Join-Path $Scratch 'fixture.err')
+        $Deadline = [DateTime]::UtcNow.AddSeconds(30)
+        while (!(Test-Path $ManifestPath -PathType Leaf)) {
+            if ($Fixture.HasExited -or [DateTime]::UtcNow -ge $Deadline) { throw 'The disposable SSH fixture did not become ready' }
+            Start-Sleep -Milliseconds 100
+        }
+        $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+        # The running Managed route adopts fixture A on :8789. The diagnostic must
+        # reach fixture B on :8787 using native OpenSSH, never A or the blocked endpoint.
+        [IO.File]::WriteAllText($TunnelConfig, (@{
+            mode = 'managed'
+            sshTarget = "ssh://imp-fixture@127.0.0.1:$BlockedPort"
+        } | ConvertTo-Json))
+        Start-FixtureDesktop $Log ([ref]$Desktop) $Manifest
+        $Observer = Start-ThreadJob -ArgumentList $Desktop.Id, $Directory -ScriptBlock {
+            param($DesktopId, $Directory)
+            $ErrorActionPreference = 'Stop'
+            $Filter = "ParentProcessId=$DesktopId AND Name='ssh.exe'"
+            if (Get-CimInstance Win32_Process -Filter $Filter) { throw 'SSH child existed before checking' }
+            [IO.File]::WriteAllText((Join-Path $Directory 'ssh-observer-ready'), '')
+            foreach ($Check in 1..3) {
+                $Request = Join-Path $Directory "ssh-check-$Check"
+                while (!(Test-Path -LiteralPath $Request)) { Start-Sleep -Milliseconds 50 }
+                $Candidates = @(Get-CimInstance Win32_Process -Filter $Filter)
+                if ($Candidates.Count -ne 1) { throw 'Expected exactly one held desktop SSH child' }
+                $Ssh = [Diagnostics.Process]::GetProcessById([int]$Candidates[0].ProcessId)
+                try {
+                    $null = $Ssh.Handle
+                    if ([Math]::Abs(($Ssh.StartTime.ToUniversalTime() - $Candidates[0].CreationDate.ToUniversalTime()).TotalMilliseconds) -ge 1 -or
+                        $Ssh.HasExited) { throw 'Held desktop SSH child identity changed' }
+                    [IO.File]::WriteAllText("$Request.observed", '')
+                    if (!$Ssh.WaitForExit(10000)) { throw 'The observed SSH child did not retire' }
+                    [IO.File]::WriteAllText("$Request.retired", '')
+                } finally { $Ssh.Dispose() }
+            }
+        }
+        $Deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (!(Test-Path -LiteralPath (Join-Path $Directory 'ssh-observer-ready'))) {
+            if ($Observer.State -in 'Completed', 'Failed', 'Stopped' -or [DateTime]::UtcNow -ge $Deadline) {
+                throw 'The desktop SSH child observer did not start'
+            }
+            Start-Sleep -Milliseconds 50
+        }
+        Invoke-ConnectionUi $Desktop 'managed-diagnostic' $BlockedPort $Directory
+        if ($Desktop.HasExited) { throw 'Installed desktop exited during Managed diagnostic acceptance' }
+        if (!(Wait-Job $Observer -Timeout 10) -or $Observer.State -ne 'Completed' -or
+            (Get-CimInstance Win32_Process -Filter "ParentProcessId=$($Desktop.Id) AND Name='ssh.exe'")) {
+            throw 'Could not verify diagnostic SSH child retirement before desktop exit'
+        }
+        Assert-NoManagedRuntime $Log
+        if (Select-String -Path $Log -Pattern '^imp: owned node pid=' -Quiet) {
+            throw 'Installed desktop started a node over the disposable SSH backend'
+        }
+        $Passed = $true
+    } finally {
+        $CleanupErrors = @()
+        try {
+            if ($Observer) { Remove-Job $Observer -Force }
+        } catch { $CleanupErrors += 'Could not stop the desktop SSH child observer' }
+        try {
+            if ($Desktop) { Stop-FixtureDesktop $Desktop $Log }
+        } catch { $CleanupErrors += 'Could not stop the installed diagnostic desktop' }
+        try {
+            if ($Fixture) {
+                if (!$Fixture.HasExited) {
+                    try {
+                        [IO.File]::AppendAllText((Join-Path $Directory 'commands.log'), "stop`n")
+                        if (!$Fixture.WaitForExit(15000)) { throw 'Fixture exit timeout' }
+                    } finally {
+                        if (!$Fixture.HasExited) { $Fixture.Kill($true) }
+                    }
+                }
+                if ($Fixture.ExitCode -ne 0) { throw 'Fixture exit failure' }
+            }
+        } catch { $CleanupErrors += 'The disposable SSH fixture did not exit cleanly; profile restoration could not be verified' }
+        if (!$Passed -and $Uv -and (!$Fixture -or $Fixture.HasExited)) {
+            Push-Location (Split-Path $PSScriptRoot)
+            try {
+                & $Uv run --locked --project services/relay python scripts/test-managed-check.py startup-evidence $Directory 2>$null
+                if ($LASTEXITCODE) { Write-Host 'Windows OpenSSH fixture startup evidence unavailable' }
+            } catch { Write-Host 'Windows OpenSSH fixture startup evidence unavailable' }
+            finally { Pop-Location }
+        }
+        try {
+            if ($Manifest -and (Get-NetTCPConnection -State Listen -LocalPort $Manifest.port -ErrorAction SilentlyContinue)) {
+                throw 'The disposable SSH listener survived fixture cleanup'
+            }
+            Wait-FixtureGone
+        } catch { $CleanupErrors += 'A disposable fixture listener or process survived cleanup' }
+        try {
+            Remove-Item -LiteralPath $Scratch -Recurse -Force
+        } catch { $CleanupErrors += 'Could not remove the disposable diagnostic fixtures' }
+        foreach ($Message in $CleanupErrors) { Write-Warning $Message -WarningAction Continue }
+        if ($CleanupErrors) { $script:FixtureCleanupFailed = $true }
+        if ($Passed -and $CleanupErrors) { throw 'Installed Managed diagnostic cleanup failed' }
+    }
 }
 
 $Completed = $false
@@ -478,6 +605,7 @@ if ($CheckConnectionUi) {
             if (!$App.HasExited) { throw 'Installed desktop is still running after cleanup' }
         }
         if ($FailedPhases) { throw "Installed connection UI assertions failed: $($FailedPhases -join ', ')" }
+        if ($CheckManagedDiagnostic) { Test-InstalledManagedDiagnostic $Port }
     } finally {
         $Blocked.Dispose()
     }

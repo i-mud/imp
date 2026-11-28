@@ -1,12 +1,20 @@
 <script lang="ts">
   import X from '@lucide/svelte/icons/x';
-  import { tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
 
-  import type {
-    ConnectionMode,
-    ConnectionSettings,
-    ConnectionSettingsState,
-    ConnectionSettingsUpdate,
+  import {
+    cancelManagedConnection,
+    checkManagedConnection,
+    managedCheckPending,
+    managedCheckRestartRequired,
+    MANAGED_CHECK_RESTART_MESSAGE,
+    RETIREMENT_UNCONFIRMED,
+    type ConnectionMode,
+    type ConnectionSettings,
+    type ConnectionSettingsState,
+    type ConnectionSettingsUpdate,
+    type ManagedCheckDestination,
+    type ManagedCheckResult,
   } from '../lib/tunnel.ts';
 
   let {
@@ -37,6 +45,27 @@
     direct: 'Remote Imp credentials',
     external: 'Own SSH tunnel',
   };
+  const SSH_USERNAME = /^[a-z0-9_][a-z0-9_.-]{0,63}$/i;
+  const CHECK_MESSAGES = {
+    invalid_destination: 'Check the server login or SSH alias and try again.',
+    ssh_unavailable: 'OpenSSH is unavailable. Install or enable the OpenSSH client, then try again.',
+    live: 'The remote Imp node reported live state during this check.',
+    stale:
+      'The remote Imp node reported stale state. Check your MUD client adapter and try again during play.',
+    down: 'The remote Imp node reported its feed is down. Check that your MUD client adapter is running.',
+    no_usable_state:
+      'No usable state was received. Check that the remote Imp node and MUD client adapter are running.',
+    host_verification: 'SSH could not verify the server. Verify its host key in OpenSSH before retrying.',
+    authentication: 'SSH sign-in failed. Set up a key or SSH agent for sign-in without prompts.',
+    forwarding_unavailable:
+      'SSH could not reach the remote Imp port. Check that the node is running and SSH allows forwarding.',
+    invalid_protocol:
+      'The response was not a supported Imp state feed. Check the remote node and its version.',
+    timeout: 'The check timed out. Check that the server and Imp node are reachable, then try again.',
+    cancelled: 'Connection check cancelled.',
+    connection_failed: 'Could not check the connection. Check your SSH setup and network, then try again.',
+    busy: 'Another connection check is running. Try again after it finishes.',
+  } satisfies Record<ManagedCheckResult, string>;
 
   let location = $state<'local' | 'remote' | null>(null);
   let mode = $state<ConnectionMode | null>(null);
@@ -49,6 +78,12 @@
   let pairingToken = $state('');
   let saving = $state(false);
   let saved = $state(false);
+  let activeCheck: number | null = null;
+  let checking = $state(false);
+  let cancelRequested = $state(false);
+  let checkResult = $state<ManagedCheckResult | null>(null);
+  let checkButton = $state<HTMLButtonElement>();
+  let cancelCheckButton = $state<HTMLButtonElement>();
   let confirmingDiscard = $state(false);
   let cancelDiscardButton = $state<HTMLButtonElement>();
   let saveButton = $state<HTMLButtonElement>();
@@ -73,9 +108,26 @@
   const canKeepPairingToken = $derived(
     stored?.mode === 'direct' && stored.hasPairingToken && sameEndpoint(stored.remoteUrl, remoteUrl.trim()),
   );
+  const checkBlocked = $derived(
+    checking || cancelRequested || $managedCheckPending || $managedCheckRestartRequired,
+  );
+  const checkStatus = $derived(
+    $managedCheckRestartRequired
+      ? ''
+      : checking
+        ? 'Checking connection…'
+        : cancelRequested
+          ? 'Cancelling check…'
+          : $managedCheckPending
+            ? 'Finishing previous check…'
+            : checkResult === null
+              ? ''
+              : CHECK_MESSAGES[checkResult],
+  );
 
   // Rebuild the draft only when the native settings actually load or save.
   $effect(() => {
+    untrack(invalidateCheck);
     if (settings === null) return;
     const current = settings.saved;
     mode = current?.mode ?? null;
@@ -113,12 +165,66 @@
 
   $effect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !saving) onclose();
+      if (event.key === 'Escape' && !saving) close();
     };
 
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   });
+
+  onDestroy(invalidateCheck);
+
+  function close(): void {
+    invalidateCheck();
+    onclose();
+  }
+
+  function invalidateCheck(): void {
+    const requestId = activeCheck;
+    if (requestId !== null && !cancelRequested) void cancelManagedConnection(requestId).catch(() => {});
+    activeCheck = null;
+    checking = false;
+    cancelRequested = false;
+    checkResult = null;
+  }
+
+  function cancelCheck(): void {
+    if (activeCheck === null || cancelRequested) return;
+    if (document.activeElement === cancelCheckButton) checkButton?.focus();
+    checking = false;
+    cancelRequested = true;
+    void cancelManagedConnection(activeCheck).catch(() => {});
+  }
+
+  async function checkConnection(): Promise<void> {
+    if (mode !== 'managed' || saving || checkBlocked) return;
+    issue = null;
+    checkResult = null;
+    const destination = managedDestination(true);
+    if (!destination) return;
+
+    try {
+      const request = checkManagedConnection(destination);
+      if (request === null) {
+        checkResult = 'ssh_unavailable';
+        return;
+      }
+      activeCheck = request.requestId;
+      checking = true;
+      const result = await request.result;
+      if (activeCheck !== request.requestId) return;
+
+      if (document.activeElement === cancelCheckButton) checkButton?.focus();
+      activeCheck = null;
+      checking = false;
+      if (result !== RETIREMENT_UNCONFIRMED && (!cancelRequested || result === 'cancelled')) {
+        checkResult = Object.hasOwn(CHECK_MESSAGES, result) ? result : 'connection_failed';
+      }
+      cancelRequested = false;
+    } catch {
+      checkResult = 'connection_failed';
+    }
+  }
 
   function stateUrl(value: string): URL | null {
     try {
@@ -173,6 +279,54 @@
     );
   }
 
+  function validCheckSshTarget(target: string): boolean {
+    if (/\s/.test(target)) return false;
+    const at = target.indexOf('@');
+    const host = at < 0 ? target : target.slice(at + 1);
+    return (
+      (at < 0 || SSH_USERNAME.test(target.slice(0, at))) &&
+      (/^[a-z0-9_][a-z0-9_.-]{0,252}$/i.test(host) || (host.includes(':') && validSshHost(host)))
+    );
+  }
+
+  function managedDestination(checking = false): ManagedCheckDestination | null {
+    if (useSshAlias) {
+      const target = sshTarget.trim();
+      if (!target || (checking && !validCheckSshTarget(target))) {
+        issue = {
+          field: 'ssh',
+          message: target
+            ? 'To check this connection, enter an SSH alias or host with an optional username and no port.'
+            : 'Enter your SSH target.',
+        };
+        sshField?.focus();
+        return null;
+      }
+      return { sshTarget: target };
+    }
+
+    const host = sshHost.replace(/^ +| +$/g, '');
+    const username = sshUsername.replace(/^ +| +$/g, '');
+    const port = sshPort.replace(/^ +| +$/g, '');
+    if (!validSshHost(host)) {
+      issue = { field: 'server', message: 'Enter a server hostname or IP address.' };
+      serverField?.focus();
+      return null;
+    }
+    if (!SSH_USERNAME.test(username)) {
+      issue = { field: 'username', message: 'Enter a valid SSH username.' };
+      usernameField?.focus();
+      return null;
+    }
+    const portNumber = Number(port);
+    if (port && (!/^[0-9]+$/.test(port) || portNumber < 1 || portNumber > 65535)) {
+      issue = { field: 'port', message: 'Enter a port from 1 to 65535.' };
+      portField?.focus();
+      return null;
+    }
+    return { sshDestination: port ? { host, username, port: portNumber } : { host, username } };
+  }
+
   function endpoint(summary: ConnectionSettings): string {
     if (summary.mode === 'managed') {
       const destination = summary.sshDestination;
@@ -185,6 +339,7 @@
   }
 
   function edit(): void {
+    invalidateCheck();
     confirmingDiscard = false;
     saved = false;
     issue = null;
@@ -231,6 +386,7 @@
       settings === null ||
       mode === null ||
       saving ||
+      checkBlocked ||
       (discardConfirmed && !confirmingDiscard)
     ) {
       return;
@@ -238,36 +394,9 @@
 
     let update: ConnectionSettingsUpdate;
     if (mode === 'managed') {
-      if (useSshAlias) {
-        const target = sshTarget.trim();
-        if (!target) {
-          issue = { field: 'ssh', message: 'Enter your SSH target.' };
-          sshField?.focus();
-          return;
-        }
-        update = { mode, sshTarget: target };
-      } else {
-        const host = sshHost.replace(/^ +| +$/g, '');
-        const username = sshUsername.replace(/^ +| +$/g, '');
-        const port = sshPort.replace(/^ +| +$/g, '');
-        if (!validSshHost(host)) {
-          issue = { field: 'server', message: 'Enter a server hostname or IP address.' };
-          serverField?.focus();
-          return;
-        }
-        if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(username)) {
-          issue = { field: 'username', message: 'Enter a valid SSH username.' };
-          usernameField?.focus();
-          return;
-        }
-        const portNumber = Number(port);
-        if (port && (!/^[0-9]+$/.test(port) || portNumber < 1 || portNumber > 65535)) {
-          issue = { field: 'port', message: 'Enter a port from 1 to 65535.' };
-          portField?.focus();
-          return;
-        }
-        update = { mode, sshDestination: port ? { host, username, port: portNumber } : { host, username } };
-      }
+      const destination = managedDestination();
+      if (!destination) return;
+      update = { mode, ...destination };
     } else if (mode === 'direct') {
       const url = remoteUrl.trim();
       if (!stateUrl(url)) {
@@ -342,11 +471,14 @@
       type="button"
       aria-label="Close connection settings"
       disabled={saving}
-      onclick={onclose}><X size={16} /></button
+      onclick={close}><X size={16} /></button
     >
   </header>
 
   <div class="dialog-content">
+    {#if $managedCheckRestartRequired}
+      <p id="managed-check-restart-required" class="error" role="alert">{MANAGED_CHECK_RESTART_MESSAGE}</p>
+    {/if}
     {#if loadError !== null}
       <p class="error" role="alert">{loadError}</p>
     {:else if settings === null}
@@ -535,6 +667,36 @@
           >
             {useSshAlias ? 'Use server and username' : 'Use an existing SSH alias'}
           </button>
+          <div>
+            <div class="form-actions check-actions">
+              <button
+                bind:this={checkButton}
+                class="manager-btn secondary"
+                name="check-managed-connection"
+                type="button"
+                disabled={saving}
+                aria-disabled={checkBlocked || undefined}
+                aria-describedby={$managedCheckRestartRequired
+                  ? 'managed-check-help managed-check-restart-required'
+                  : 'managed-check-help'}
+                onclick={() => void checkConnection()}>Check connection</button
+              >
+              {#if checking}
+                <button
+                  bind:this={cancelCheckButton}
+                  class="manager-btn secondary"
+                  name="cancel-managed-check"
+                  type="button"
+                  onclick={cancelCheck}>Cancel check</button
+                >
+              {/if}
+            </div>
+            <p id="managed-check-help" class="mode-help">
+              Checks the remote Imp node without saving. It does not verify your character, updates during
+              play, or actions.
+            </p>
+            <p id="managed-check-status" role="status" class="mode-help">{checkStatus}</p>
+          </div>
         {:else if mode === 'direct'}
           <label>
             <span>WSS state URL</span>
@@ -581,6 +743,10 @@
           </p>
         {/if}
 
+        {#if mode !== 'managed' && $managedCheckPending}
+          <p class="mode-help" role="status">{checkStatus}</p>
+        {/if}
+
         {#if issue !== null}
           <p id="connection-field-error" class="error" role="alert">{issue.message}</p>
         {:else if showSaveError && saveError !== null}
@@ -620,6 +786,7 @@
               class="manager-btn danger"
               type="button"
               aria-describedby="discard-direct-warning"
+              disabled={checkBlocked}
               onclick={() => void save(true)}>Remove credentials and save</button
             >
           {:else}
@@ -627,7 +794,7 @@
               bind:this={saveButton}
               class="manager-btn primary"
               type="submit"
-              disabled={saving || mode === null}
+              disabled={saving || mode === null || checkBlocked}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -637,7 +804,7 @@
             class="manager-btn secondary"
             type="button"
             disabled={saving}
-            onclick={onclose}
+            onclick={close}
           >
             Close
           </button>
@@ -861,5 +1028,19 @@
     justify-content: end;
     gap: var(--space-4);
     padding-top: var(--space-1);
+  }
+
+  .check-actions {
+    justify-content: start;
+    margin-bottom: var(--space-4);
+  }
+
+  .check-actions button[aria-disabled='true'] {
+    opacity: var(--opacity-disabled);
+    cursor: default;
+  }
+
+  #managed-check-status:not(:empty) {
+    margin-top: var(--space-4);
   }
 </style>

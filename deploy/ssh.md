@@ -14,20 +14,24 @@ interactive prompt. Both modes use the same server installation.
 - Use the Windows OpenSSH **Client** from PowerShell on the same computer and
   Windows account that run Imp, not from WSL or from the server. Ask the server
   operator for the SSH hostname, login name, port, and host-key fingerprint.
+  **Check connection** requires the Windows OpenSSH Client feature; an SSH
+  client installed elsewhere or available through `PATH` isn't a substitute.
 
-Both modes forward the entire relay TCP port without filtering routes or adding
-relay authentication. Use SSH forwarding only if you trust the local users and
-processes on **both** computers: a loopback listener isn't reachable directly
-from the network, but other processes on that computer can reach it. Never bind
-the relay or the SSH forward to a public interface.
+Both gameplay modes forward the entire relay TCP port without filtering routes
+or adding relay authentication. Use SSH forwarding only if you trust the
+local users and processes on **both** computers: a loopback listener isn't
+reachable directly from the network, but other processes on that computer can
+reach it. Never bind the relay or the SSH forward to a public interface.
 
 ## Managed SSH
 
-In a source build with separate login fields, follow [Server and
-username](#server-and-username). The published
-[v0.6.0 installer](https://github.com/i-mud/imp/releases/tag/v0.6.0) uses the
-[existing alias](#existing-ssh-alias) steps below instead. Neither route
-handles interactive SSH prompts in Imp.
+Use [server and username](#server-and-username) or an
+[existing SSH alias](#existing-ssh-alias). In a current source build, select
+**Check connection** instead of running a separate terminal preflight.
+The published [v0.7.0 installer](https://github.com/i-mud/imp/releases/tag/v0.7.0)
+supports both login forms but has no in-app check: use the
+[terminal preflight](#terminal-preflight) instead. Neither version handles SSH
+prompts in Imp.
 
 ### Server and username
 
@@ -46,26 +50,14 @@ handles interactive SSH prompts in Imp.
    `-p 2222` if you will leave the port blank in Imp. Compare the displayed
    fingerprint with the one obtained through a separate trusted channel
    **before** accepting an unknown key. If `CheckHostIP` is enabled in your
-   OpenSSH configuration, verify the host and its address in this preflight.
+   OpenSSH configuration, verify the host and its address during this login.
    If the key is unexpected or changed, stop and confirm it with the operator.
    Complete the login in PowerShell and type `exit`. Don't bypass verification.
 
-3. With the same host, username and port (or no `-p`), test a fresh,
-   noninteractive login from PowerShell:
-
-   ```powershell
-   ssh -S none -o ForkAfterAuthentication=no -o BatchMode=yes -o StrictHostKeyChecking=yes -o VerifyHostKeyDNS=no -o NoHostAuthenticationForLocalhost=no -o UpdateHostKeys=no -l muduser -p 2222 -- vps.example.com exit
-   ```
-
-   This must succeed without prompting; `exit` tests remote command access
-   too. It doesn't check SSH forwarding permission, the desktop port, or
-   relay health. Fix SSH access first, or use [External SSH](#external-ssh)
-   if the login needs a prompt every time.
-
-4. Select **Set up connection** or go to **Settings → Connection → Manage**.
+3. Select **Set up connection** or go to **Settings → Connection → Manage**.
    Choose **On another computer or server → Use my server login**. Enter
    the same **Server**, **Username**, and, if specified, **Port (optional)**.
-   Select **Save**, choose **Quit Imp** in the tray, then reopen Imp.
+   Follow [Check, save and restart](#check-save-and-restart).
 
 Enter a server name, not a URL or a full SSH command. **Server** accepts an
 ASCII DNS name (letters, digits and hyphens; labels must start and end with
@@ -120,29 +112,69 @@ changed, stop and have the server operator verify it; don't bypass the warning.
 Handle authentication prompts in PowerShell, not in Imp. Type `exit` once you
 have verified the login.
 
-1. Make sure the alias can log in without prompts as the Windows account that
-   runs Imp. If your key has a passphrase, load it into the Windows OpenSSH
-   agent before opening Imp.
-2. In PowerShell, test a fresh login with that alias:
-
-   ```powershell
-   ssh -S none -o BatchMode=yes imp-vps exit
-   ```
-
-   If it fails, fix SSH access first. If your login always needs a prompt, use
-   [External SSH](#external-ssh).
-
-3. Select **On another computer or server → Use my server login** in the
-   Connection dialog. In a build with server fields, select **Use an existing
-   SSH alias** to enter the **SSH target**. With v0.6.0,
-   enter your alias in **SSH target** directly. In
-   [v0.5.4](../docs/install-windows.md#published-v054), open the manager via
-   Settings and select **Managed** instead. Select **Save**, choose **Quit Imp**
-   in the tray, then reopen Imp.
+If your key has a passphrase, load it into the Windows OpenSSH agent before
+opening Imp. Select **On another computer or server → Use my server login →
+Use an existing SSH alias**, then enter the alias in **SSH target**. With
+[v0.6.0](https://github.com/i-mud/imp/releases/tag/v0.6.0), enter your alias in
+**SSH target** directly. In [v0.5.4](../docs/install-windows.md#published-v054),
+open the manager via Settings and select **Managed** instead.
+Follow [Check, save and restart](#check-save-and-restart).
 
 A saved SSH target stays in alias mode and is not parsed or migrated to
 the separate fields. Legacy Managed SSH retains its existing host-key
 settings; switching to separate fields is optional.
+
+### Check, save and restart
+
+1. In a current source build, select **Check connection**. Imp uses the
+   entered login without saving it or changing the running connection. The
+   check opens one temporary SSH stream to the server's loopback relay, reads
+   its game-feed status, and closes. It requires forwarding permission but
+   does not run a remote shell command or send a game action. **Cancel check**
+   stops the check; editing the login or closing the dialog also cancels it.
+   If your version doesn't show this control, use the
+   [terminal preflight](#terminal-preflight).
+2. Select **Save**, choose **Quit Imp** in the tray, then reopen Imp to apply
+   the change. A check result is not a requirement for saving.
+3. In TinyFugue, select the intended world and play. Setup is complete when
+   Imp shows your intended character and the vitals visibly update.
+
+A live result means the relay reported a live feed with usable state during
+that check. A stale, down, or missing-state result can mean the relay is
+reachable but isn't supplying usable live data. A timeout doesn't prove the
+relay is down. The check doesn't test whether the desktop gameplay port
+(`8789`) can bind, identify which relay gameplay state or actions will reach
+after restart, or confirm the intended character or continuing updates.
+
+Imp and the OpenSSH client it starts for the check don't open a listening
+port. If you use `ProxyJump` or `ProxyCommand`, make sure every proxy or jump
+process uses verified, noninteractive SSH in the foreground and opens no
+additional forwards or listeners. Imp can't enforce this in your OpenSSH
+configuration. Ask the operator to confirm it before running the check if
+you're unsure. The Managed gameplay forward is unchanged.
+
+### Terminal preflight
+
+In v0.7.0 and earlier, test a fresh noninteractive login from PowerShell on the
+Windows account that runs Imp. This is optional troubleshooting if your build
+has **Check connection**. For separate server fields, use the same host,
+username and port as in Imp; omit `-p 2222` if you leave the port blank:
+
+```powershell
+ssh -S none -o ForkAfterAuthentication=no -o BatchMode=yes -o StrictHostKeyChecking=yes -o VerifyHostKeyDNS=no -o NoHostAuthenticationForLocalhost=no -o UpdateHostKeys=no -l muduser -p 2222 -- vps.example.com exit
+```
+
+For an existing SSH alias:
+
+```powershell
+ssh -S none -o BatchMode=yes imp-vps exit
+```
+
+This should succeed without prompting. `exit` also tests remote command
+access, which the in-app check doesn't need. Neither command tests
+forwarding permission, the desktop port, or relay health. Resolve unexpected
+host keys with the server operator; never bypass verification. If your login
+always needs a prompt, use [External SSH](#external-ssh).
 
 ## External SSH
 
@@ -178,10 +210,11 @@ save, quit and reopen Imp.
 ## Tunnel ownership and ports
 
 Managed uses the system OpenSSH client, configuration, keys, `known_hosts`, and
-agent. Imp doesn't store an SSH password or private key. Managed and its
-preflight use `-S none` to avoid reusing an OpenSSH master. The preflight
-checks a new noninteractive login, not forwarding permission, port
-availability, or relay health.
+agent. Imp doesn't store an SSH password or private key. The Managed forward
+and the in-app check start their own foreground OpenSSH target client without
+reusing a master. Proxy or jump clients must also be configured for trusted,
+noninteractive foreground operation; the target options don't make nested
+clients foreground or contain independently persistent processes.
 
 Both forms of Managed SSH supervise their own forward. If a listener on the
 desktop port already answers like an Imp relay, Imp can use it without owning
@@ -204,10 +237,13 @@ for the desktop's same-host node, not the SSH listener.
 
 ## Troubleshooting
 
-- **SSH login fails:** Fix it in PowerShell first. Check the server address or
-  alias, username, SSH port, key and agent. If the preflight prompts or fails,
-  don't work around verification. If a host key is unexpected or changed, stop
-  and confirm it with the server operator.
+- **OpenSSH unavailable in Check connection:** Install or enable the Windows
+  OpenSSH Client optional feature. The check uses the system copy at
+  `%SystemRoot%\System32\OpenSSH\ssh.exe`; it doesn't search `PATH`.
+- **SSH login fails:** Check the server address or alias, username, SSH port,
+  key and agent. Use [the terminal preflight](#terminal-preflight) if you need
+  to troubleshoot the login in PowerShell. If a host key is unexpected or
+  changed, stop and confirm it with the server operator.
 - **Local port occupied:** Use `Get-NetTCPConnection -LocalPort 8789 -State Listen`
   in PowerShell to identify the listener by `OwningProcess`. Stop only a forward
   you started and meant to replace. If the listener is unknown or belongs to

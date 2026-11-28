@@ -1088,45 +1088,47 @@ landed separately and is unchanged by Guided SSH.
 
 ### 29.3 - Guided SSH
 
-**PR1: server-login fields for Managed SSH.** Keep existing Managed gameplay,
-alias handling, and save/restart behavior; remove the need to create an alias
-for a supported server address and established, noninteractive login. Compare
-against the 29.0 onboarding baseline: this does not simplify SSH authentication,
-verify forwarding in the UI, change remote installation, or remove the restart.
+**29.3 PR1: server-login fields for Managed SSH (published in v0.7.0).**
+[PR #72](https://github.com/i-mud/imp/pull/72) removed the need to create an
+alias for a supported server address and established noninteractive login.
+It kept alias settings, the existing Managed gameplay transport and the
+save/restart flow. v0.7.0 still uses terminal preflight; it did not change
+authentication or remote installation.
 
-**PR2 proposal: check an unsaved login without changing the running connection.**
-Use the same validated structured settings and target host policy to start
-one foreground system `ssh -W 127.0.0.1:8787` process. Use its stdin/stdout
-for one read-only WebSocket to `/state`: no desktop listener, no adopted forward,
-no remote command, and no `/action` or `/ingest` requests. Never save the form,
-change the active route, or retry. Give the check a short overall deadline
-(proposed: five seconds, including login and relay frames), with cancellation on
-request, dialog close, or edited login details. Close the stream and clean up
-the owned process on every outcome; discard late results for the old form.
-Use safe diagnostics without exposing raw frames, SSH config, or credentials.
+**29.3e: explicit Managed SSH diagnostic (source).** The user can check the
+entered server login or alias before saving. The check replaces the routine
+terminal preflight on this route, not first-time host trust and credential
+preparation. It starts one owned foreground system `ssh -W 127.0.0.1:8787`
+process for one read-only `/state` WebSocket over stdio. Neither Imp nor
+that target client opens a listener. Any nested proxy or jump process
+must be operator-configured for verified, noninteractive foreground use
+without additional forwards or listeners. There is no port adoption,
+remote command, retry, `/action` or `/ingest` request. The five-second
+overall deadline includes login and relay frames.
+Cancellation, dialog close and edited login details request retirement;
+stale results cannot update a newer draft. If retirement cannot be confirmed,
+Imp refuses another check or save until restart. Only safe result categories
+cross to the renderer, and the check does not save or activate a route.
 
-Validate the real [protocol](../packages/protocol/SPEC.md#messages) frames:
-versioned `hello` and `status`, not just a WebSocket upgrade or `/healthz`.
-Use a valid `snapshot` with non-null context alongside current `status.feed`
-to distinguish a live feed from a reachable relay with `down`, `stale`, or
-no usable state. Snapshot timestamps and retained values do not prove freshness:
-unchanged observations can keep the feed live. Report only what the relay
-showed during the check. A slow login or path can cause a timeout; it does
-not prove the relay is down. The check would not
-prove the player's character is correct, that gameplay will stay live, that
-the separate Managed forward can bind, or that state and actions will use the
-same backend after Save. Confirm the intended character's vitals update during
-play.
+The diagnostic validates versioned `hello` and `status` rather than just a
+WebSocket upgrade or `/healthz`. A live result needs a valid snapshot with
+non-null context and a live feed status. Stale, down, and no usable state
+are not a live result; retained values and snapshot timestamps don't prove
+freshness. A timeout doesn't prove the relay is down. The check cannot prove
+the intended character, continuing updates, that the separate gameplay
+forward can bind, or that state and actions use the checked backend after
+Save and restart. Confirm the intended character's vitals update during play.
 
-Acceptance for PR2 would use the production relay with a synthetic producer
-on a disposable SSH server and native Windows/Linux clients. Cover verified
-login on a configured SSH port, host-key rejection, unauthorized identity,
-forwarding denial, missing backend, invalid protocol, and real live, stale,
-down, and retained-state cases. Cover deadline, cancellation, changed inputs
-and late replies, process cleanup, and isolation from an occupied `8789` and
-an existing session. Check that no listener is created, settings and gameplay
-don't change, and no action is sent. This is fixture evidence, not published
-artifact or player acceptance.
+Acceptance uses the production relay with a synthetic producer on a
+disposable SSH server and native Windows/Linux clients. Measure configured
+SSH port and verified login; host-key rejection, unauthorized identity,
+forwarding denial, missing backend, and invalid protocol; live, stale, down,
+and retained-state results; and deadline, cancellation, changed inputs,
+late replies, and owned process cleanup. Check an occupied `8789` and an
+existing session. Verify no listener from Imp or the directly launched
+client, no settings or gameplay changes, and no action. Record evidence in
+[status](status.md#slice-29---connection-onboarding); these checks are not
+published-artifact or player acceptance.
 
 **Strict gameplay transport is deferred.** Keep
 [the negative evidence from #69–71](status.md#slice-29---connection-onboarding)

@@ -29,9 +29,10 @@ Manage** if you dismissed the prompt. Choose **On another computer or server**.
 Then choose who runs the SSH connection:
 
 - **Use my server login:** Follow [Managed SSH](../../deploy/ssh.md#managed-ssh)
-  if your verified Windows OpenSSH login works without prompts. The published
-  v0.6.0 installer uses an existing SSH alias; newer source builds can also
-  accept a server, username, and optional SSH port directly.
+  if your verified Windows OpenSSH login works without prompts. Enter the
+  server, username and optional SSH port, or use an existing alias. The
+  published v0.7.0 installer uses a terminal preflight; current source builds
+  offer **Check connection** instead.
 - **Advanced → Use my own SSH tunnel:** Follow
   [External SSH](../../deploy/ssh.md#external-ssh) if you need authentication
   prompts or prefer manual control.
@@ -39,8 +40,9 @@ Then choose who runs the SSH connection:
 If you installed [v0.5.4](../install-windows.md#published-v054), follow the
 release-specific steps in the matching SSH section instead.
 
-An open SSH session alone doesn't prove Imp can reach the intended server's
-relay. Save any connection change and quit and reopen Imp to apply it.
+A login or successful **Check connection** doesn't prove the running HUD
+reaches the intended relay or character. Save any connection change and quit
+and reopen Imp to apply it.
 
 ## In TinyFugue
 

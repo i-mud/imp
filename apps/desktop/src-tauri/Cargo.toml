@@ -34,6 +34,9 @@ tempfile = "3"
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-window-state = "2"
+# The app registers no native logger. Filter the `tungstenite` target if adding
+# one: its debug/trace output can contain peer payloads.
+tungstenite = "0.30"
 url = "2"
 tauri-plugin-shell = "=2.3.6"
 

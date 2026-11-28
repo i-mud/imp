@@ -54,10 +54,14 @@ session don't establish that.
 - **Check and recover:** In **Settings → Connection → Manage**, check the
   connection **In use** (in v0.5.4, the selection shows what was last saved).
   Follow the matching route:
-  - **Managed SSH (Use my server login):** Use the
-    [Managed SSH preflight](../deploy/ssh.md#managed-ssh) with the same server
-    details or SSH alias. Resolve prompts in your own SSH client first. If the
-    host key is unexpected or has changed, stop and verify it with the server operator.
+  - **Managed SSH (Use my server login):** In a current source build, select
+    **Check connection** with the same server details or SSH alias. It checks
+    the entered login and the relay's reported feed, not the running HUD
+    route or desktop port. Use the
+    [terminal preflight](../deploy/ssh.md#terminal-preflight) in v0.7.0 and
+    earlier or to investigate the login. Handle prompts in your own SSH client.
+    If the host key is unexpected or has changed, stop and verify it with
+    the server operator.
   - **External SSH (Use my own SSH tunnel):** Make sure your
     [SSH forward](../deploy/ssh.md#external-ssh) is still running on
     `127.0.0.1:8789` and points to the right server's loopback relay.
@@ -69,6 +73,17 @@ session don't establish that.
 - **Stop:** If the chosen path fails its checks, ask the server operator. Don't
   bypass host-key or TLS checks, replace an unknown process using a port, or
   expose the loopback relay to make the connection work. See [operator checks](#operator-checks).
+
+If the Managed check reports forwarding unavailable or cannot read the relay,
+ask the operator to check forwarding permission and the server's loopback relay.
+A timeout may also mean the path or login was slow. A stale, down, or missing
+feed is different from a login failure: see
+[Imp is connected but shows no character](#imp-is-connected-but-shows-no-character).
+If the check reports live but the HUD still isn't connected after Save and
+restart, check the [gameplay forward and desktop port](../deploy/ssh.md#troubleshooting).
+If Imp cannot confirm that the temporary SSH process stopped, **quit and
+reopen Imp** before checking or saving again. This is a local cleanup fault,
+not evidence that your server login failed. Your saved settings are unchanged.
 
 ## Imp is connected but shows no character
 
@@ -123,7 +138,8 @@ session don't establish that.
   on reconnect, but Imp doesn't resend actions.
 - **Check and recover:** Keep playing in your MUD client if it's still
   connected. Check the underlying path: for **Local**, look for a local node
-  or port error; for **Managed**, check the network and the SSH preflight;
+  or port error; for **Managed**, check the network and follow the
+  [Managed SSH diagnostics](#server-login-works-but-imp-wont-connect);
   for **External**, restore your own forward if it exited; for **Direct**,
   check public reachability and TLS. After it reconnects, confirm fresh
   updates before relying on the HUD again.
@@ -160,6 +176,7 @@ session don't establish that.
   only when a saved change still needs a restart. The published v0.5.4
   release shows only the saved selection. Closing the dialog doesn't save
   or apply changes.
+  **Check connection** doesn't save or apply changes either.
 - **Check and recover:** If the intended route is already saved for next
   launch, use **Quit Imp** in the Windows notification area and reopen Imp.
   Otherwise, choose the intended route in **Settings → Connection → Manage**,
