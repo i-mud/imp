@@ -4,7 +4,9 @@
 import argparse
 import asyncio
 import ctypes
+import http.client
 import json
+import ntpath
 import os
 import re
 import runpy
@@ -40,6 +42,23 @@ EVIDENCE_LIMIT = 16 * 1024
 VERSION = rb"[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}(?:p[0-9]{1,3})?"
 PHASES = ("tools", "account-context", "key-generation", "key-acl", "server-config",
           "server-listener", "installed-alias", "independent-forward", "installed-listeners", "ready")
+PERMISSION_ROLES = {
+    "fixture-directory": ".", "server-config": "sshd.config",
+    "host-key": "host_key", "authorized-keys": "authorized_keys",
+}
+PERMISSION_REPORTS = {
+    "rejected-ace": rb"Bad permissions\. Try removing permissions for user: .+? "
+                    rb"(?:\((?P<sid>S-1(?:-[0-9]{1,20}){2,16})\) )?on file (?P<path>.+)\.",
+    "rejected-owner": rb"Bad owner on (?P<path>.+)",
+    "descriptor-read-failed": rb"failed to retrieve the owner sid and dacl of file (?P<path>.+) with error code: [0-9]+",
+    "bad-ownership-or-modes": rb"(?:Authentication refused: bad ownership or modes for (?:file|directory) "
+                              rb"(?P<path>.+)|Ignored (?P<ignored>.+): bad ownership or modes)",
+    "access-denied": rb"Could not open authorized keys '(?P<path>.+)': Permission denied",
+}
+IDENTITY_ROLES = ("token-user", "login-user", "sshd-listener-user")
+PRINCIPAL_ROLES = (*IDENTITY_ROLES, "token-group", "system", "administrators", "trusted-installer",
+                   "builtin-users", "authenticated-users", "everyone")
+ACE_LIMIT = 12
 EVIDENCE = {
     "client": {
         "host-verification": (rb"Host key verification failed\.",),
@@ -71,11 +90,7 @@ EVIDENCE = {
             rb'.*sshd\.config line [0-9]+: unsupported option "[^"]+"\.',
         ),
         "authentication-rejected": (rb"Failed publickey for .+ from 127\.0\.0\.1 port [0-9]{1,5} ssh2(?:: .+)?",),
-        "key-permissions": (
-            rb"Authentication refused: bad ownership or modes for (?:file|directory) .+",
-            rb"Ignored .+: bad ownership or modes",
-            rb"Bad permissions\. Try removing permissions for user: .+ on file .+\.",
-        ),
+        "key-permissions": tuple(PERMISSION_REPORTS.values()),
         "bind-failed": (
             rb"Bind to port [0-9]{1,5} on 127\.0\.0\.1 failed: .+",
             rb"Cannot bind any address\.",
@@ -96,10 +111,14 @@ def evidence_lines(data):
             yield line
 
 
+def diagnostic_lines(data):
+    for line in evidence_lines(data):
+        yield re.sub(rb"^(?:debug[123]|error|fatal): ", b"", line).removesuffix(b" [preauth]")
+
+
 def classify_evidence(data, side):
     found = set()
-    for line in evidence_lines(data):
-        line = re.sub(rb"^(?:debug[123]|error|fatal): ", b"", line).removesuffix(b" [preauth]")
+    for line in diagnostic_lines(data):
         for category, patterns in EVIDENCE[side].items():
             if any(re.fullmatch(pattern, line) for pattern in patterns):
                 found.add(category)
@@ -112,6 +131,148 @@ def ssh_version(data):
         if match:
             return match[1].decode("ascii")
     return "unidentified"
+
+
+def permission_reports(data, paths):
+    def windows_path(path):
+        return ntpath.normcase(path.removeprefix('\\\\?\\'))
+
+    known = {windows_path(str(path)): role for role, path in paths.items()}
+    reports = {}
+    for line in diagnostic_lines(data):
+        for reason, pattern in PERMISSION_REPORTS.items():
+            if match := re.fullmatch(pattern, line):
+                groups = match.groupdict()
+                path = (groups["path"] or groups.get("ignored")).decode("ascii")
+                if path.startswith('"') and path.endswith('"'):
+                    path = path[1:-1]
+                if role := known.get(windows_path(path)):
+                    if role not in reports or reason == "rejected-ace":
+                        sid = groups.get("sid")
+                        reports[role] = {"reason": reason, "sid": sid.decode("ascii") if sid else None}
+                break
+    return reports
+
+
+def inspect_permissions(root, login, server_process, reports):
+    executable = openssh("sshd").parent.parent / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    pid = server_process.pid if server_process is not None and server_process.poll() is None else None
+    request = {"root": str(root), "login": login, "serverPid": pid, "reports": reports, "limit": ACE_LIMIT}
+    try:
+        with tempfile.TemporaryFile() as output:
+            subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-File", SCRIPTS / "inspect-managed-check-acl.ps1"],
+                input=json.dumps(request).encode("ascii"), stdout=output, stderr=subprocess.DEVNULL,
+                check=True, timeout=10,
+            )
+            output.seek(0)
+            data = output.read(EVIDENCE_LIMIT + 1)
+        result = json.loads(data) if len(data) <= EVIDENCE_LIMIT else None
+    except (OSError, ValueError, RecursionError, subprocess.SubprocessError):
+        result = None
+    if not isinstance(result, dict):
+        result = {}
+    identities = result.get("identities", {})
+    descriptors = result.get("descriptors", {})
+    permissions = {
+        "identities": {role: identities.get(role) if isinstance(identities, dict) else None for role in IDENTITY_ROLES},
+        "files": {
+            role: {
+                "reason": report["reason"],
+                "descriptor": descriptors.get(role) if isinstance(descriptors, dict) else None,
+            }
+            for role, report in reports.items()
+        },
+    }
+    try:
+        render_permissions(permissions)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        permissions["identities"] = dict.fromkeys(IDENTITY_ROLES)
+        for report in permissions["files"].values():
+            report["descriptor"] = None
+    return permissions
+
+
+def render_permissions(permissions):
+    def fields(value, *expected):
+        if not isinstance(value, dict) or value.keys() != set(expected):
+            raise ValueError
+
+    def principals(value):
+        if isinstance(value, list) and len(value) <= len(PRINCIPAL_ROLES) and all(
+            role in PRINCIPAL_ROLES for role in value
+        ):
+            return "+".join(value) or "other"
+        raise ValueError
+
+    def number(value, bound):
+        if type(value) is int and 0 <= value <= bound:
+            return value
+        raise ValueError
+
+    fields(permissions, "identities", "files")
+    identities = permissions["identities"]
+    files = permissions["files"]
+    fields(identities, *IDENTITY_ROLES)
+    if not isinstance(files, dict) or not files.keys() <= PERMISSION_ROLES.keys():
+        raise ValueError
+    if not files:
+        return ["  permission rejection: no known fixture path matched"]
+    output = ["  identities: " + "; ".join(
+        f"{role}={principals(identities[role]) if identities[role] is not None else 'unavailable'}"
+        for role in IDENTITY_ROLES
+    ) + "; auth-child-token=not-observed"]
+    for role, report in files.items():
+        fields(report, "reason", "descriptor")
+        reason = report["reason"]
+        if reason not in PERMISSION_REPORTS:
+            raise ValueError
+        prefix = f"  descriptor {role}: rejection={reason}; snapshot=after-rejection"
+        descriptor = report["descriptor"]
+        if descriptor is None:
+            output.append(prefix + "; unavailable")
+            continue
+        fields(descriptor, "owner", "control", "reportedSidMatches", "aceCount", "aces")
+        owner = principals(descriptor["owner"]) if descriptor["owner"] is not None else "not-observed"
+        control = number(descriptor["control"], 0xffff)
+        match = descriptor["reportedSidMatches"]
+        dacl = descriptor["aceCount"]
+        aces = descriptor["aces"]
+        if not isinstance(aces, list) or len(aces) > ACE_LIMIT:
+            raise ValueError
+        if dacl is None:
+            if aces or match not in (None, 0):
+                raise ValueError
+        elif len(aces) > number(dacl, 0xffff):
+            raise ValueError
+        if match is not None:
+            number(match, dacl or 0)
+        output.append(
+            f"{prefix}; owner={owner}; control=0x{control:04x}; "
+            f"protected={'yes' if control & 0x1000 else 'no'}; "
+            f"auto-inherited={'yes' if control & 0x0400 else 'no'}; "
+            f"dacl={'null' if dacl is None else dacl}; captured-aces={len(aces)}; "
+            f"reported-sid-ace-matches={'no-sid' if match is None else match}"
+        )
+        for ace in aces:
+            fields(ace, "index", "type", "flags", "mask", "principal", "matchesReportedSid")
+            index = number(ace["index"], dacl - 1)
+            kind = number(ace["type"], 0xff)
+            flags = number(ace["flags"], 0xff)
+            mask = ace["mask"]
+            if mask is not None and (not isinstance(mask, str) or not re.fullmatch(r"[0-9a-f]{8}", mask)):
+                raise ValueError
+            relation = principals(ace["principal"]) if ace["principal"] is not None else "not-observed"
+            reported = ace["matchesReportedSid"]
+            if type(reported) is not bool:
+                raise ValueError
+            output.append(
+                f"    ace[{index}]: type={kind}; flags=0x{flags:02x} "
+                f"({'inherited' if flags & 0x10 else 'explicit'}); "
+                f"mask={'unavailable' if mask is None else '0x' + mask}; principal={relation}; "
+                f"matches-reported-sid={'yes' if reported else 'no'}"
+            )
+    return output
 
 
 def render_evidence(summary):
@@ -144,14 +305,23 @@ def render_evidence(summary):
         ):
             return unavailable
         output.append(f"  {side} System32/OpenSSH/{executable}: version={version}; evidence={','.join(categories)}")
+    if "independentForward" in summary:
+        if summary["independentForward"] != "relay-health-live":
+            return unavailable
+        output.append("  independent forward: live production relay health verified")
+    if "permissions" in summary:
+        try:
+            output.extend(render_permissions(summary["permissions"]))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return unavailable
     return "\n".join(output)
 
 
 def read_startup_evidence(root):
     try:
         with (root / "startup-evidence.json").open("rb") as file:
-            data = file.read(1025)
-        summary = json.loads(data) if len(data) <= 1024 else None
+            data = file.read(EVIDENCE_LIMIT + 1)
+        summary = json.loads(data) if len(data) <= EVIDENCE_LIMIT else None
     except (ValueError, OSError, RecursionError):
         summary = None
     return render_evidence(summary)
@@ -200,7 +370,7 @@ class WindowsStartup:
             self.summary["observation"] = "timed-out"
             raise StartupFailed from None
 
-    def observe(self, side, log):
+    def observe(self, side, log, *, root=None, login=None, server_process=None):
         end = log.seek(0, os.SEEK_END)
         start = max(0, end - EVIDENCE_LIMIT)
         # Inspect the preceding byte so a truncated line cannot look like a diagnostic.
@@ -209,6 +379,19 @@ class WindowsStartup:
         if start:
             data = data.partition(b"\n")[2]
         self.summary[side] = classify_evidence(data, side)
+        if side != "server" or root is None:
+            return
+        self.summary.pop("permissions", None)
+        if "key-permissions" in self.summary[side]:
+            root = root.resolve()
+            reports = permission_reports(data, {role: root / name for role, name in PERMISSION_ROLES.items()})
+            if reports:
+                self.summary["permissions"] = inspect_permissions(root, login, server_process, reports)
+            else:
+                self.summary["permissions"] = {
+                    "identities": dict.fromkeys(IDENTITY_ROLES),
+                    "files": {},
+                }
 
     def publish(self):
         if self.installed_root is None:
@@ -481,7 +664,7 @@ LogLevel DEBUG3
             startup.summary["config"] = "timed-out"
             raise
         finally:
-            startup.observe("server", log)
+            startup.observe("server", log, root=root, login=identity)
         startup.summary["config"] = "accepted"
     with tempfile.TemporaryFile() as log:
         process = None
@@ -492,14 +675,34 @@ LogLevel DEBUG3
                 startup.wait_for_listener(port, process, "disposable Windows sshd")
             yield username, port, jump_target, permit, [sys.executable, "-u", str(ENDPOINT)]
         finally:
-            if process is not None:
-                stop(process)
-            if startup.summary["phase"] != "ready":
-                startup.observe("server", log)
+            try:
+                if startup.summary["phase"] != "ready":
+                    startup.observe("server", log, root=root, login=identity, server_process=process)
+            finally:
+                if process is not None:
+                    stop(process)
+
+
+def probe_relay(port):
+    connection = http.client.HTTPConnection(HOST, port, timeout=3)
+    try:
+        connection.request("GET", "/healthz")
+        response = connection.getresponse()
+        body = response.read(1025)
+        assert response.status == 200 and len(body) <= 1024, "independent relay health request failed"
+        health = json.loads(body)
+        assert (
+            isinstance(health, dict) and health.get("feed") == "live" and health.get("has_snapshot") is True
+            and health.get("seq") == 2
+        ), "independent forward did not reach the live fixture relay"
+    except (http.client.HTTPException, ValueError):
+        raise AssertionError("independent relay health request failed") from None
+    finally:
+        connection.close()
 
 
 @contextmanager
-def independent(root, username, port, startup=None):
+def independent(root, username, port, backend, startup=None):
     with tempfile.TemporaryFile() as log:
         process = None
         try:
@@ -516,11 +719,15 @@ def independent(root, username, port, startup=None):
                     startup.wait_for_listener(local_port, process, "independent authenticated forward")
                 else:
                     wait_until(lambda: listening(local_port, process.pid), "independent authenticated forward", process)
+                with tempfile.TemporaryDirectory(dir=root, prefix="independent-") as directory, endpoint(
+                    backend, "live", Path(directory) / "relay.audit",
+                ):
+                    probe_relay(local_port)
+                if startup:
+                    startup.summary["independentForward"] = "relay-health-live"
 
             def alive():
                 assert process.poll() is None and listening(local_port, process.pid), "independent SSH was disturbed"
-                with socket.create_connection((HOST, local_port), timeout=3):
-                    pass
 
             yield alive
         finally:
@@ -662,7 +869,7 @@ def exercise(harness, root, server, startup=None):
             assert (config.read_bytes(), known_hosts.read_bytes()) == original, f"{label} changed SSH files"
 
     assert not listening(8789), "stock diagnostic port must be free before the fixture"
-    with independent(root, username, port, startup) as alive:
+    with independent(root, username, port, backend, startup) as alive:
         if startup:
             startup.ready()
         case("structured-default-port", "live", mode="live", explicit=False)
@@ -808,9 +1015,9 @@ def main():
         assert not any(root.iterdir()), "installed fixture directory must be empty"
         assert not (listening(8787) or listening(8789)), "installed fixture requires free 8787 and 8789"
         with report_windows_startup(root) as startup, windows_server(root, startup) as fixture:
-            username, port, _, _, _ = fixture
+            username, port, _, _, backend = fixture
             with install_alias(root, username, port, startup):
-                with independent(root, username, port, startup):
+                with independent(root, username, port, backend, startup):
                     pass
                 asyncio.run(installed_endpoints(root, username, port, startup))
     else:

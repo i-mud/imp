@@ -128,7 +128,7 @@ class StartupEvidenceTest(unittest.TestCase):
             for invalid_exit in (True, 0x100000000):
                 path.write_text(json.dumps({**payload, "exitCode": invalid_exit}), encoding="ascii")
                 self.assertEqual(read_evidence(root), "Windows OpenSSH fixture startup evidence unavailable")
-            path.write_text(json.dumps({**payload, "arbitrary": "X" * 1024}), encoding="ascii")
+            path.write_text(json.dumps({**payload, "arbitrary": "X" * FIXTURE["EVIDENCE_LIMIT"]}), encoding="ascii")
             self.assertEqual(read_evidence(root), "Windows OpenSSH fixture startup evidence unavailable")
 
     def test_config_failure_reports_observed_outcome_and_prevents_spawn(self):
@@ -189,6 +189,130 @@ class StartupEvidenceTest(unittest.TestCase):
         for invalid in (b"domain\\runner\n", b"stockhost\\runner *\n", b"stockhost\\runner\nextra\n"):
             with self.assertRaises(ValueError):
                 account(invalid, "stockhost")
+
+
+    def test_permission_rejections_match_only_exact_complete_fixture_paths(self):
+        reports = FIXTURE["permission_reports"]
+        paths = {
+            "authorized-keys": r"C:\Fixture Space\authorized_keys", "host-key": r"C:\Fixture Space\host_key",
+            "fixture-directory": r"C:\Fixture Space",
+        }
+        sid = "S-1-5-21-1-2-3-1001"
+        data = (
+            f"debug3: Bad permissions. Try removing permissions for user: PRIVATE ({sid}) on file "
+            "\\\\?\\c:\\FIXTURE SPACE\\authorized_keys. [preauth]\r\n"
+            "debug3: Bad owner on C:/fixture space/host_key\r\n"
+            "error: Authentication refused: bad ownership or modes for directory C:/fixture space\n"
+            "error: Authentication refused: bad ownership or modes for file C:/wrong/authorized_keys\n"
+            "debug3: Bad owner on C:/fixture space/host_key.bak\n"
+            "debug3: failed to retrieve the owner sid and dacl of file C:/fixture space/host_key with error code: 5"
+        ).encode("ascii")
+        self.assertEqual(reports(data, paths), {
+            "authorized-keys": {"reason": "rejected-ace", "sid": sid},
+            "host-key": {"reason": "rejected-owner", "sid": None},
+            "fixture-directory": {"reason": "bad-ownership-or-modes", "sid": None},
+        })
+        self.assertEqual(reports(
+            b"error: Could not open authorized keys 'C:/Fixture Space/authorized_keys': Permission denied\n", paths,
+        ), {"authorized-keys": {"reason": "access-denied", "sid": None}})
+        self.assertFalse(reports(data, {"authorized-keys": r"C:\another\authorized_keys"}))
+
+    def test_observation_correlates_a_sanitized_raw_descriptor_or_marks_it_unavailable(self):
+        inspect = FIXTURE["inspect_permissions"]
+        startup_type = FIXTURE["WindowsStartup"]
+        owner = ["token-user", "login-user", "sshd-listener-user"]
+        descriptor = {
+            "owner": owner, "control": 0x8404, "aceCount": 2, "reportedSidMatches": 1,
+            "aces": [
+                {"index": 0, "type": 0, "flags": 0, "mask": "001f01ff",
+                 "principal": owner, "matchesReportedSid": False},
+                {"index": 1, "type": 0, "flags": 0x10, "mask": "001301bf",
+                 "principal": ["token-group", "builtin-users"], "matchesReportedSid": True},
+            ],
+        }
+        sid = "S-1-5-21-1-2-3-1001"
+        login = r"private-host\private-user"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            data = (
+                f"Bad permissions. Try removing permissions for user: {login} ({sid}) "
+                f"on file {root / 'authorized_keys'}.\n"
+            ).encode("ascii")
+            payload = {
+                "identities": dict.fromkeys(owner, owner),
+                "descriptors": {"authorized-keys": descriptor},
+            }
+
+            def run(argv, **options):
+                self.assertEqual(argv[0].name, "powershell.exe")
+                self.assertEqual(argv[-1].name, "inspect-managed-check-acl.ps1")
+                self.assertEqual(options["stderr"], subprocess.DEVNULL)
+                self.assertEqual(json.loads(options["input"]), {
+                    "root": str(root), "login": login, "serverPid": 41,
+                    "reports": {"authorized-keys": {"reason": "rejected-ace", "sid": sid}},
+                    "limit": FIXTURE["ACE_LIMIT"],
+                })
+                options["stdout"].write(json.dumps(payload).encode("ascii"))
+
+            process = Mock(pid=41)
+            process.poll.return_value = None
+            startup = startup_type(root)
+            with patch.dict(inspect.__globals__, {"openssh": lambda name: root / "OpenSSH" / (name + ".exe")}), \
+                    patch("subprocess.run", side_effect=run) as run_inspector:
+                startup.observe("server", io.BytesIO(data), root=root, login=login, server_process=process)
+                startup.publish()
+                rendered = read_evidence(root)
+                self.assertIn("authorized-keys: rejection=rejected-ace; snapshot=after-rejection", rendered)
+                self.assertIn("owner=token-user+login-user+sshd-listener-user", rendered)
+                self.assertIn("protected=no; auto-inherited=yes; dacl=2", rendered)
+                self.assertIn("reported-sid-ace-matches=1", rendered)
+                self.assertIn("(explicit); mask=0x001f01ff", rendered)
+                self.assertIn(
+                    "(inherited); mask=0x001301bf; principal=token-group+builtin-users; matches-reported-sid=yes",
+                    rendered,
+                )
+                self.assertIn("auth-child-token=not-observed", rendered)
+                raw = (root / "startup-evidence.json").read_text(encoding="ascii").lower()
+                for private in (login.split("\\")[0], login.split("\\")[1], sid, root.name):
+                    self.assertNotIn(private.lower(), raw)
+                    self.assertNotIn(private.lower(), rendered.lower())
+
+                descriptor["untrusted"] = sid
+                startup.observe("server", io.BytesIO(data), root=root, login=login, server_process=process)
+                startup.publish()
+                self.assertIn("snapshot=after-rejection; unavailable", read_evidence(root))
+                self.assertNotIn(sid, (root / "startup-evidence.json").read_text(encoding="ascii"))
+
+                run_inspector.reset_mock()
+                startup.observe("server", io.BytesIO(b"debug3: Bad owner on C:/outside/authorized_keys\n"),
+                                root=root, login=login, server_process=process)
+                startup.publish()
+                run_inspector.assert_not_called()
+                self.assertIn("no known fixture path matched", read_evidence(root))
+
+    def test_independent_relay_probe_requires_the_live_health_response(self):
+        probe = FIXTURE["probe_relay"]
+        cases = (
+            (200, b'{"feed":"live","has_snapshot":true,"seq":2}', None),
+            (200, b'{"feed":"stale","has_snapshot":true,"seq":2}', AssertionError),
+            (200, b'{"feed":"live","has_snapshot":false,"seq":2}', AssertionError),
+            (200, b'{"feed":"live","has_snapshot":true,"seq":1}', AssertionError),
+            (200, b"", AssertionError),
+            (200, b"x" * 1025, AssertionError),
+            (404, b'{"feed":"live","has_snapshot":true,"seq":2}', AssertionError),
+        )
+        for status, body, error in cases:
+            with self.subTest(status=status, body=body), patch("http.client.HTTPConnection") as connect:
+                connection = connect.return_value
+                response = connection.getresponse.return_value
+                response.status = status
+                response.read.return_value = body
+                with self.assertRaises(error) if error else nullcontext():
+                    probe(50325)
+                connect.assert_called_once_with("127.0.0.1", 50325, timeout=3)
+                connection.request.assert_called_once_with("GET", "/healthz")
+                response.read.assert_called_once_with(1025)
+                connection.close.assert_called_once_with()
 
 
 if __name__ == "__main__":
