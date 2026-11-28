@@ -10,6 +10,16 @@ public release versions.
 
 No changes yet.
 
+## [0.8.0] - 2026-11-28
+
+### Bug Fixes
+
+- block connection changes after unconfirmed SSH retirement ([7d8c3f4](https://github.com/i-mud/imp/commit/7d8c3f4cecf1e5168eb1d094f719cfd385f2288b))
+
+### Features
+
+- verify Managed SSH connections before saving ([1054d05](https://github.com/i-mud/imp/commit/1054d051ed778a6cbdae882d498388d50b1fb2d3))
+
 ## [0.7.0] - 2026-11-27
 
 ### Features
