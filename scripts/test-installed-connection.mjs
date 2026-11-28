@@ -9,7 +9,8 @@ import { setupManagedCheckBrowser } from './managed-check-browser-fixture.mjs';
 
 // PowerShell verifies installed WebView ownership; the browser mode needs a dedicated headless profile.
 const endpoint = `http://127.0.0.1:${Number(process.argv[2])}`;
-const [phase, tunnelConfig, fixturePort, screenshotArgument, diagnosticFixture] = process.argv.slice(3);
+const [phase, tunnelConfig, fixturePort, screenshotArgument, diagnosticFixture, desktopPid] =
+  process.argv.slice(3);
 const screenshotDirectory = screenshotArgument === '-' ? undefined : screenshotArgument;
 const browser = phase === 'browser-managed';
 if (browser && !/^[a-f0-9]{24}$/.test(tunnelConfig ?? '')) {
@@ -705,6 +706,9 @@ async function installedManagedDiagnostic() {
     await traffic(`${backend} FIXTURE READY live retained=2`, 1);
   }
   await traffic('A OPEN /state', 1);
+  // The existing desktop node supervisor probes 8787 even before the first diagnostic.
+  const nodeHealth = `B REQUEST /healthz owner=${desktopPid}`;
+  await waitFor(() => count(nodeHealth) > 0, 'the held desktop process to probe its local node port');
   await setView('expanded', 'dark');
   await closeSettings();
   await hudShows(runningName, runningHp);
@@ -782,8 +786,8 @@ async function installedManagedDiagnostic() {
   await screenshot('managed-check-failure.png');
   await fontMetrics(20);
   const enlargedLines = await assertCheckLines();
-  console.log(
-    `Installed failure feedback contained: normal=${normalLines} lines, enlarged=${enlargedLines} lines`,
+  process.stdout.write(
+    `Installed failure feedback contained: normal=${normalLines} lines, enlarged=${enlargedLines} lines\n`,
   );
   await closeManager('footer', MANAGER_TRIGGER);
   await closeSettings();
@@ -803,10 +807,19 @@ async function installedManagedDiagnostic() {
     'The diagnostic replaced the active consumer or left a temporary consumer open',
   );
   ok(
-    !events().some((line) =>
-      /^[AB] (?:DISPATCH\b|REQUEST\b|MESSAGE\b|(?:OPEN|CLOSED) (?!\/state$))/.test(line),
+    !events().some((line) => line.startsWith('B REQUEST /healthz') && line !== nodeHealth),
+    'B received a health request not attributable to the desktop node supervisor',
+  );
+  ok(
+    !events().some(
+      (line) =>
+        line !== nodeHealth &&
+        /^[AB] (?:DISPATCH\b|REQUEST\b|MESSAGE\b|(?:OPEN|CLOSED) (?!\/state$))/.test(line),
     ),
     'The installed diagnostic sent a client message, used an unexpected route, or dispatched an action',
+  );
+  process.stdout.write(
+    `Installed route audit: ${count(nodeHealth)} desktop health probes; B diagnostic /state only\n`,
   );
 }
 

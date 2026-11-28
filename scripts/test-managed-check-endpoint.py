@@ -65,7 +65,7 @@ class ObservedRelay(RelayServer):
     async def _process_request(self, connection, request):
         response = await super()._process_request(connection, request)
         if response is not None and not (self.label == "A" and request.path == "/healthz"):
-            self.record(f"{self.label} REQUEST {request.path}")
+            self.record(f"{self.label} REQUEST {request.path}", connection)
         return response
 
     async def _handle_connection(self, connection):
@@ -245,7 +245,7 @@ async def invalid_peer(mode, port, record):
 
 
 async def main(mode):
-    def record(event):
+    def record(event, connection=None):
         print(event, flush=True)
 
     if mode in REAL_MODES:

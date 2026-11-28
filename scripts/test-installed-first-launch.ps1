@@ -349,7 +349,7 @@ function Invoke-ConnectionUi($Process, [string]$Phase, [int]$FixturePort = 0, [s
     $Arguments = @((Join-Path $PSScriptRoot 'test-installed-connection.mjs'), $DebugPort, $Phase, $TunnelConfig, $FixturePort)
     if ($ScreenshotDirectory) { $Arguments += $ScreenshotDirectory }
     elseif ($ManagedFixtureDirectory) { $Arguments += '-' }
-    if ($ManagedFixtureDirectory) { $Arguments += $ManagedFixtureDirectory }
+    if ($ManagedFixtureDirectory) { $Arguments += $ManagedFixtureDirectory, $Process.Id }
     & $Node @Arguments
     if ($LASTEXITCODE) { throw [IO.InvalidDataException]::new("Installed connection UI phase failed: $Phase") }
 }

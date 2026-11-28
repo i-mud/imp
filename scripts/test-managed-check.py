@@ -559,35 +559,52 @@ def evidence_tail(log):
     return data.partition(b"\n")[2] if start else data
 
 
+def windows_tcp_rows(family, kind, stride):
+    from ctypes import wintypes
+
+    table = ctypes.WinDLL("iphlpapi").GetExtendedTcpTable
+    table.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), wintypes.BOOL,
+                      wintypes.ULONG, ctypes.c_int, wintypes.ULONG)
+    table.restype = wintypes.DWORD
+    size = wintypes.DWORD()
+    buffer = None
+    for _ in range(4):
+        result = table(buffer, ctypes.byref(size), False, family, kind, 0)
+        if result != 122:  # ERROR_INSUFFICIENT_BUFFER
+            break
+        buffer = ctypes.create_string_buffer(size.value)
+    if result != 0:
+        raise ctypes.WinError(result)
+    if buffer is not None:
+        count, = struct.unpack_from("=I", buffer)
+        data = memoryview(buffer).cast("B")
+        for start in range(4, 4 + count * stride, stride):
+            yield data[start:start + stride]
+
+
+def windows_peer_owner(peer, local):
+    # Read the client half of the live IPv4 four-tuple, before sending the HTTP response.
+    for row in windows_tcp_rows(socket.AF_INET, 4, 24):  # TCP_TABLE_OWNER_PID_CONNECTIONS
+        state, = struct.unpack_from("=I", row)
+        if (state == 5 and row[4:8] == socket.inet_aton(peer[0]) and
+                struct.unpack_from("!H", row, 8)[0] == peer[1] and
+                row[12:16] == socket.inet_aton(local[0]) and
+                struct.unpack_from("!H", row, 16)[0] == local[1]):
+            return struct.unpack_from("=I", row, 20)[0]
+    return None
+
+
 def listening(port, pid=None):
     """Passively check both TCP families, including wildcard listeners."""
     if os.name == "nt":
-        from ctypes import wintypes
-
-        table = ctypes.WinDLL("iphlpapi").GetExtendedTcpTable
-        table.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), wintypes.BOOL,
-                          wintypes.ULONG, ctypes.c_int, wintypes.ULONG)
-        table.restype = wintypes.DWORD
         # MIB_TCPROW_OWNER_PID / MIB_TCP6ROW_OWNER_PID strides and field offsets.
         for family, stride, local_port, owner in (
             (socket.AF_INET, 24, 8, 20),
             (socket.AF_INET6, 56, 20, 52),
         ):
-            size = wintypes.DWORD()
-            buffer = None
-            for _ in range(4):
-                result = table(buffer, ctypes.byref(size), False, family, 3, 0)  # OWNER_PID_LISTENER
-                if result != 122:  # ERROR_INSUFFICIENT_BUFFER
-                    break
-                buffer = ctypes.create_string_buffer(size.value)
-            if result != 0:
-                raise ctypes.WinError(result)
-            if buffer is None:
-                continue
-            count, = struct.unpack_from("=I", buffer)
-            for row in range(4, 4 + count * stride, stride):
-                local, = struct.unpack_from("!H", buffer, row + local_port)
-                if local == port and (pid is None or struct.unpack_from("=I", buffer, row + owner)[0] == pid):
+            for row in windows_tcp_rows(family, 3, stride):  # TCP_TABLE_OWNER_PID_LISTENER
+                local, = struct.unpack_from("!H", row, local_port)
+                if local == port and (pid is None or struct.unpack_from("=I", row, owner)[0] == pid):
                     return True
         return False
 
@@ -1192,8 +1209,12 @@ async def installed_endpoints(root, username, port, startup):
             commands = root / "commands.log"
             commands.touch(exist_ok=False)
             events = listeners.enter_context((root / "events.log").open("x", encoding="ascii"))
-        def record(event):
-            print(event, file=events, flush=True)
+        def record(event, connection=None):
+            try:
+                if event == "B REQUEST /healthz":
+                    event += f" owner={windows_peer_owner(connection.remote_address, connection.local_address)}"
+            finally:
+                print(event, file=events, flush=True)  # An unattributed request must still fail the audit.
 
         with startup.stage("installed-listeners"):
             running = support["ProductionEndpoint"]("A", record)

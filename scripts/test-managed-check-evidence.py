@@ -3,8 +3,11 @@
 
 import io
 import json
+import os
 import runpy
+import socket
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager, nullcontext
@@ -15,6 +18,26 @@ FIXTURE = runpy.run_path(str(Path(__file__).with_name("test-managed-check.py")))
 classify = FIXTURE["classify_evidence"]
 version = FIXTURE["ssh_version"]
 read_evidence = FIXTURE["read_startup_evidence"]
+
+
+@unittest.skipUnless(os.name == "nt", "Win32 TCP owner table")
+class InstalledPeerOwnerTest(unittest.TestCase):
+    def test_health_peer_is_client_not_relay_or_an_unrelated_socket(self):
+        owner = FIXTURE["windows_peer_owner"]
+        with socket.socket() as server:
+            server.settimeout(10)
+            server.bind(("127.0.0.1", 0))
+            server.listen()
+            local = server.getsockname()
+            code = ("import os,socket,sys; print(os.getpid(),flush=True);"
+                    " s=socket.create_connection(('127.0.0.1',int(sys.argv[1])),10); s.recv(1)")
+            with subprocess.Popen([sys.executable, "-c", code, str(local[1])], stdout=subprocess.PIPE) as client:
+                connection, peer = server.accept()
+                with connection:
+                    # A Windows venv launcher is not necessarily the Python process that opened the socket.
+                    self.assertEqual(owner(peer, local), int(client.stdout.readline()))
+                    self.assertEqual(owner(local, peer), os.getpid())
+                    self.assertIsNone(owner((peer[0], 0), local))
 
 
 class StartupEvidenceTest(unittest.TestCase):

@@ -127,6 +127,15 @@ line breaking at normal size. The fixture now checks the entire message and
 every line's bounds at both sizes, and requires multiline wrapping at the
 enlarged size. Neither the UI nor the debugger policy changed.
 
+The [geometry run](https://github.com/i-mud/imp/actions/runs/46135555980/job/140950062207)
+measured one contained line at normal size and two at enlarged size. The
+installed phase then failed its final traffic audit, which had not distinguished
+the desktop's existing node supervisor from a forwarded client. Both share
+loopback in this Windows fixture: the supervisor probes `/healthz` on port 8787 even
+in Managed mode. The fixture now attributes each such HTTP request by the
+live client-side TCP tuple and the held desktop process, not by its URL alone.
+An SSH-forwarded or unattributed health request must still fail acceptance.
+
 Neither source-fixture results nor candidate-installer checks are
 published-artifact acceptance or independent human onboarding. Slice 28
 recruitment requirements remain unchanged. The
