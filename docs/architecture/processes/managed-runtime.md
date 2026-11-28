@@ -313,6 +313,12 @@ Isolation from `8789` means a successful check says nothing about whether
 the Managed gameplay forward can bind or which endpoint state and actions
 will reach after restart.
 
+`forwarding_unavailable` requires a forwarding refusal attributable to the
+owned OpenSSH client. A missing relay doesn't necessarily produce that
+evidence: if sshd confirms the channel but closes it before any relay bytes
+arrive, `connection_failed` is the truthful result. Neither is a successful
+connection check.
+
 Gameplay runtime diagnostics preserve the same UI boundary. Local mode reads
 `NodeSupervisor` diagnostics; Managed/External loopback consumption uses tunnel
 diagnostics; Direct WSS uses its socket lifecycle. Components still receive only

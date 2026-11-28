@@ -202,10 +202,6 @@ fn capture_io(output: &Path, error: &Path, large: bool) {
 }
 
 fn managed_check(args: &[std::ffi::OsString]) {
-    let (args, observe) = match args {
-        [_, _, _, option] if option == "--observe-ssh" => (&args[..3], true),
-        _ => (args, false),
-    };
     let [program, config, destination] = args else {
         panic!("invalid Managed check fixture arguments");
     };
@@ -216,21 +212,17 @@ fn managed_check(args: &[std::ffi::OsString]) {
     let config = config.clone();
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
-        let mut observation = observe.then(managed_check::process::SshObservation::default);
         let result = worker_check.run_with(1, destination, |destination, deadline, cancelled| {
             managed_check::process::run_fixture(
                 destination,
                 deadline,
                 cancelled,
-                (&program, &config),
+                &program,
+                &config,
                 |pid| println!("pid {pid}"),
                 |duration| println!("cleanup_us {}", duration.as_micros()),
-                observation.as_mut(),
             )
         });
-        if let Some(observation) = observation {
-            println!("{observation}");
-        }
         println!(
             "result {}",
             serde_json::to_value(result).unwrap().as_str().unwrap()

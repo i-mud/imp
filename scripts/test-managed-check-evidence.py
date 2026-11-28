@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Deterministic checks for the Managed SSH fixture's evidence boundary."""
+"""Deterministic checks for the Windows SSH fixture's startup evidence."""
 
 import io
 import json
 import runpy
 import subprocess
-import sys
 import tempfile
 import unittest
-from contextlib import contextmanager, nullcontext, redirect_stdout
+from contextlib import contextmanager, nullcontext
 from pathlib import Path, PureWindowsPath
 from unittest.mock import Mock, patch
 
@@ -16,115 +15,6 @@ FIXTURE = runpy.run_path(str(Path(__file__).with_name("test-managed-check.py")))
 classify = FIXTURE["classify_evidence"]
 version = FIXTURE["ssh_version"]
 read_evidence = FIXTURE["read_startup_evidence"]
-
-
-class DiagnosticEvidenceTest(unittest.TestCase):
-    OBSERVATION = (
-        "ssh_observation stdout_eof=1 stdout_block=0 stdout_error=0 stderr_eof=1 stderr_block=0"
-        " stderr_error=0 stderr_overflow=0 app_bytes=0 exit=-2147483648 fatal_called=1 host_site=0"
-        " auth_site=0 stdio_site=1 preamble=0 final=stdio_fatal prefix=missing"
-        " retirement=after_collection interference=none"
-    )
-    SESSION = (
-        b"Connection from 127.0.0.1 port 50325 on 127.0.0.1 port 59900\r\n"
-        b"Accepted publickey for private-runner from 127.0.0.1 port 50325 ssh2: ED25519 SHA256:private-key\r\n"
-    )
-    REQUEST = (
-        b"debug1: server_input_channel_open: ctype direct-tcpip rchan 0 win 2097152 max 32768\r\n"
-        b"debug1: server_request_direct_tcpip: originator 0.0.0.0 port 65535, target 127.0.0.1 port 8787\r\n"
-    )
-    CHANNEL = b"debug1: channel 2: new direct-tcpip [direct-tcpip] (inactive timeout: 0)\r\n"
-
-    def test_client_only_accepts_one_complete_allowlisted_record(self):
-        observation = FIXTURE["client_observation"]
-        line = self.OBSERVATION
-        self.assertEqual(observation(["pid 5", line, "result connection_failed"]), line)
-        for invalid in (
-            [line, line], [line + " PRIVATE"], [line.replace("exit=-2147483648", "exit=-2147483649")],
-            [line.replace("exit=-2147483648", "exit=2147483648")], [line.replace("exit=-2147483648", "exit=-0")],
-            [line.replace("stdio_fatal", "stdio_success")], [line.replace("stderr_error=0", "stderr_error=2")],
-            [line.replace("prefix=missing ", "")], [line.replace(" prefix=", "\tprefix=")],
-        ):
-            with self.subTest(invalid=invalid):
-                self.assertIsNone(observation(invalid))
-
-    def test_server_separates_tcp_completion_from_ssh_channel_messages(self):
-        classify_server = FIXTURE["managed_server_evidence"]
-        cases = (
-            (b"refused local port forward: originator 0.0.0.0 port 65535, target 127.0.0.1 port 8787\r\n"
-             b"debug3: send packet: type 92\r\n", "observed", "refused", "unobserved", "unobserved"),
-            (b"Received request from 127.0.0.1 port 50325 to connect to host 127.0.0.1 port 8787,"
-             b" but the request was denied.\r\n", "observed", "unobserved", "unobserved", "unobserved"),
-            (self.CHANNEL + b"debug1: channel 2: connection failed: Connection refused\r\n"
-             b"error: connect_to 127.0.0.1 port 8787: failed.\r\n"
-             b"debug3: send packet: type 92\r\n", "unobserved", "refused", "unobserved", "failed"),
-            (b"error: connect to 127.0.0.1 port 8787 failed: PRIVATE\r\n",
-             "unobserved", "unobserved", "unobserved", "failed"),
-            (self.CHANNEL + b"debug1: server_input_channel_open: confirm direct-tcpip\r\n",
-             "unobserved", "unobserved", "unobserved", "unobserved"),
-            (self.CHANNEL + b"debug1: channel 2: connected to 127.0.0.1 port 8787\r\n",
-             "unobserved", "unobserved", "unobserved", "connected"),
-            (self.CHANNEL + b"debug1: channel 2: connected to 127.0.0.1 port 8787\r\n"
-             b"debug3: send packet: type 91\r\ndebug2: channel 2: rcvd close\r\n",
-             "unobserved", "accepted", "observed", "connected"),
-            (self.CHANNEL + b"debug3: send packet: type 91\r\n"
-             b"debug2: channel 3: rcvd close\r\ndebug2: channel 2: send close\r\n",
-             "unobserved", "accepted", "unobserved", "unobserved"),
-            (self.CHANNEL + b"debug3: send packet: type 91\r\n"
-             b"debug2: channel 2: send close for remote id 0\r\ndebug3: send packet: type 97\r\n",
-             "unobserved", "accepted", "observed", "unobserved"),
-            (self.CHANNEL + b"debug2: channel 2: rcvd close\r\n"
-             b"debug3: send packet: type 91\r\ndebug3: send packet: type 97\r\n",
-             "unobserved", "accepted", "unobserved", "unobserved"),
-        )
-        for data, denied, opened, closed, tcp in cases:
-            with self.subTest(data=data):
-                self.assertEqual(
-                    classify_server(self.SESSION + self.REQUEST + data, "private-runner"),
-                    f"log=sampled scope=session publickey=observed direct_tcpip=observed policy_denial={denied} "
-                    f"ssh_open={opened} ssh_close={closed} target_tcp={tcp}",
-                )
-
-    def test_server_only_attributes_unique_matching_sessions(self):
-        classify_server = FIXTURE["managed_server_evidence"]
-        window = "log=sampled scope=case-window publickey="
-        target = (" direct_tcpip=observed policy_denial=unobserved ssh_open=unobserved"
-                  " ssh_close=unobserved target_tcp=unobserved")
-        for data, expected in (
-            (self.REQUEST, window + "unobserved" + target),
-            (self.SESSION + self.SESSION + self.REQUEST, "log=ambiguous"),
-            (self.SESSION.replace(b"50325 on", b"12345 on") + self.REQUEST, window + "observed" + target),
-            (self.SESSION.replace(b"for private-runner", b"for other") + self.REQUEST, window + "unobserved" + target),
-            (self.SESSION + self.REQUEST + self.REQUEST, "log=ambiguous"),
-            (self.SESSION + self.REQUEST.replace(b"port 8787", b"port 8788"),
-             window + "observed direct_tcpip=unobserved"),
-            (self.SESSION + self.REQUEST[:-2], window + "observed direct_tcpip=unobserved"),
-            (self.SESSION + self.REQUEST.split(b"\r\n", 1)[1] + b"debug3: send packet: type 92\r\n",
-             window + "observed" + target.replace("ssh_open=unobserved", "ssh_open=refused")),
-        ):
-            with self.subTest(data=data):
-                self.assertEqual(classify_server(data, "private-runner"), expected)
-
-    def test_server_window_is_bounded_and_listener_inventory_is_passive(self):
-        observer = FIXTURE["observe_managed_server"]
-        for label, payload, expected in (
-            ("relay-absent", self.REQUEST, "log=sampled scope=case-window publickey=unobserved "
-             "direct_tcpip=observed policy_denial=unobserved ssh_open=unobserved ssh_close=unobserved "
-             "target_tcp=unobserved relay_listener_before=absent relay_listener_after=present"),
-            ("forwarding-denied", b"x" * (FIXTURE["MANAGED_LOG_LIMIT"] + 1), "log=limit-exceeded"),
-        ):
-            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "sshd.log"
-                path.write_bytes(self.SESSION)
-                out = io.StringIO()
-                inventory = Mock(side_effect=[False, True])
-                with patch.dict(observer.__wrapped__.__globals__, {"listening": inventory}):
-                    with path.open("rb") as reader, redirect_stdout(out), observer(reader, label, "private-runner"):
-                        with path.open("ab") as writer:
-                            writer.write(payload)
-                self.assertEqual(out.getvalue(), f"{sys.platform} {label}: sshd_observation {expected}\n")
-                self.assertEqual([call.args for call in inventory.call_args_list],
-                                 [(8787,), (8787,)] if label == "relay-absent" else [])
 
 
 class StartupEvidenceTest(unittest.TestCase):

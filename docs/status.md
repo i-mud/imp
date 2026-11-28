@@ -102,6 +102,16 @@ is a controlled Chromium result. The local Windows NSIS candidate built;
 the installed eleven-phase gate is separate. See the exact-head results on
 [PR #73](https://github.com/i-mud/imp/pull/73).
 
+The [hosted Windows absent-relay trace](https://github.com/i-mud/imp/actions/runs/46132151852/job/140939538548)
+distinguishes two outcomes on stock OpenSSH 9.5p2. Policy denial produced an
+SSH channel refusal, exit 255 and an attributable forwarding fatal. With no
+relay listening on `8787`, the same sshd confirmed the channel and then
+closed it. The client exited 0 with no relay bytes; both pipes reached EOF
+and stderr contained only the authentication preamble. The latter is a
+generic connection failure, not a proven forwarding refusal. The Linux
+container sshd refused the channel in both cases, including when the client
+ran on Windows. The native diagnostic did not change.
+
 Neither source-fixture results nor candidate-installer checks are
 published-artifact acceptance or independent human onboarding. Slice 28
 recruitment requirements remain unchanged. The
