@@ -120,6 +120,13 @@ sequencing error: disconnecting the producer after the subscriber opens queues
 `live` at startup and `down` later. The installed fixture now disconnects the
 producer before subscribing, then releases the held startup frames.
 
+The [subsequent installed run](https://github.com/i-mud/imp/actions/runs/46134247855/job/140945973449)
+reached the correct live, down, cancelled and unreachable results. The last
+result failed an assertion that combined text containment with mandatory
+line breaking at normal size. The fixture now checks the entire message and
+every line's bounds at both sizes, and requires multiline wrapping at the
+enlarged size. Neither the UI nor the debugger policy changed.
+
 Neither source-fixture results nor candidate-installer checks are
 published-artifact acceptance or independent human onboarding. Slice 28
 recruitment requirements remain unchanged. The

@@ -136,7 +136,7 @@ const CHECK_COPY = {
   noState: 'No usable state was received.',
   failure: 'SSH could not reach the remote Imp port.',
   cancelled: 'Connection check cancelled.',
-  unreachable: 'Could not check the connection.',
+  unreachable: 'Could not check the connection. Check your SSH setup and network, then try again.',
   timeout: 'The check timed out.',
   authentication: 'SSH sign-in failed.',
   hostVerification: 'SSH could not verify the server.',
@@ -395,19 +395,21 @@ async function fontMetrics(pixels) {
   );
 }
 
-async function assertCheckWraps() {
+async function assertCheckLines(minimum = 2) {
   await assertFits();
-  ok(
-    await evaluate(`(() => {
-      const status = document.querySelector(${J(CHECK_STATUS)});
-      const box = status.getBoundingClientRect();
-      const text = new Range();
-      text.selectNodeContents(status);
-      const lines = [...text.getClientRects()];
-      return lines.length > 1 && lines.every(line => line.left >= box.left - 1 && line.right <= box.right + 1);
-    })()`),
-    'Long diagnostic feedback did not wrap within its status region',
-  );
+  const { lines, contained } = await evaluate(`(() => {
+    const status = document.querySelector(${J(CHECK_STATUS)});
+    const box = status.getBoundingClientRect();
+    const text = new Range();
+    text.selectNodeContents(status);
+    const lines = [...text.getClientRects()];
+    return {lines: lines.length, contained: lines.every(line =>
+      line.left >= box.left - 1 && line.right <= box.right + 1 &&
+      line.top >= box.top - 1 && line.bottom <= box.bottom + 1)};
+  })()`);
+  ok(contained, 'Diagnostic feedback extended outside its status region');
+  ok(lines >= minimum, `Expected at least ${minimum} diagnostic text lines, observed ${lines}`);
+  return lines;
 }
 
 async function tabTo(selector) {
@@ -619,7 +621,7 @@ async function browserManaged() {
         await finish(live ? 'live' : noState ? 'no_usable_state' : 'forwarding_unavailable');
         await checkShows(live ? CHECK_COPY.live : noState ? CHECK_COPY.noState : CHECK_COPY.failure);
         await assertFits();
-        if (!live && !noState) await assertCheckWraps();
+        if (!live && !noState) await assertCheckLines();
         if (pixels === 20 && theme === 'dark') await screenshot(`${prefix}-${live ? 'live' : 'no-live'}.png`);
         if (pixels === 20 && layout === 'expanded' && theme === 'light')
           await screenshot(`${prefix}-failure.png`);
@@ -752,7 +754,7 @@ async function installedManagedDiagnostic() {
   await downRetired();
   await traffic('B CLOSED /state', 2);
   await assertUnchanged();
-  await assertCheckWraps();
+  await assertCheckLines();
   await screenshot('managed-check-no-live.png');
   await tabWrap();
   await command('hold');
@@ -776,8 +778,13 @@ async function installedManagedDiagnostic() {
   await startCheck();
   await checkShows(CHECK_COPY.unreachable);
   await assertUnchanged();
-  await assertCheckWraps();
+  const normalLines = await assertCheckLines(1);
   await screenshot('managed-check-failure.png');
+  await fontMetrics(20);
+  const enlargedLines = await assertCheckLines();
+  console.log(
+    `Installed failure feedback contained: normal=${normalLines} lines, enlarged=${enlargedLines} lines`,
+  );
   await closeManager('footer', MANAGER_TRIGGER);
   await closeSettings();
   await hudShows(runningName, runningHp + 3);
