@@ -114,6 +114,16 @@ jobs:
       - run: python scripts/test-managed-check.py container apps/desktop/src-tauri/target/debug/runtime-ownership-harness
         timeout-minutes: 10
 
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - name: Exercise Direct code handoff and authenticated transport
+        run: npm run test:direct-code
+        timeout-minutes: 10
+
   release:
     name: semantic-release
     if: >-

@@ -242,6 +242,38 @@ a reserved loopback endpoint; the harness refuses SSH routing overrides. It
 requires the desktop-owned node on 8787 and refuses occupied 8787–8789.
 Passing this gate is not evidence of remote authentication or live game data.
 
+Direct connection codes have their own phases. `code` pastes a synthetic code
+(outer whitespace and CRLF included) on a Local desktop through the real
+clipboard and a real Ctrl+V on the focused field. The text reaches the
+clipboard through stdin only, and only on a disposable GitHub-hosted runner (or
+with `IMP_DISPOSABLE_PLAYTEST=1`); it is cleared afterwards. The installed gate
+pastes a declared subset (unsupported version, oversized before trimming,
+decoded newline, plus a constructed embedded newline) because NUL cannot
+round-trip the Windows Unicode clipboard; the controlled browser pastes all
+fixtures. Each must focus the field, leave no field text, preview or native
+save, and not echo the code; a new invalid code after a valid one must do the
+same. The manual
+fallback must start blank; then the code is previewed and saved. The harness
+relaunches for `code-restart`: saved route is Direct, blank-token retention,
+replacement by a second code, and removal after confirmation. Codes use
+`tests/fixtures/direct-connection-codes.json` and reserved loopback endpoints
+that nothing contacts.
+
+The controlled-Chromium counterpart runs the same flow against the Vite
+development page with simulated native commands and a synthetic paste event
+(a simulated user-initiated paste), so it proves renderer
+behavior only, never installed or remote behavior. It starts and removes its
+own dev server (refusing an occupied 1420) and a throwaway browser profile:
+
+```bash
+CHROME=/path/to/chromium node scripts/run-browser-connection.mjs browser-direct "$PWD/browser-direct-evidence"
+```
+
+`browser-managed` runs the existing Managed diagnostic the same way. Screenshots
+(`browser-direct-*.png`, `installed-code-*.png` in CI's
+`$RUNNER_TEMP/imp-connection-ui`) show only the masked field, the endpoint
+preview, and synthetic data.
+
 The installed desktop runs under the real application identifier from
 `tauri.conf.json`, so it would load that identifier's settings (Direct URL and
 pairing token, SSH target) and WebView data. The script therefore requires a

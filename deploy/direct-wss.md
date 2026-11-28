@@ -91,6 +91,89 @@ server file, proxy configuration, log, screenshot, or support message.
    you're stuck, or the [first-use guide](../docs/first-use.md#check-that-imp-is-working)
    for more on the HUD indicators.
 
+## Connection codes (source only)
+
+> **Not in a published release.** v0.8.0 and earlier installers and server
+> bundles neither print nor accept codes: with a release, use the manual steps
+> above. With a source build of both the server and the desktop, the code is the
+> preferred route and the manual URL and token entry stays as the fallback.
+> Mixed pairs (release on either side) need the manual route. No acceptance of
+> codes on an installed artifact, live server, NAT deployment or by an
+> independent player is recorded yet.
+
+With a code-capable server, `imp-direct-wss setup` or `rotate` run with
+`--public-url` prints, after public verification and the URL lines:
+
+```text
+Imp Direct connection code (shown once; contains the pairing token; not stored):
+imp1.<endpoint>.<token>
+Manual fallback with the same credential (enter the URL separately):
+Direct WSS pairing token (shown once; not stored):
+<43-character token>
+```
+
+Setup without `--public-url` prints no code. If the verified URL can't be
+represented, the server says `A connection code is unavailable for this URL;
+enter the URL and token separately.` and prints only the token.
+
+**A connection code contains the reusable pairing token.** The terminal shows
+the same credential twice for compatibility with older desktops. Anyone
+holding either form can observe state and request actions until rotation. Paste it
+only into Imp, from a private terminal or approved password manager; never into
+a URL, argument, environment variable, file, log, screenshot, chat or support
+message. The server stores only the token digest and can't reprint the code.
+Terminal delivery isn't atomic or recoverable: if the terminal fails or the
+session is interrupted mid-handoff, treat the credential as exposed and rotate.
+
+To pair in a source build: copy the code and paste it into the masked
+**Connection code** field of **Use remote Imp credentials**. The form is
+code-first unless a Direct connection is already saved. It then shows
+`Imp will connect to` and the decoded `wss://…/state` endpoint. **Review** it
+(stop if it isn't your server), then **Save** and quit and reopen Imp. A
+rejected code gets a generic message that doesn't echo it, and nothing is
+saved. **Enter URL and token manually** switches to the usual two fields and
+clears the code. Only in manual entry can a blank token keep the saved credential.
+Saving does not test the connection or rotate the server credential.
+
+Format. The desktop enforces all of this on paste, with no repair or
+normalisation; the server issues a code only for an endpoint that meets it:
+
+- `imp1.` + the endpoint's unpadded base64url + `.` + the 43-character
+  base64url encoding of the 32-byte token, all canonical (no padding, no extra
+  characters, or nonzero unused bits). Input is ASCII and at most 512 bytes
+  before trimming; only outer ASCII space, tab, CR and LF are trimmed.
+- The endpoint is exactly lowercase `wss://HOST[:PORT]/state`: no user info,
+  query, fragment or other path. `HOST` is a lowercase ASCII DNS name (labels
+  of 1–63 of `a-z0-9-`, starting and ending alphanumeric, whose final label
+  starts with a letter; a single label is allowed; at most 253 characters in
+  all) or canonical dotted-decimal IPv4 (four octets 0–255, no leading zeros).
+  Any label beginning `xn--` is rejected rather than interpreted as IDNA. A
+  port is 1–65535, written canonically, and an explicit `:443` is kept.
+- IPv6 hosts, uppercase, other schemes and anything else are not
+  representable; use manual entry. The endpoint binding rules for a saved
+  credential still apply.
+
+Use manual entry for an older server or desktop, an endpoint a code can't
+represent, a server run without `--public-url`, or a credential retained from
+an earlier handoff. Re-running setup with a retained credential prints no token
+or code, and a code can't be rebuilt from the server; rotate deliberately (see
+below) to obtain a new one. Rotation invalidates every previously issued
+code and token for all desktops, and a replacement code goes through the same
+paste, review, save and restart. A code that failed to save can still be used
+later; a lost one needs rotation.
+
+Clearing the desktop's saved Direct credential works as for a manual token and
+neither revokes a code nor stops the server. Hold the printed code only as
+long as needed to pair desktops.
+
+**Trust and NAT.** The code's endpoint comes from the URL the server verified
+just before printing. On the NAT route that check reaches only the local Caddy
+listener with normal TLS validation (see above), so it doesn't prove outside
+reachability: pair from a desktop outside the router and confirm vitals update.
+A code doesn't pin or replace TLS: Imp still verifies the endpoint's
+certificate, and a code for the wrong or untrusted host stays wrong. If the
+code reached you over an untrusted channel, treat the token as exposed and rotate.
+
 ## Existing Direct credentials and recovery
 
 - Re-running the installer with a retained credential doesn't print the token,

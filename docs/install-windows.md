@@ -91,6 +91,9 @@ Use [Direct desktop configuration](../deploy/direct-wss.md#direct-desktop-config
 to pair for the first time. If you're [changing a saved endpoint](../deploy/direct-wss.md#changing-a-saved-endpoint),
 check which token to enter **before** saving the new URL.
 
+Source builds can also take a server-printed [connection code](../deploy/direct-wss.md#connection-codes-source-only);
+published installers up to v0.8.0 cannot, so enter the URL and token.
+
 ## Mudlet integration
 
 Follow the [local Mudlet quick start](quickstart/mudlet-windows.md) to install

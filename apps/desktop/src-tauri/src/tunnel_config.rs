@@ -21,6 +21,9 @@ const UNAVAILABLE_ERROR: &str =
     "Imp could not read tunnel.json. Restore a valid file or move it aside, then restart Imp.";
 const CHANGED_ERROR: &str = "Connection settings changed on disk. Restart Imp before saving again.";
 const CONFLICTING_DESTINATIONS: &str = "Choose either a server login or an SSH alias, not both.";
+const CODE_CONFLICT: &str = "A connection code cannot be combined with other connection fields.";
+const CODE_INVALID: &str = "The connection code is not valid.";
+const CODE_MAX_LEN: usize = 512;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -302,18 +305,77 @@ pub struct ConnectionSettingsStatus {
 /// `pairing_token: None` means "preserve the existing Direct token" and is
 /// valid only for the same saved Direct endpoint. A supplied string is always
 /// validated as a replacement; an empty string is not a preserve sentinel.
+///
+/// `connection_code` is a Direct-only alternative to `remote_url` plus
+/// `pairing_token`; it must be the only connection field supplied. Wire
+/// decoding rejects the code beside any manual field key, even null or empty.
 #[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(try_from = "RawUpdate")]
 pub struct ConnectionSettingsUpdate {
     pub mode: TunnelMode,
-    #[serde(default)]
     pub ssh_target: String,
-    #[serde(default)]
     pub ssh_destination: Option<SshDestination>,
-    #[serde(default)]
     pub remote_url: String,
-    #[serde(default)]
     pub pairing_token: Option<String>,
+    pub connection_code: Option<String>,
+}
+
+/// Wire shape that records which keys were present. Unknown keys are ignored,
+/// so no error here can echo a secret-bearing value.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawUpdate {
+    mode: TunnelMode,
+    #[serde(default, deserialize_with = "present")]
+    ssh_target: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    ssh_destination: Option<Option<SshDestination>>,
+    #[serde(default, deserialize_with = "present")]
+    remote_url: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pairing_token: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present_code")]
+    connection_code: Option<String>,
+}
+
+fn present_code<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d)
+        .map(Some)
+        .map_err(|_| de::Error::custom(CODE_INVALID))
+}
+
+impl TryFrom<RawUpdate> for ConnectionSettingsUpdate {
+    type Error = &'static str;
+
+    fn try_from(raw: RawUpdate) -> Result<Self, Self::Error> {
+        if raw.connection_code.is_some()
+            && (raw.ssh_target.is_some()
+                || raw.ssh_destination.is_some()
+                || raw.remote_url.is_some()
+                || raw.pairing_token.is_some())
+        {
+            return Err(CODE_CONFLICT);
+        }
+        Ok(Self {
+            mode: raw.mode,
+            ssh_target: raw.ssh_target.unwrap_or_default(),
+            ssh_destination: raw.ssh_destination.flatten(),
+            remote_url: raw.remote_url.unwrap_or_default(),
+            pairing_token: raw.pairing_token.flatten(),
+            connection_code: raw.connection_code,
+        })
+    }
+}
+
+impl fmt::Debug for ConnectionSettingsUpdate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let secret = |present: bool| if present { "<redacted>" } else { "" };
+        f.debug_struct("ConnectionSettingsUpdate")
+            .field("mode", &self.mode)
+            .field("pairing_token", &secret(self.pairing_token.is_some()))
+            .field("connection_code", &secret(self.connection_code.is_some()))
+            .finish()
+    }
 }
 
 type PersistConfig = fn(&Path, &TunnelConfig, bool) -> Result<(), String>;
@@ -518,6 +580,27 @@ impl TunnelConfig {
         if update.ssh_destination.is_some() && !update.ssh_target.is_empty() {
             return Err(CONFLICTING_DESTINATIONS);
         }
+        if let Some(code) = update.connection_code.as_deref() {
+            if update.mode != TunnelMode::Direct
+                || code.is_empty()
+                || !update.remote_url.is_empty()
+                || update.pairing_token.is_some()
+                || !update.ssh_target.is_empty()
+                || update.ssh_destination.is_some()
+            {
+                return Err(CODE_CONFLICT);
+            }
+            let (remote_url, pairing_token) = decode_connection_code(code)?;
+            let candidate = TunnelConfig {
+                mode: TunnelMode::Direct,
+                ssh_target: String::new(),
+                ssh_destination: None,
+                remote_url,
+                pairing_token,
+            };
+            validate(&candidate)?;
+            return Ok(candidate);
+        }
         let candidate = match update.mode {
             TunnelMode::External => TunnelConfig::default(),
             TunnelMode::Local => TunnelConfig {
@@ -603,6 +686,80 @@ fn validate_direct_url(value: &str) -> Result<Url, &'static str> {
     }
 
     Ok(url)
+}
+
+/// Decodes `imp1.<base64url endpoint>.<base64url token>` without repair.
+/// Returns the exact endpoint and token. Errors never echo the input.
+fn decode_connection_code(raw: &str) -> Result<(String, String), &'static str> {
+    if raw.len() > CODE_MAX_LEN || !raw.is_ascii() {
+        return Err(CODE_INVALID);
+    }
+    let code = raw.trim_matches([' ', '\t', '\r', '\n']);
+    let mut parts = code.split('.');
+    let (Some("imp1"), Some(endpoint), Some(token), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(CODE_INVALID);
+    };
+    // The engine rejects padding and non-zero trailing bits, so decoding is canonical.
+    let mut endpoint_bytes = [0u8; 384];
+    let endpoint_len = (endpoint.len() <= 364)
+        .then(|| {
+            URL_SAFE_NO_PAD
+                .decode_slice(endpoint, &mut endpoint_bytes)
+                .ok()
+        })
+        .flatten()
+        .ok_or(CODE_INVALID)?;
+    let endpoint = std::str::from_utf8(&endpoint_bytes[..endpoint_len])
+        .ok()
+        .filter(|endpoint| canonical_code_endpoint(endpoint))
+        .ok_or(CODE_INVALID)?;
+    let mut token_bytes = [0u8; 48];
+    if token.len() != 43 || URL_SAFE_NO_PAD.decode_slice(token, &mut token_bytes).ok() != Some(32) {
+        return Err(CODE_INVALID);
+    }
+    Ok((endpoint.to_owned(), token.to_owned()))
+}
+
+/// Exact lowercase `wss://HOST[:PORT]/state` with a DNS name or dotted IPv4 host.
+fn canonical_code_endpoint(endpoint: &str) -> bool {
+    let Some(authority) = endpoint
+        .strip_prefix("wss://")
+        .and_then(|rest| rest.strip_suffix("/state"))
+    else {
+        return false;
+    };
+    let (host, port) = match authority.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    port.is_none_or(|port| {
+        !port.starts_with('0')
+            && port.len() <= 5
+            && port.bytes().all(|b| b.is_ascii_digit())
+            && port.parse::<u16>().is_ok()
+    }) && (canonical_ipv4(host) || canonical_dns_name(host))
+}
+
+fn canonical_ipv4(host: &str) -> bool {
+    // std rejects leading zeros, shorthand and non-decimal octets.
+    host.parse::<Ipv4Addr>().is_ok()
+}
+
+fn canonical_dns_name(host: &str) -> bool {
+    let alnum = |b: &u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    let final_label = host.rsplit('.').next().unwrap_or_default();
+    host.len() <= 253
+        && final_label.starts_with(|c: char| c.is_ascii_lowercase())
+        && host.split('.').all(|label| {
+            let bytes = label.as_bytes();
+            (1..=63).contains(&bytes.len())
+                && !label.starts_with("xn--")
+                && bytes.first().is_some_and(alnum)
+                && bytes.last().is_some_and(alnum)
+                && bytes.iter().all(|b| alnum(b) || *b == b'-')
+        })
 }
 
 fn validate_direct_token(token: &str) -> Result<(), &'static str> {
@@ -875,6 +1032,7 @@ mod tests {
             ssh_destination: None,
             remote_url: String::new(),
             pairing_token: None,
+            connection_code: None,
         }
     }
 
@@ -924,6 +1082,7 @@ mod tests {
                 ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
+                connection_code: None,
             })
             .unwrap();
 
@@ -1157,6 +1316,7 @@ mod tests {
                 ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
+                connection_code: None,
             })
             .unwrap();
 
@@ -1179,6 +1339,7 @@ mod tests {
             ssh_destination: None,
             remote_url: String::new(),
             pairing_token: None,
+            connection_code: None,
         });
         assert_eq!(
             empty.unwrap_err(),
@@ -1192,6 +1353,7 @@ mod tests {
                 ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
+                connection_code: None,
             })
             .unwrap();
 
@@ -1281,6 +1443,7 @@ mod tests {
             ssh_destination: None,
             remote_url: remote_url.into(),
             pairing_token: pairing_token.map(str::to_owned),
+            connection_code: None,
         }
     }
 
@@ -1310,6 +1473,7 @@ mod tests {
                 ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
+                connection_code: None,
             })
             .unwrap();
         assert_eq!(settings.running.unwrap().mode, TunnelMode::Direct);
@@ -1360,6 +1524,7 @@ mod tests {
                 ssh_destination: None,
                 remote_url: "wss://ignored.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
+                connection_code: None,
             })
             .unwrap();
 
@@ -1392,6 +1557,7 @@ mod tests {
                 ssh_destination: None,
                 remote_url: "wss://imp.example/state".into(),
                 pairing_token: Some(VALID_TOKEN.into()),
+                connection_code: None,
             })
             .unwrap();
 
@@ -1705,6 +1871,7 @@ mod tests {
             ssh_destination: Some(destination),
             remote_url: String::new(),
             pairing_token: None,
+            connection_code: None,
         }
     }
 
@@ -2003,6 +2170,234 @@ mod tests {
         assert!(!status.pending_restart);
         assert!(status.saved.unwrap().ssh_destination.is_none());
         assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    const CODE_FIXTURE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/fixtures/direct-connection-codes.json"
+    );
+
+    fn code_update(code: &str) -> ConnectionSettingsUpdate {
+        ConnectionSettingsUpdate {
+            connection_code: Some(code.into()),
+            ..direct_update("", None)
+        }
+    }
+
+    fn code_fixture() -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(CODE_FIXTURE).unwrap()).unwrap()
+    }
+
+    fn first_valid_vector(field: &str) -> String {
+        code_fixture()["valid"][0][field].as_str().unwrap().into()
+    }
+
+    #[test]
+    fn shared_connection_code_vectors() {
+        let fixture = code_fixture();
+        let valid = fixture["valid"].as_array().unwrap();
+        let invalid = fixture["invalid"].as_array().unwrap();
+        assert!(!valid.is_empty() && !invalid.is_empty());
+        for vector in valid {
+            let name = vector["name"].as_str().unwrap();
+            let code = vector["code"].as_str().unwrap();
+            let updated = TunnelConfig::default()
+                .updated(code_update(code))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(
+                updated,
+                direct_config(
+                    vector["endpoint"].as_str().unwrap(),
+                    vector["token"].as_str().unwrap()
+                ),
+                "{name}"
+            );
+        }
+        for vector in invalid {
+            let name = vector["name"].as_str().unwrap();
+            let code = vector["code"].as_str().unwrap();
+            let error = TunnelConfig::default()
+                .updated(code_update(code))
+                .expect_err(name);
+            assert_eq!(error, CODE_INVALID, "{name}");
+        }
+    }
+
+    #[test]
+    fn connection_code_conflicts_reject_before_decoding() {
+        let code = first_valid_vector("code");
+        let mut cases = Vec::new();
+        for mode in [TunnelMode::External, TunnelMode::Local, TunnelMode::Managed] {
+            cases.push(ConnectionSettingsUpdate {
+                mode,
+                ..code_update(&code)
+            });
+        }
+        for edit in [
+            |u: &mut ConnectionSettingsUpdate| u.remote_url = "wss://imp.example/state".into(),
+            |u: &mut ConnectionSettingsUpdate| u.pairing_token = Some(VALID_TOKEN.into()),
+            |u: &mut ConnectionSettingsUpdate| u.ssh_target = "avatar".into(),
+            |u: &mut ConnectionSettingsUpdate| u.ssh_destination = Some(server()),
+            |u: &mut ConnectionSettingsUpdate| u.connection_code = Some(String::new()),
+        ] {
+            let mut update = code_update(&code);
+            edit(&mut update);
+            cases.push(update);
+        }
+        for update in cases {
+            assert!(
+                matches!(
+                    TunnelConfig::default().updated(update.clone()),
+                    Err(CODE_CONFLICT | CONFLICTING_DESTINATIONS)
+                ),
+                "{update:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn connection_code_debug_and_errors_never_reveal_secrets() {
+        let code = first_valid_vector("code");
+        let token = first_valid_vector("token");
+        let update = code_update(&code);
+        let mut manual = direct_update("wss://imp.example/state", Some(VALID_TOKEN));
+        manual.connection_code = Some(code.clone());
+        for debug in [format!("{update:?}"), format!("{manual:?}")] {
+            assert!(!debug.contains(&code) && !debug.contains(&token));
+            assert!(!debug.contains(VALID_TOKEN));
+            assert!(debug.contains("<redacted>"));
+        }
+        let error = TunnelConfig::default()
+            .updated(code_update(&format!("{code}x")))
+            .unwrap_err();
+        assert!(!error.contains(&token) && !error.contains("imp1"));
+    }
+
+    #[test]
+    fn connection_code_save_replaces_atomically_and_failures_preserve_prior_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let prior = direct_config("wss://old.example/state", VALID_TOKEN);
+        persist_config(&path, &prior, true).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let mut store = ConnectionConfigStore::new(path.clone(), load(&path));
+        let code = first_valid_vector("code");
+
+        assert_eq!(
+            store.save(code_update(&format!("{code}."))).unwrap_err(),
+            CODE_INVALID
+        );
+        let mut mixed = code_update(&code);
+        mixed.pairing_token = Some(VALID_TOKEN.into());
+        assert_eq!(store.save(mixed).unwrap_err(), CODE_CONFLICT);
+        store.persist = failing_persist;
+        assert_eq!(
+            store.save(code_update(&code)).unwrap_err(),
+            "simulated persistence failure"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(
+            store.settings().unwrap().saved.unwrap().remote_url,
+            "wss://old.example/state"
+        );
+
+        store.persist = persist_config;
+        assert!(store.save(code_update(&code)).unwrap().pending_restart);
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let object = persisted.as_object().unwrap();
+        assert_eq!(object.len(), 3);
+        assert_eq!(object["mode"], "direct");
+        assert_eq!(object["remoteUrl"], first_valid_vector("endpoint"));
+        assert_eq!(object["pairingToken"], first_valid_vector("token"));
+    }
+
+    #[test]
+    fn connection_code_wire_presence_is_strict() {
+        let code = first_valid_vector("code");
+        let parse = |extra: &str| {
+            serde_json::from_str::<ConnectionSettingsUpdate>(&format!(
+                r#"{{"mode":"direct","connectionCode":"{code}"{extra}}}"#
+            ))
+        };
+        let update = parse("").unwrap();
+        assert_eq!(update.connection_code.as_deref(), Some(code.as_str()));
+        assert!(update.remote_url.is_empty() && update.pairing_token.is_none());
+
+        for extra in [
+            r#","remoteUrl":"""#,
+            r#","remoteUrl":"wss://imp.example/state""#,
+            r#","pairingToken":null"#,
+            r#","pairingToken":"""#,
+            r#","sshTarget":"""#,
+            r#","sshDestination":null"#,
+        ] {
+            let error = parse(extra).err().unwrap().to_string();
+            assert!(error.contains(CODE_CONFLICT), "{extra}: {error}");
+            assert!(!error.contains(&code), "{extra}");
+        }
+        for wire in [
+            r#"{"mode":"direct","connectionCode":null}"#,
+            r#"{"mode":"direct","connectionCode":5}"#,
+            r#"{"mode":"direct","connectionCode":["imp1.secret"]}"#,
+            r#"{"mode":"direct","connectionCode":{"k":"imp1.secret"}}"#,
+        ] {
+            let error = serde_json::from_str::<ConnectionSettingsUpdate>(wire)
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(error.contains(CODE_INVALID), "{wire}: {error}");
+            assert!(!error.contains("secret"), "{wire}");
+        }
+
+        let manual: ConnectionSettingsUpdate = serde_json::from_str(
+            r#"{"mode":"direct","remoteUrl":"wss://imp.example/state","pairingToken":null}"#,
+        )
+        .unwrap();
+        assert!(manual.pairing_token.is_none() && manual.connection_code.is_none());
+        let existing = direct_config("wss://imp.example/state", VALID_TOKEN);
+        assert_eq!(existing.updated(manual).unwrap(), existing);
+    }
+
+    #[test]
+    fn connection_code_rotates_token_and_covers_first_save_and_mode_switch() {
+        let token = first_valid_vector("token");
+        let endpoint = first_valid_vector("endpoint");
+        let rotated = TunnelConfig::default()
+            .updated(code_update(&first_valid_vector("code")))
+            .unwrap();
+        let existing = direct_config(&endpoint, VALID_TOKEN);
+        let updated = existing
+            .updated(code_update(&first_valid_vector("code")))
+            .unwrap();
+        assert_eq!(updated, direct_config(&endpoint, &token));
+        assert_eq!(updated, rotated);
+        assert!(!existing.same_route(&updated));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tunnel.json");
+        let store = ConnectionConfigStore::new(path.clone(), load(&path));
+        assert!(
+            store
+                .save(code_update(&first_valid_vector("code")))
+                .unwrap()
+                .pending_restart
+        );
+        let LoadedConfig::Configured(saved) = load(&path) else {
+            panic!("expected the first save to create a Direct config");
+        };
+        assert_eq!(saved, direct_config(&endpoint, &token));
+
+        let local = dir.path().join("local.json");
+        std::fs::write(&local, r#"{"mode":"local"}"#).unwrap();
+        let store = ConnectionConfigStore::new(local.clone(), load(&local));
+        store
+            .save(code_update(&first_valid_vector("code")))
+            .unwrap();
+        assert_eq!(
+            load(&local),
+            LoadedConfig::Configured(direct_config(&endpoint, &token))
+        );
     }
 
     fn tempdir() -> std::path::PathBuf {

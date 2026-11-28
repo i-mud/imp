@@ -569,6 +569,17 @@ The URL must use `wss`, contain a hostname, and use exactly `/state` (no prefix,
 trailing slash, userinfo, query, or fragment).
 Invalid URL diagnostics never echo the supplied value.
 
+**Connection code (source only, not in v0.8.0 or earlier bundles).** After
+successful public verification, `setup` or `rotate` with `--public-url` also
+prints an `imp1.` connection code that embeds the verified endpoint and the
+new token, then the unchanged raw-token block. The code is the token and has
+the same handoff rules: private terminal, no capture, once only. It is
+omitted for a URL it can't encode (uppercase, IPv6, `xn--` labels, noncanonical
+port); the output says so and prints only the token. Without `--public-url`
+nothing changes. The grammar and desktop steps are in the
+[Direct WSS guide](direct-wss.md#connection-codes-source-only). Idempotent
+setup with a retained credential prints neither; rotate for a new code.
+
 Configure DNS and the TLS edge before invoking this option. After the usual
 relay, local gateway, and service-state checks, provisioning authenticates the
 public `/state` with the newly generated in-memory token and requires a decoded

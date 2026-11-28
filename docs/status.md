@@ -5,6 +5,13 @@ native shell is also runtime-verified on Windows 11 x64.
 
 ## Slice 29 - Connection onboarding
 
+The published [v0.8.0](https://github.com/i-mud/imp/releases/tag/v0.8.0)
+release (2026-11-28, from [PR #73](https://github.com/i-mud/imp/pull/73), merge
+`faf1174`) contains the Managed SSH diagnostic described under 29.3e. Its
+assets are the Windows installer `Imp_0.8.0_x64-setup.exe` and the Linux server
+bundle with its `.sha256`. The 29.3e text below keeps its original wording as
+the record of how that evidence was reached.
+
 The published [v0.7.0](https://github.com/i-mud/imp/releases/tag/v0.7.0)
 installer includes the intent-based dialog and separate Managed SSH server,
 username and optional SSH port fields with strict target host verification
@@ -19,7 +26,7 @@ with `Expected a loopback WebView2 debugger after the executable-scoped policy l
 [run 46060962523](https://github.com/i-mud/imp/actions/runs/46060962523) passed
 at the same head. The passing runs do not explain or erase the failure.
 
-**29.3e, current source:** An explicit **Check connection** uses the entered
+**29.3e, published in v0.8.0:** An explicit **Check connection** uses the entered
 Managed SSH alias or structured login and reports the remote relay's feed
 state or a safe diagnostic. It uses one temporary, owned SSH stdio stream
 to read `/state`, with a five-second deadline, no remote shell command, and
@@ -136,11 +143,43 @@ in Managed mode. The fixture now attributes each such HTTP request by the
 live client-side TCP tuple and the held desktop process, not by its URL alone.
 An SSH-forwarded or unattributed health request must still fail acceptance.
 
+**PR #73 final evidence (head `50d14a1b0f`).** The final pull-request
+[Windows run 46137011771](https://github.com/i-mud/imp/actions/runs/46137011771/job/140954521263)
+passed the native tests, the Windows OpenSSH diagnostic cases, the NSIS build
+and all eleven installed WebView2 phases, including `managed-diagnostic`.
+[CI run 46137011806](https://github.com/i-mud/imp/actions/runs/46137011806)
+passed `check` and the Linux OpenSSH diagnostic job. The earlier failing runs
+above stay as recorded; the first exit 255 was never explained. PR #73 was
+merged and the release workflow published v0.8.0. That evidence covers the
+candidate installer built from the final head, not the published v0.8.0
+installer or server bundle, and no independent human onboarding is recorded.
+
 Neither source-fixture results nor candidate-installer checks are
 published-artifact acceptance or independent human onboarding. Slice 28
 recruitment requirements remain unchanged. The
 [roadmap](roadmap.md#slice-29---connection-onboarding) separates the read-only
 diagnostic from deferred strict gameplay transport.
+
+**29.4, current source only (unreleased, unmerged):** Direct connection codes.
+`imp-direct-wss setup/rotate --public-url` can print an `imp1.` code that
+carries a verified `wss://HOST[:PORT]/state` endpoint and the pairing token.
+The desktop's **Use remote Imp credentials** form can accept the code, show the
+decoded endpoint for review, and then save as before. The contract and bounds
+are in the [Direct WSS guide](../deploy/direct-wss.md#connection-codes-source-only).
+Manual URL and token entry stays supported and the server still prints the raw
+token. The issuer, native save and renderer preview share one format corpus.
+The tagged v0.8.0 native loader read all seven valid candidate saves with the
+exact endpoint and token. The [masked preview](audits/direct-code-browser/browser-direct-preview.png)
+and [restart notice](audits/direct-code-browser/browser-direct-saved.png) are
+controlled Chromium evidence, not installed network traffic.
+
+`npm run test:direct-code` exercises verified issuance, native save and reload,
+and the production renderer clients against the authenticated gateway and relay
+behind a disposable TLS edge. The Windows PR gate separately installs the
+candidate NSIS and exercises code entry and relaunch with synthetic settings.
+Neither gate tests published artifacts, public DNS, NAT reachability or an
+independent player's setup. During play, confirm the intended character's
+vitals update.
 
 ## Slice 28 — External Alpha Readiness
 

@@ -16,6 +16,7 @@
     type ManagedCheckDestination,
     type ManagedCheckResult,
   } from '../lib/tunnel.ts';
+  import { parseConnectionCode } from '../lib/connection-code.ts';
 
   let {
     settings,
@@ -76,6 +77,9 @@
   let sshPort = $state('');
   let remoteUrl = $state('');
   let pairingToken = $state('');
+  let connectionCode = $state('');
+  let manualEntry = $state(false);
+  let codeField = $state<HTMLInputElement>();
   let saving = $state(false);
   let saved = $state(false);
   let activeCheck: number | null = null;
@@ -97,7 +101,7 @@
   let urlField = $state<HTMLInputElement>();
   let tokenField = $state<HTMLInputElement>();
   let issue = $state<{
-    field: 'ssh' | 'server' | 'username' | 'port' | 'url' | 'token';
+    field: 'ssh' | 'server' | 'username' | 'port' | 'url' | 'token' | 'code';
     message: string;
   } | null>(null);
   let showSaveError = $state(false);
@@ -108,6 +112,7 @@
   const canKeepPairingToken = $derived(
     stored?.mode === 'direct' && stored.hasPairingToken && sameEndpoint(stored.remoteUrl, remoteUrl.trim()),
   );
+  const codeDestination = $derived(parseConnectionCode(connectionCode));
   const checkBlocked = $derived(
     checking || cancelRequested || $managedCheckPending || $managedCheckRestartRequired,
   );
@@ -142,6 +147,8 @@
     sshPort = destination?.port?.toString() ?? '';
     remoteUrl = current?.remoteUrl ?? '';
     pairingToken = '';
+    connectionCode = '';
+    manualEntry = current?.mode === 'direct';
     confirmingDiscard = false;
     issue = null;
   });
@@ -353,6 +360,7 @@
 
   function chooseMode(nextMode: ConnectionMode | null): void {
     mode = nextMode;
+    if (nextMode !== 'direct') connectionCode = '';
     if (nextMode === 'external') advancedOpen = true;
     edit();
   }
@@ -368,6 +376,33 @@
     if (!sameEndpoint(remoteUrl.trim(), next.trim())) pairingToken = '';
     remoteUrl = next;
     edit();
+  }
+
+  async function toggleManualEntry(): Promise<void> {
+    manualEntry = !manualEntry;
+    connectionCode = '';
+    pairingToken = '';
+    edit();
+    await tick();
+    (manualEntry ? urlField : codeField)?.focus();
+  }
+
+  // Browsers strip CR/LF from single-line inputs, which would silently repair pasted data.
+  // Validate the pasted text itself and replace the field with it only when it is a valid code.
+  function pasteCode(event: ClipboardEvent): void {
+    event.preventDefault();
+    const text = event.clipboardData?.getData('text/plain') ?? '';
+    edit();
+    if (parseConnectionCode(text)) {
+      connectionCode = text.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+      return;
+    }
+    connectionCode = '';
+    issue = {
+      field: 'code',
+      message:
+        'This connection code is not valid. Copy it again from the server, or enter the URL and token manually.',
+    };
   }
 
   function wrapFocus(event: KeyboardEvent): void {
@@ -397,6 +432,18 @@
       const destination = managedDestination();
       if (!destination) return;
       update = { mode, ...destination };
+    } else if (mode === 'direct' && !manualEntry) {
+      if (!codeDestination) {
+        issue = {
+          field: 'code',
+          message: connectionCode
+            ? 'This connection code is not valid. Copy it again from the server, or enter the URL and token manually.'
+            : 'Paste the connection code from the server, or enter the URL and token manually.',
+        };
+        codeField?.focus();
+        return;
+      }
+      update = { mode, connectionCode };
     } else if (mode === 'direct') {
       const url = remoteUrl.trim();
       if (!stateUrl(url)) {
@@ -440,7 +487,10 @@
 
     try {
       saved = await onsave(update);
-      if (saved) pairingToken = '';
+      if (saved) {
+        pairingToken = '';
+        connectionCode = '';
+      }
     } finally {
       saving = false;
       await tick();
@@ -698,49 +748,91 @@
             <p id="managed-check-status" role="status" class="mode-help">{checkStatus}</p>
           </div>
         {:else if mode === 'direct'}
-          <label>
-            <span>WSS state URL</span>
-            <input
-              bind:this={urlField}
-              value={remoteUrl}
-              type="url"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="wss://imp.example/state"
-              required
-              disabled={saving}
-              aria-invalid={issue?.field === 'url' || undefined}
-              aria-describedby={issue?.field === 'url' ? 'wss-help connection-field-error' : 'wss-help'}
-              oninput={(event) => editUrl(event.currentTarget.value)}
-            />
-          </label>
+          {#if manualEntry}
+            <label>
+              <span>WSS state URL</span>
+              <input
+                bind:this={urlField}
+                value={remoteUrl}
+                name="direct-url"
+                type="url"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="wss://imp.example/state"
+                required
+                disabled={saving}
+                aria-invalid={issue?.field === 'url' || undefined}
+                aria-describedby={issue?.field === 'url' ? 'wss-help connection-field-error' : 'wss-help'}
+                oninput={(event) => editUrl(event.currentTarget.value)}
+              />
+            </label>
 
-          <label>
-            <span>Pairing token</span>
-            <input
-              bind:this={tokenField}
-              bind:value={pairingToken}
-              type="password"
-              spellcheck="false"
-              autocomplete="off"
-              required={!canKeepPairingToken}
-              disabled={saving}
-              aria-invalid={issue?.field === 'token' || undefined}
-              aria-describedby={issue?.field === 'token' ? 'token-help connection-field-error' : 'token-help'}
-              oninput={edit}
-            />
-          </label>
+            <label>
+              <span>Pairing token</span>
+              <input
+                bind:this={tokenField}
+                bind:value={pairingToken}
+                name="direct-token"
+                type="password"
+                spellcheck="false"
+                autocomplete="off"
+                required={!canKeepPairingToken}
+                disabled={saving}
+                aria-invalid={issue?.field === 'token' || undefined}
+                aria-describedby={issue?.field === 'token'
+                  ? 'token-help connection-field-error'
+                  : 'token-help'}
+                oninput={edit}
+              />
+            </label>
 
-          <p id="wss-help" class="mode-help">
-            Get the WSS URL and token from <code>imp-direct-wss setup</code> on the server. Never append the token
-            to the URL.
-          </p>
+            <p id="wss-help" class="mode-help">
+              Get the WSS URL and token from <code>imp-direct-wss setup</code> on the server. Never append the token
+              to the URL.
+            </p>
 
-          <p id="token-help" class="mode-help">
-            {canKeepPairingToken
-              ? 'Leave the token blank to keep your saved credential.'
-              : 'Enter the pairing token for this endpoint.'}
-          </p>
+            <p id="token-help" class="mode-help">
+              {canKeepPairingToken
+                ? 'Leave the token blank to keep your saved credential.'
+                : 'Enter the pairing token for this endpoint.'}
+            </p>
+          {:else}
+            <label>
+              <span>Connection code</span>
+              <input
+                bind:this={codeField}
+                bind:value={connectionCode}
+                name="connection-code"
+                type="password"
+                spellcheck="false"
+                autocomplete="off"
+                autocapitalize="none"
+                disabled={saving}
+                aria-invalid={issue?.field === 'code' || undefined}
+                aria-describedby={issue?.field === 'code'
+                  ? 'connection-code-help connection-field-error'
+                  : 'connection-code-help'}
+                oninput={edit}
+                onpaste={pasteCode}
+              />
+            </label>
+            <p id="connection-code-help" class="mode-help">
+              Paste the code printed by <code>imp-direct-wss setup</code> on the server. It contains your pairing
+              token, so it is hidden.
+            </p>
+            <p class="mode-help destination" role="status" data-connection-code-preview>
+              {#if codeDestination}Imp will connect to <code>{codeDestination}</code>{/if}
+            </p>
+          {/if}
+          <button
+            class="manager-btn secondary"
+            name="direct-manual-entry"
+            type="button"
+            disabled={saving}
+            onclick={toggleManualEntry}
+          >
+            {manualEntry ? 'Use a connection code instead' : 'Enter URL and token manually'}
+          </button>
         {/if}
 
         {#if mode !== 'managed' && $managedCheckPending}
@@ -1020,6 +1112,10 @@
 
   .saved-message {
     color: var(--good-text);
+  }
+
+  .destination:empty {
+    display: none;
   }
 
   .form-actions {

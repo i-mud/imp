@@ -1533,15 +1533,21 @@ def test_public_verification_precedes_handoff(
     public_edge.health = health
     handoff = direct_wss._write_pairing_token
 
-    def checked_handoff(token: str, output: io.StringIO) -> None:
+    def checked_handoff(token: str, output: io.StringIO, code: str | None = None) -> None:
         assert ("/healthz", False) in public_edge.requests
         assert TOKEN not in output.getvalue()
-        handoff(token, output)
+        handoff(token, output, code)
 
     monkeypatch.setattr(direct_wss, "_write_pairing_token", checked_handoff)
     url, flags = (PUBLIC_URL, ["--verify-via-loopback"]) if loopback else (public_edge.url, [])
     assert direct_wss.main([command, "--public-url", url, *flags]) == 0, stderr.getvalue()
     assert stdout.getvalue().endswith(TOKEN + "\n")
+    code = f"imp1.{base64.urlsafe_b64encode(url.encode()).rstrip(b'=').decode()}.{TOKEN}"
+    assert stdout.getvalue().count(code) == 1
+    # Code and standalone token both carry the freshly generated credential, never the prior one.
+    new_data = f"IMP_GATEWAY_TOKEN_SHA256={token_digest(TOKEN).hex()}\n".encode()
+    assert (home / ".config/imp/gateway.env").read_bytes() == new_data
+    assert OLD_TOKEN not in stdout.getvalue()
     assert not stderr.getvalue()
     assert service.active and service.enabled == (command == "setup" or enabled)
     assert TOKEN not in repr(service.calls)
@@ -1561,6 +1567,61 @@ def test_public_verification_precedes_handoff(
         assert set(public_edge.sni) == set(public_edge.hosts) == {"imp.example.test"}
         assert public_edge.lookups == []
         assert stdout.getvalue().index("Public WSS endpoint: verified") < stdout.getvalue().index(TOKEN)
+
+
+@pytest.mark.parametrize("fault", ["code", "partial-write", "flush"])
+@pytest.mark.parametrize("command,enabled", [("setup", False), ("rotate", False), ("rotate", True)])
+def test_verified_handoff_fault_restores_prior_digest_and_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    public_edge: SimpleNamespace,
+    command: str,
+    enabled: bool,
+    fault: str,
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    old_data = f"{_config_line(token_digest(OLD_TOKEN).hex())}\n".encode()
+    config = home / ".config/imp/gateway.env"
+    if command == "rotate":
+        _write_config(home, old_data)
+    service = _fake_systemctl(home, monkeypatch, active=command == "rotate", enabled=enabled)
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda length: TOKEN)
+    monkeypatch.setattr(direct_wss, "_verify_gateway", lambda token: None)
+
+    class FaultyTTY(TTY):
+        def write(self, value: str) -> int:
+            if fault == "partial-write" and value.startswith("Imp Direct connection code"):
+                super().write(value[: len(value) // 2])
+                raise BrokenPipeError
+            return super().write(value)
+
+        def flush(self) -> None:
+            if fault == "flush":
+                raise BrokenPipeError
+
+    def broken_issuer(endpoint: str, token: str) -> str:
+        raise RuntimeError(token)
+
+    if fault == "code":
+        monkeypatch.setattr(direct_wss, "_connection_code", broken_issuer)
+    stdout = FaultyTTY()
+    stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stdin", TTY())
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+
+    assert direct_wss.main([command, "--public-url", PUBLIC_URL, "--verify-via-loopback"]) == 1
+    assert "Public WSS endpoint: verified" in stdout.getvalue()
+    if command == "rotate":
+        assert config.read_bytes() == old_data
+    else:
+        assert not config.exists()
+    assert service.active == (command == "rotate")
+    assert service.enabled == enabled
+    assert "restored" in stderr.getvalue()
+    assert TOKEN not in stderr.getvalue() and "imp1." not in stderr.getvalue()
+    if fault == "code":
+        assert TOKEN not in stdout.getvalue() and "imp1." not in stdout.getvalue()
 
 
 def test_default_public_verification_still_dials_public_name(
@@ -1666,6 +1727,7 @@ def test_public_failure_restores_state_without_disclosing_token(
     assert service.enabled == enabled
     assert "restored" in stderr.getvalue()
     assert TOKEN not in stdout.getvalue() + stderr.getvalue() + caplog.text
+    assert "imp1." not in stdout.getvalue() + stderr.getvalue()
     assert TOKEN not in repr(service.calls)
     assert TOKEN not in repr(dict(os.environ))
 
@@ -1684,6 +1746,7 @@ def test_public_setup_is_idempotent_without_existing_plaintext(
     assert direct_wss.main(["setup", "--public-url", "wss://imp.example/state"]) == 0
     assert config.read_bytes() == old_data
     assert "Public verification not performed" in stdout.getvalue()
+    assert "imp1." not in stdout.getvalue()
     assert not stderr.getvalue()
     assert not (config.parent / direct_wss._LOCK_NAME).exists()
 

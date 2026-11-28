@@ -1,3 +1,4 @@
+import vectors from '../../../tests/fixtures/direct-connection-codes.json';
 import { flushSync, mount, tick, unmount, type ComponentProps } from 'svelte';
 import { fromStore, writable } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -127,6 +128,11 @@ async function choose(mode: string): Promise<void> {
   const radio = document.querySelector<HTMLInputElement>(`input[type="radio"][value="${mode}"]`);
   if (!radio) throw new Error(`Missing route: ${mode}`);
   await click(radio);
+}
+
+async function manual(): Promise<void> {
+  const toggle = document.querySelector<HTMLButtonElement>('button[name="direct-manual-entry"]')!;
+  if (!document.querySelector('input[type="url"]')) await click(toggle);
 }
 
 function field(key: string): HTMLInputElement {
@@ -883,6 +889,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
   ])('blocks an unsafe or invalid Direct URL', async (url) => {
     const { onsave } = await setup(null);
     await choose('direct');
+    await manual();
     await input('url', url);
     await input('password', TOKEN);
     await submit();
@@ -896,6 +903,7 @@ describe('ConnectionDialog credential-discard interactions', () => {
   it('requires a canonical token when no Direct credential is saved', async () => {
     const { onsave } = await setup(null);
     await choose('direct');
+    await manual();
     await input('url', DIRECT.remoteUrl);
     await input('password', 'x'.repeat(43));
     await submit();
@@ -923,6 +931,181 @@ describe('ConnectionDialog credential-discard interactions', () => {
       expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'local' });
     },
   );
+});
+
+describe('ConnectionDialog Direct connection code', () => {
+  const { code, endpoint } = vectors.valid[0]!;
+  const second = vectors.valid[1]!;
+  const preview = () => document.querySelector('[data-connection-code-preview]')!;
+  const toggleManual = () => click(document.querySelector('button[name="direct-manual-entry"]')!);
+  async function paste(text: string): Promise<Event> {
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } });
+    flushSync(() => field('connection-code').dispatchEvent(event));
+    await settle();
+    return event;
+  }
+
+  it('is the masked default, previews the exact endpoint, and saves only the code', async () => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    const codeInput = field('connection-code');
+    expect(codeInput.type).toBe('password');
+    expect(codeInput.hasAttribute('maxlength')).toBe(false);
+    expect(document.querySelector('input[type="url"]')).toBeNull();
+    expect(preview().textContent).toBe('');
+    await input('connection-code', code.slice(0, -1));
+    expect(preview().textContent).toBe('');
+    await paste(` ${code}\r\n`);
+    expect(preview().textContent).toBe(`Imp will connect to ${endpoint}`);
+    expect(document.body.textContent).not.toContain(code);
+    await submit();
+    expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'direct', connectionCode: code });
+    expect(codeInput.value).toBe('');
+  });
+
+  it('replaces the preview after a valid paste and drops it when the current code becomes invalid', async () => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    const first = await paste(` ${code}\r\n`);
+    expect(first.defaultPrevented).toBe(true);
+    expect(field('connection-code').value).toBe(code);
+    expect(preview().textContent).toBe(`Imp will connect to ${endpoint}`);
+    await paste(second.code);
+    expect(preview().textContent).toBe(`Imp will connect to ${second.endpoint}`);
+    await input('connection-code', `${second.code}x`);
+    expect(preview().textContent).toBe('');
+    await submit();
+    expect(onsave).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field('connection-code'));
+  });
+
+  it.each([
+    ['an embedded newline', () => `${code.slice(0, 20)}\n${code.slice(20)}`],
+    ['an embedded carriage return', () => `${code.slice(0, 20)}\r${code.slice(20)}`],
+    ['oversized input', () => `${code}${' '.repeat(600)}`],
+  ])('does not silently repair a paste with %s', async (_name, text) => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    await paste(code);
+    await paste(text());
+    expect(field('connection-code').value).toBe('');
+    expect(preview().textContent).toBe('');
+    expect(field('connection-code').getAttribute('aria-invalid')).toBe('true');
+    await submit();
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('focuses an invalid code without echoing it and never saves', async () => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    await submit();
+    expect(document.activeElement).toBe(field('connection-code'));
+    await input('connection-code', 'imp1.secret.invalid');
+    await submit();
+    const alert = document.querySelector('#connection-field-error')!;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).not.toContain('secret');
+    expect(field('connection-code').getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(field('connection-code'));
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('keeps the code for retry and preserves actionable settings errors', async () => {
+    const onsave = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { errorStore } = await setup(null, onsave);
+    await choose('direct');
+    await input('connection-code', code);
+    await submit();
+    const changed = 'Connection settings changed on disk. Restart Imp before saving again.';
+    errorStore.set(changed);
+    await settle();
+    const alert = document.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toBe(changed);
+    expect(document.body.textContent).not.toContain(code);
+    expect(field('connection-code').value).toBe(code);
+    await submit();
+    expect(onsave).toHaveBeenCalledTimes(2);
+    expect(field('connection-code').value).toBe('');
+  });
+
+  it('preserves backend messages for manual entry', async () => {
+    const { errorStore } = await setup(null, vi.fn().mockResolvedValue(false));
+    await choose('direct');
+    await toggleManual();
+    await input('url', 'wss://fixture.invalid/state');
+    await input('password', TOKEN);
+    await submit();
+    errorStore.set('Could not save native connection settings.');
+    await settle();
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      'Could not save native connection settings.',
+    );
+  });
+
+  it('clears the code when changing route or switching to manual entry, without saving', async () => {
+    const { onsave } = await setup(null);
+    await choose('direct');
+    await input('connection-code', code);
+    await toggleManual();
+    expect(document.activeElement).toBe(document.querySelector('input[type="url"]'));
+    await input('password', TOKEN);
+    await toggleManual();
+    expect(field('connection-code').value).toBe('');
+    await toggleManual();
+    expect(field('password').value).toBe('');
+    await toggleManual();
+    await input('connection-code', code);
+    await choose('local');
+    await choose('direct');
+    expect(field('connection-code').value).toBe('');
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('discards the code on Close, Escape, and reopen', async () => {
+    const { onclose } = await setup(null);
+    await choose('direct');
+    await input('connection-code', code);
+    await click(button('Close'));
+    expect(onclose).toHaveBeenCalledOnce();
+    flushSync(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(onclose).toHaveBeenCalledTimes(2);
+
+    await unmount(mounted.pop()!);
+    document.body.replaceChildren();
+    await setup(null);
+    await choose('direct');
+    expect(field('connection-code').value).toBe('');
+    expect(preview().textContent).toBe('');
+  });
+
+  it('never falls back to the saved credential from code mode', async () => {
+    const { onsave } = await setup();
+    await toggleManual();
+    await submit();
+    expect(onsave).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field('connection-code'));
+    expect(field('connection-code').getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('opens saved Direct manually and keeps the saved credential only there', async () => {
+    const { onsave } = await setup();
+    expect(document.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(DIRECT.remoteUrl);
+    await submit();
+    expect(onsave).toHaveBeenCalledExactlyOnceWith({ mode: 'direct', remoteUrl: DIRECT.remoteUrl });
+  });
+
+  it('rotates only the token for the saved endpoint', async () => {
+    const { onsave } = await setup();
+    await input('password', TOKEN);
+    await submit();
+    expect(onsave).toHaveBeenCalledExactlyOnceWith({
+      mode: 'direct',
+      remoteUrl: DIRECT.remoteUrl,
+      pairingToken: TOKEN,
+    });
+    expect(field('password').value).toBe('');
+  });
 });
 
 describe('ConnectionDialog save focus', () => {

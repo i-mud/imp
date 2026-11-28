@@ -1095,7 +1095,7 @@ It kept alias settings, the existing Managed gameplay transport and the
 save/restart flow. v0.7.0 still uses terminal preflight; it did not change
 authentication or remote installation.
 
-**29.3e: explicit Managed SSH diagnostic (source).** The user can check the
+**29.3e: explicit Managed SSH diagnostic (published in v0.8.0, [PR #73](https://github.com/i-mud/imp/pull/73)).** The user can check the
 entered server login or alias before saving. The check replaces the routine
 terminal preflight on this route, not first-time host trust and credential
 preparation. It starts one owned foreground system `ssh -W 127.0.0.1:8787`
@@ -1138,10 +1138,22 @@ every action, including cancellation, backend replacement, port reuse, and no
 action replay; it must meet the latency, stream isolation, and teardown gates
 on Windows and Unix before replacing the current route.
 
-The other onboarding increments remain separate: 29.4 Direct connection codes
-beyond credential binding, 29.5 live switching, 29.6 remote install simplification,
-and 29.7 published-artifact acceptance and independent onboarding. Verify the
-matching published Windows installer and server bundle through ordinary play,
+**29.4: Direct connection codes (source only).** A server prints one
+`imp1.` code after public verification so the player pastes one value instead
+of a URL and token. The desktop decodes it with the strict grammar in the
+[Direct WSS guide](../deploy/direct-wss.md#connection-codes-source-only), shows
+the endpoint for review, and saves through the existing Direct path; manual
+entry remains for older servers, endpoints a code can't represent, and
+unverified or retained credentials. Endpoint binding from 29.4a is unchanged.
+Not published. [Source acceptance](status.md#slice-29---connection-onboarding)
+uses a disposable TLS edge and synthetic gameplay; it does not establish
+public or NAT reachability. Published-artifact and independent-player
+acceptance stay with 29.7.
+
+The other onboarding increments remain separate: 29.5 live switching,
+29.6 remote install simplification, and 29.7 published-artifact acceptance and
+independent onboarding. Verify the matching published Windows installer and
+server bundle through ordinary play,
 then record independent outcomes on each priority route. Those gates and the
 [Slice 28 pilot conditions](#slice-28---external-alpha-readiness) are unchanged.
 

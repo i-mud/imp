@@ -484,6 +484,7 @@ function Test-InstalledManagedDiagnostic([int]$BlockedPort) {
 }
 
 $Completed = $false
+$CodePhaseRan = $false
 $FixtureCleanupFailed = $false
 try {
 $Setup = Start-Process (Resolve-Path $Installer).Path -ArgumentList '/S' -Wait -PassThru
@@ -552,9 +553,12 @@ if ($CheckConnectionUi) {
                 @{ Phase = 'managed-restart' },
                 @{ Phase = 'external'; Config = @{ mode = 'external' } },
                 @{ Phase = 'direct'; Config = @{ mode = 'direct'; remoteUrl = "wss://127.0.0.1:$Port/state"; pairingToken = ('A' * 43) } },
+                @{ Phase = 'code'; Config = @{ mode = 'local' } },
+                @{ Phase = 'code-restart' },
                 @{ Phase = 'legacy'; Config = @{} },
                 @{ Phase = 'invalid' })) {
             if ($Case.Phase -eq 'managed-restart' -and $FailedPhases -contains 'managed-structured') { continue }
+            if ($Case.Phase -eq 'code-restart' -and $FailedPhases -contains 'code') { continue }
             if ($null -ne $Case.Config) {
                 [IO.File]::WriteAllText($TunnelConfig, ($Case.Config | ConvertTo-Json))
             } elseif ($Case.Phase -eq 'invalid') {
@@ -567,6 +571,7 @@ if ($CheckConnectionUi) {
             try {
                 Start-FixtureDesktop $Log ([ref]$App)
                 try {
+                    if ($Case.Phase -like 'code*') { $script:CodePhaseRan = $true }
                     Invoke-ConnectionUi $App $Case.Phase $Port
                 } catch [IO.InvalidDataException] {
                     # Local depends on deferral's save; the structured restart depends on its save.
@@ -587,7 +592,14 @@ if ($CheckConnectionUi) {
                             throw 'Installed UI did not save the selected local route'
                         }
                     }
-                    'direct' {
+                    'code' {
+                        $Saved = Get-Content $TunnelConfig -Raw | ConvertFrom-Json
+                        if ($Saved.mode -ne 'direct' -or $Saved.remoteUrl -ne "wss://127.0.0.1:$Port/state" -or
+                            $Saved.pairingToken -notmatch '^[A-Za-z0-9_-]{43}$') {
+                            throw 'Installed UI did not save the pasted synthetic connection code as Direct'
+                        }
+                    }
+                    { $_ -in 'direct', 'code-restart' } {
                         $Saved = Get-Content $TunnelConfig -Raw | ConvertFrom-Json
                         if ($Saved.mode -ne 'local' -or $Saved.pairingToken -or $Saved.remoteUrl) {
                             throw 'Confirmed mode switch did not remove the synthetic Direct credentials'
@@ -616,6 +628,10 @@ $Completed = $true
     if ($FixtureCleanupFailed) { $CleanupErrors += 'Could not verify all owned fixture processes exited' }
     if ($CheckConnectionUi) {
         try { Restore-WebViewPolicy } catch { $CleanupErrors += "WebView2 policy cleanup failed: $($_.Exception.Message)" }
+        # Only code phases on a disposable hosted runner (or explicit consent) ever touch the clipboard.
+        if ($CodePhaseRan -and (($env:GITHUB_ACTIONS -eq 'true' -and $env:IMP_ACCEPTANCE_RUNNER -eq 'github-hosted') -or $env:IMP_DISPOSABLE_PLAYTEST -eq '1')) {
+            try { Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.Clipboard]::Clear() } catch { $CleanupErrors += 'Synthetic clipboard cleanup failed' }
+        }
         try { Wait-FixtureGone } catch { $CleanupErrors += $_.Exception.Message }
     }
     foreach ($Message in $CleanupErrors) { Write-Error $Message -ErrorAction Continue }

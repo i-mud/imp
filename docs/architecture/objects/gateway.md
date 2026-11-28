@@ -14,7 +14,8 @@ loopback relay.
 The installed Linux bundle's `imp-direct-wss setup|rotate|status` command
 manages only the supported target-user service and fixed configuration paths.
 Setup and rotation require terminal stdin/stdout before mutation; plaintext
-token output is reserved for deliberate one-time handoff. Status does not
+token output (and, with `--public-url` for a representable URL, a source-only
+connection code that embeds the token) is reserved for deliberate one-time handoff. Status does not
 mutate or disclose credentials. The connection-oriented installer leaves a fresh
 gateway disabled for SSH/install-only, or delegates verified Direct setup after
 preparing its narrow Caddy edge. Ordinary upgrades preserve prior enablement
@@ -28,6 +29,11 @@ redirects and ignores environment proxies. Public failure uses the existing
 configuration/service rollback. Existing-credential setup remains a no-op and
 explicitly reports that public verification was not performed; public rotation
 requires an already-active gateway. This command does not configure the TLS edge.
+The code is formatted only after public verification, never for a retained
+credential, and the server stores neither it nor the token. The code and the
+raw-token block are written on consecutive lines, but terminal delivery
+is not atomic or recoverable: a failing terminal can leave either, so
+treat an interrupted handoff as exposure and rotate.
 During credential mutation, temporary INT/TERM/HUP handlers enter the same
 digest/service rollback; signals deferred inside a verification exception are
 checked before token output. Original handlers are captured before installation,
