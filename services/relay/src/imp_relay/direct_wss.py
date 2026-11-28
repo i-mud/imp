@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import errno
 import http.client
 import json
@@ -670,6 +671,38 @@ def _public_url(value: str, loopback: bool = False) -> SplitResult:
     return parts
 
 
+_CODE_HOST = re.compile(
+    r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"|(?:(?:0|[1-9][0-9]{0,2})\.){3}(?:0|[1-9][0-9]{0,2})",
+    re.ASCII,
+)
+_CODE_ENDPOINT = re.compile(r"wss://([^/:]+)(?::([1-9][0-9]{0,4}))?/state", re.ASCII)
+
+
+def _code_endpoint(value: str) -> bool:
+    """True when value is exactly representable in a connection code (no normalization)."""
+    match = _CODE_ENDPOINT.fullmatch(value)
+    if match is None or (match[2] is not None and int(match[2]) > 65535):
+        return False
+    host = match[1]
+    if not _CODE_HOST.fullmatch(host) or any(label.startswith("xn--") for label in host.split(".")):
+        return False
+    octets = host.split(".")
+    return not (len(octets) == 4 and all(octet.isdigit() for octet in octets)) or all(
+        int(octet) <= 255 for octet in octets
+    )
+
+
+def _connection_code(endpoint: str, token: str) -> str | None:
+    """Code for a representable endpoint, else None; an invalid token is a fault, never a fallback."""
+    if not valid_pairing_token(token):
+        raise DirectWssError("secure pairing token generation failed")
+    if not _code_endpoint(endpoint):
+        return None
+    encoded = base64.urlsafe_b64encode(endpoint.encode("ascii")).rstrip(b"=").decode("ascii")
+    return f"imp1.{encoded}.{token}"
+
+
 def _public_http_get(
     parts: SplitResult, path: str, context: ssl.SSLContext, loopback: bool = False
 ) -> tuple[int, bytes]:
@@ -772,8 +805,12 @@ def _require_tty() -> None:
         raise DirectWssError("setup and rotate require interactive stdin and stdout")
 
 
-def _write_pairing_token(token: str, stdout: IO[str]) -> None:
+def _write_pairing_token(token: str, stdout: IO[str], code: str | None = None) -> None:
     try:
+        if code is not None:
+            stdout.write("Imp Direct connection code (shown once; contains the pairing token; not stored):\n")
+            stdout.write(code + "\n")
+            stdout.write("Manual fallback with the same credential (enter the URL separately):\n")
         stdout.write("Direct WSS pairing token (shown once; not stored):\n")
         stdout.write(token + "\n")
         stdout.flush()
@@ -921,12 +958,22 @@ def _mutate(
                         else "Public state URL: wss://<your-public-host>/state\n"
                         "Configure your TLS proxy to forward approved routes to 127.0.0.1:8788.\n"
                     )
-                    stdout.write(
-                        "Paste the URL and token separately into Settings -> Connection -> Direct.\n"
-                        "Save and restart Imp.\n"
-                    )
+                    code = _connection_code(public_url.geturl(), token) if public_url is not None else None
+                    if code is not None:
+                        paste = "Paste the connection code, or the URL and token separately, into "
+                        paste += "Settings -> Connection -> Direct.\n"
+                    elif public_url is not None:
+                        paste = "A connection code is unavailable for this URL; "
+                        paste += "enter the URL and token separately.\n"
+                    else:
+                        paste = "Paste the URL and token separately into Settings -> Connection -> Direct.\n"
+                    stdout.write(paste)
+                    stdout.write("Save and restart Imp.\n")
                     check_interrupted()
-                    _write_pairing_token(token, stdout)
+                    if code is None:
+                        _write_pairing_token(token, stdout)
+                    else:
+                        _write_pairing_token(token, stdout, code)
                 except BaseException as error:
                     rollback_failures: list[str] = []
                     # A signal can land after the replace but before config_replaced is set; only a

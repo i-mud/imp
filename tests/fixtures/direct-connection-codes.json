@@ -1,0 +1,290 @@
+{
+  "valid": [
+    {
+      "name": "verified DNS",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "endpoint": "wss://mud.example/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "explicit port",
+      "code": "imp1.d3NzOi8vZWRnZS0yLmV4YW1wbGU6ODQ0My9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "endpoint": "wss://edge-2.example:8443/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "explicit default port",
+      "code": "imp1.d3NzOi8vaG9zdDo0NDMvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "endpoint": "wss://host:443/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "canonical IPv4",
+      "code": "imp1.d3NzOi8vMTkyLjAuMi4xOjY1NTM1L3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "endpoint": "wss://192.0.2.1:65535/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "clipboard whitespace",
+      "code": " \timp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\r\n",
+      "endpoint": "wss://mud.example/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "raw bound inclusive",
+      "code": "                                                                                                                                                                                                                                                                                                                                                                                                                                                imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "endpoint": "wss://mud.example/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "maximum DNS length",
+      "code": "imp1.d3NzOi8vYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEuYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYjoxL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "endpoint": "wss://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:1/state",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unsupported version",
+      "code": "imp2.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "wrong case",
+      "code": "IMP1.D3NZOI8VBXVKLMV4YW1WBGUVC3RHDGU.AAECAWQFBGCICQOLDA0ODXAREHMUFRYXGBKAGXWDHH8"
+    },
+    {
+      "name": "not a code",
+      "code": "wss://mud.example/state"
+    },
+    {
+      "name": "missing component",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU"
+    },
+    {
+      "name": "extra component",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8.x"
+    },
+    {
+      "name": "empty endpoint",
+      "code": "imp1..AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "empty token",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU."
+    },
+    {
+      "name": "oversized before trimming",
+      "code": "                                                                                                                                                                                                                                                                                                                                                                                                                                                 imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "padded endpoint",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU=.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "padded token",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+    },
+    {
+      "name": "short token",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh"
+    },
+    {
+      "name": "token nonzero unused bits",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9"
+    },
+    {
+      "name": "token invalid alphabet",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdH/A"
+    },
+    {
+      "name": "invalid endpoint bytes",
+      "code": "imp1._w.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "short base64 group",
+      "code": "imp1.A.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "internal space",
+      "code": "imp1.d3N zOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "embedded tab",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\tA"
+    },
+    {
+      "name": "non-ASCII outer whitespace",
+      "code": " imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "form feed",
+      "code": "\fimp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "NUL",
+      "code": "imp1.d3NzOi8vbXVkLmV4YW1wbGUvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\u0000"
+    },
+    {
+      "name": "endpoint nonzero unused bits",
+      "code": "imp1.d3NzOi8vYS9zdGF0ZR.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "user info",
+      "endpoint": "wss://a@host/state",
+      "code": "imp1.d3NzOi8vYUBob3N0L3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "password",
+      "endpoint": "wss://a:b@host/state",
+      "code": "imp1.d3NzOi8vYTpiQGhvc3Qvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "query",
+      "endpoint": "wss://host/state?",
+      "code": "imp1.d3NzOi8vaG9zdC9zdGF0ZT8.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "fragment",
+      "endpoint": "wss://host/state#x",
+      "code": "imp1.d3NzOi8vaG9zdC9zdGF0ZSN4.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "wrong scheme",
+      "endpoint": "ws://host/state",
+      "code": "imp1.d3M6Ly9ob3N0L3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "uppercase scheme",
+      "endpoint": "WSS://host/state",
+      "code": "imp1.V1NTOi8vaG9zdC9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "uppercase host",
+      "endpoint": "wss://Host/state",
+      "code": "imp1.d3NzOi8vSG9zdC9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "trailing dot",
+      "endpoint": "wss://host./state",
+      "code": "imp1.d3NzOi8vaG9zdC4vc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "numeric TLD",
+      "endpoint": "wss://a.1/state",
+      "code": "imp1.d3NzOi8vYS4xL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "leading hyphen",
+      "endpoint": "wss://-bad/state",
+      "code": "imp1.d3NzOi8vLWJhZC9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "trailing hyphen",
+      "endpoint": "wss://bad-/state",
+      "code": "imp1.d3NzOi8vYmFkLS9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "empty label",
+      "endpoint": "wss://a..b/state",
+      "code": "imp1.d3NzOi8vYS4uYi9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "IDNA label",
+      "endpoint": "wss://xn--abc.example/state",
+      "code": "imp1.d3NzOi8veG4tLWFiYy5leGFtcGxlL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "non-ASCII endpoint",
+      "endpoint": "wss://é.example/state",
+      "code": "imp1.d3NzOi8vw6kuZXhhbXBsZS9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "encoded host",
+      "endpoint": "wss://%61/state",
+      "code": "imp1.d3NzOi8vJTYxL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "IPv6",
+      "endpoint": "wss://[::1]/state",
+      "code": "imp1.d3NzOi8vWzo6MV0vc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "short IPv4",
+      "endpoint": "wss://127.1/state",
+      "code": "imp1.d3NzOi8vMTI3LjEvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "octal IPv4",
+      "endpoint": "wss://192.0.02.1/state",
+      "code": "imp1.d3NzOi8vMTkyLjAuMDIuMS9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "out of range octet",
+      "endpoint": "wss://192.0.2.256/state",
+      "code": "imp1.d3NzOi8vMTkyLjAuMi4yNTYvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "hex IPv4",
+      "endpoint": "wss://0x7f000001/state",
+      "code": "imp1.d3NzOi8vMHg3ZjAwMDAwMS9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "long label",
+      "code": "imp1.d3NzOi8vYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "long hostname",
+      "code": "imp1.d3NzOi8vYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEuYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "empty port",
+      "endpoint": "wss://host:/state",
+      "code": "imp1.d3NzOi8vaG9zdDovc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "leading zero port",
+      "endpoint": "wss://host:0443/state",
+      "code": "imp1.d3NzOi8vaG9zdDowNDQzL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "zero port",
+      "endpoint": "wss://host:0/state",
+      "code": "imp1.d3NzOi8vaG9zdDowL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "out of range port",
+      "endpoint": "wss://host:65536/state",
+      "code": "imp1.d3NzOi8vaG9zdDo2NTUzNi9zdGF0ZQ.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "ambiguous path",
+      "endpoint": "wss://host/./state",
+      "code": "imp1.d3NzOi8vaG9zdC8uL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "encoded path",
+      "endpoint": "wss://host/%73tate",
+      "code": "imp1.d3NzOi8vaG9zdC8lNzN0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "wrong path",
+      "endpoint": "wss://host/state/",
+      "code": "imp1.d3NzOi8vaG9zdC9zdGF0ZS8.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "host separator",
+      "endpoint": "wss://host\\a/state",
+      "code": "imp1.d3NzOi8vaG9zdFxhL3N0YXRl.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "decoded whitespace",
+      "endpoint": "wss://h ost/state",
+      "code": "imp1.d3NzOi8vaCBvc3Qvc3RhdGU.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "name": "decoded newline",
+      "endpoint": "wss://host/state\n",
+      "code": "imp1.d3NzOi8vaG9zdC9zdGF0ZQo.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    }
+  ]
+}

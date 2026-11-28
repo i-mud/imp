@@ -187,6 +187,21 @@ gateway:
   prior token authenticates again and must be treated as immediate containment
   work.
 
+A source-only Direct connection code (`imp1.`, unreleased) bundles an encoded
+endpoint with the existing reusable pairing token. Possession grants exactly
+the same access as possession of the token:
+
+- the desktop accepts it only through the explicit save operation, decodes it
+  under the strict canonical grammar (≤512 ASCII characters, lowercase
+  `wss://HOST[:PORT]/state`, no IPv6, no `xn--`, no repair), and then stores
+  the same endpoint and token a manual entry would, under the same endpoint
+  binding;
+- the endpoint is shown for the player's review before save; the code is
+  never an echo target for errors or logs and is not stored as such;
+- a code does not pin TLS or prove reachability or character identity;
+- the server issues one only after public verification, never from a retained
+  credential, and never stores it. Manual entry remains the fallback.
+
 The relay itself remains unauthenticated and permanently loopback-only.
 `/ingest` and `/action-consumer` are not exposed by the gateway. See
 `docs/architecture/decisions/0001-loopback-relay-and-ssh-boundary.md` and

@@ -9,6 +9,16 @@ export function setupManagedCheckBrowser() {
   const frame = (type, data) => ({ protocol: 2, type, ...data });
   const emit = (socket, message) =>
     socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(message) }));
+  const settings = () => {
+    const { store } = fixture;
+    const saved = {
+      mode: store.mode,
+      sshTarget: store.mode === 'managed' ? target : '',
+      remoteUrl: store.remoteUrl,
+      hasPairingToken: store.pairingToken !== '',
+    };
+    return { running, saved, pendingRestart: fixture.saves > 0 };
+  };
   const fixture = (window.managedCheckFixture = {
     checks: [],
     cancellations: [],
@@ -17,6 +27,10 @@ export function setupManagedCheckBrowser() {
     actions: [],
     closed: [],
     size: null,
+    // Mirrors what native storage would persist; only Direct fields matter to the code flow.
+    store: { mode: 'managed', remoteUrl: '', pairingToken: '' },
+    updates: [],
+    failNextSave: null,
     publish(hp, seq) {
       emit(
         fixture.consumer,
@@ -95,7 +109,7 @@ export function setupManagedCheckBrowser() {
         case 'connection_config':
           return { mode: 'local', stateUrl, authenticationToken: null };
         case 'connection_settings':
-          return { running, saved: running, pendingRestart: false };
+          return settings();
         case 'tunnel_status':
           return { diagnostic: 'live' };
         case 'plugin:app|version':
@@ -113,9 +127,29 @@ export function setupManagedCheckBrowser() {
         case 'cancel_managed_connection':
           fixture.cancellations.push(args);
           return;
-        case 'save_connection_settings':
+        case 'save_connection_settings': {
           fixture.saves++;
-          break;
+          const { update } = args;
+          fixture.updates.push(JSON.parse(JSON.stringify(update)));
+          if (fixture.failNextSave) {
+            const message = fixture.failNextSave;
+            fixture.failNextSave = null;
+            throw message;
+          }
+          const { store } = fixture;
+          store.mode = update.mode;
+          if (update.mode !== 'direct') {
+            store.remoteUrl = store.pairingToken = '';
+          } else if (update.connectionCode !== undefined) {
+            const [, endpoint, token] = update.connectionCode.trim().split('.');
+            store.remoteUrl = atob(endpoint.replaceAll('-', '+').replaceAll('_', '/'));
+            store.pairingToken = token;
+          } else {
+            if (update.pairingToken !== undefined) store.pairingToken = update.pairingToken;
+            store.remoteUrl = update.remoteUrl;
+          }
+          return settings();
+        }
       }
       throw new Error('Unexpected browser fixture command');
     },

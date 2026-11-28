@@ -1,5 +1,6 @@
 //! Isolated native parent/child fixtures; never terminates the test runner.
 
+mod direct_code;
 mod guided_forward;
 #[allow(dead_code)]
 #[path = "../../src/managed_check.rs"]
@@ -426,6 +427,7 @@ fn main() {
         "io-null" => capture_io(Path::new(&args[2]), Path::new(&args[3]), true),
         "io-writer" => io_writer(false),
         "io-large-writer" => io_writer(true),
+        "direct-code" => direct_code::run(&args[2..]),
         "exit" => std::process::exit(args[2].to_str().unwrap().parse().unwrap()),
         "echo" => println!(
             "{}",

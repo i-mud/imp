@@ -27,7 +27,7 @@ for Managed SSH. The in-app **Check connection** is for current source builds.
 
 ### Remote TinyFugue on Linux
 
-- **My MUD client runs on another computer or server.** Follow the [remote TinyFugue quick start](docs/quickstart/tinyfugue-remote.md) for SSH. If your server uses a public `wss:` endpoint instead, follow the [Direct WSS guide](deploy/direct-wss.md).
+- **My MUD client runs on another computer or server.** Follow the [remote TinyFugue quick start](docs/quickstart/tinyfugue-remote.md) for SSH. If your server uses a public `wss:` endpoint instead, follow the [Direct WSS guide](deploy/direct-wss.md). Published releases (through v0.8.0) pair with the server's WSS URL and token entered separately; a source build of both sides can use a [connection code](deploy/direct-wss.md#connection-codes-source-only) instead, which is not in any release yet.
 
 #### What you need
 

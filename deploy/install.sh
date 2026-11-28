@@ -761,9 +761,9 @@ case "$CONNECTION" in
       printf 'For a router/NAT edge, add --verify-via-loopback to that command; leave the retained edge topology unchanged.\n'
     else
       printf '\nImp Direct WSS is ready.\n\nWSS URL:\n  wss://%s/state\n\n' "$PUBLIC_HOSTNAME"
-      printf "The pairing token was displayed above by Imp's provisioning step.\n\n"
+      printf "The pairing token, and a connection code when the URL supports one, were displayed above by Imp's provisioning step.\n\n"
       printf 'Desktop:\n  Settings -> Connection -> Direct\n\n'
-      printf 'Enter the WSS URL and pairing token, save, then restart Imp.\n'
+      printf 'Paste the connection code if shown, otherwise enter the WSS URL and pairing token; save, then restart Imp.\n'
     fi
     ;;
   *)

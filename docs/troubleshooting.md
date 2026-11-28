@@ -168,6 +168,14 @@ not evidence that your server login failed. Your saved settings are unchanged.
   and [bounded public verification](../deploy/operator-reference.md#bounded-public-verification).
   Don't rotate to diagnose a connection failure. Rotation is a deliberate
   server change that invalidates the old token for all clients using it.
+- **Connection code rejected (source builds only):** The code must be copied
+  whole, with no edits, from a server that printed it. A rejection doesn't say
+  why, to avoid exposing the secret. Re-copy it; otherwise use the manual
+  fallback the server printed beside it, or the URL and token separately. A
+  code can't encode some endpoints, and published installers up to v0.8.0
+  don't read codes. See the
+  [code format](../deploy/direct-wss.md#connection-codes-source-only). If the
+  code was shared somewhere untrusted, ask the operator to rotate.
 
 ## Connection settings don't take effect
 

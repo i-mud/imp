@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +13,7 @@ const endpoint = `http://127.0.0.1:${Number(process.argv[2])}`;
 const [phase, tunnelConfig, fixturePort, screenshotArgument, diagnosticFixture, desktopPid] =
   process.argv.slice(3);
 const screenshotDirectory = screenshotArgument === '-' ? undefined : screenshotArgument;
-const browser = phase === 'browser-managed';
+const browser = phase.startsWith('browser-');
 if (browser && !/^[a-f0-9]{24}$/.test(tunnelConfig ?? '')) {
   throw new Error('Browser acceptance requires its disposable page nonce');
 }
@@ -142,8 +143,11 @@ const CHECK_COPY = {
   authentication: 'SSH sign-in failed.',
   hostVerification: 'SSH could not verify the server.',
 };
-const URL_FIELD = `${DIALOG} input[type="url"]`;
-const TOKEN = `${DIALOG} input[type="password"]`;
+const URL_FIELD = `${DIALOG} input[name="direct-url"]`;
+const TOKEN = `${DIALOG} input[name="direct-token"]`;
+const CODE = `${DIALOG} input[name="connection-code"]`;
+const CODE_PREVIEW = `${DIALOG} [data-connection-code-preview]`;
+const MANUAL = `${DIALOG} button[name="direct-manual-entry"]`;
 const MANAGE = 'button[aria-label="Manage connection"]';
 const MANAGER_TRIGGER = '[data-connection-manager-trigger]';
 const SETUP_TRIGGER = '[data-connection-setup-trigger]';
@@ -224,9 +228,9 @@ async function assertNoSecrets(secrets = [], typing = false) {
     createHash('sha256').update(secret).digest('base64url'),
   ]);
   const leaked = await evaluate(`(() => {
-    const token = document.querySelector('input[type="password"]');
+    const passwords = [...document.querySelectorAll('input[type="password"]')];
     const text = [document.body.innerText, ...Array.from(document.querySelectorAll('input:not([type=password])'), el => el.value)].join('\\n');
-    return ${J(forbidden)}.some(value => text.includes(value)) || (${J(!typing)} && token && token.value !== '');
+    return ${J(forbidden)}.some(value => text.includes(value)) || (${J(!typing)} && passwords.some(field => field.value !== ''));
   })()`);
   ok(!leaked, 'A credential or digest is visible in the page');
 }
@@ -823,6 +827,292 @@ async function installedManagedDiagnostic() {
   );
 }
 
+// Direct connection codes: synthetic loopback endpoints only; nothing here is ever contacted.
+const CODE_PORT = Number(fixturePort) || 9443;
+const ENDPOINT_A = `wss://127.0.0.1:${CODE_PORT}/state`;
+const ENDPOINT_B = `wss://127.0.0.2:${CODE_PORT}/state`;
+const codeFor = (endpoint, token) => `imp1.${Buffer.from(endpoint).toString('base64url')}.${token}`;
+const CODE_A = codeFor(ENDPOINT_A, TOKEN_A);
+const CODE_B = codeFor(ENDPOINT_B, TOKEN_B);
+const SHOT = browser ? 'browser-direct' : 'installed-code';
+const directCodes = () =>
+  JSON.parse(
+    readFileSync(new URL('../tests/fixtures/direct-connection-codes.json', import.meta.url), 'utf8'),
+  );
+// Anything long enough to be a code or token must never be rendered; short fixtures would match unrelated text.
+const codeSecrets = () => [
+  CODE_A,
+  TOKEN_A,
+  CODE_B,
+  TOKEN_B,
+  ...directCodes()
+    .invalid.map(({ code }) => code.trim())
+    .filter((code) => code.length >= 40),
+];
+
+const manualOpen = () => visible(URL_FIELD);
+async function showManual() {
+  if (!(await manualOpen())) await click(MANUAL);
+  await waitFor(manualOpen, 'the manual Direct fields');
+  ok(!(await visible(CODE)), 'The code field stayed visible beside the manual fields');
+}
+async function showCode() {
+  if (!(await visible(CODE))) await click(MANUAL);
+  await waitFor(() => visible(CODE), 'the connection code field');
+  ok(!(await manualOpen()), 'Manual fields stayed visible beside the code field');
+}
+const previewIs = (endpoint) =>
+  waitFor(
+    async () =>
+      (await evaluate(`document.querySelector(${J(CODE_PREVIEW)})?.textContent ?? ''`)).includes(endpoint),
+    'the connection code preview',
+  );
+const persisted = () =>
+  browser ? evaluate(`({...window.managedCheckFixture.store})`) : Promise.resolve(config());
+async function storedIs(expected) {
+  const saved = await persisted();
+  return ['mode', 'remoteUrl', 'pairingToken'].every(
+    (name) => (saved[name] || null) === (expected[name] || null),
+  );
+}
+const savedShows = () =>
+  waitFor(async () => {
+    const text = await dialogText();
+    return text.includes(SAVED) || text.includes(SAVED_PENDING);
+  }, 'the saved confirmation');
+
+// Installed gate only, on the isolated fresh runner: synthetic text reaches the clipboard through stdin
+// (never argv or the environment) and is always cleared afterwards.
+let clipboardUsed = false;
+function powershell(script, input) {
+  const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', script], {
+    input,
+    stdio: ['pipe', 'ignore', 'ignore'],
+    timeout: 20_000,
+  });
+  return run.status === 0;
+}
+// Only a disposable GitHub-hosted runner, or an explicit disposable-playtest consent, may have its clipboard touched.
+const clipboardAllowed = () =>
+  (process.env.GITHUB_ACTIONS === 'true' && process.env.IMP_ACCEPTANCE_RUNNER === 'github-hosted') ||
+  process.env.IMP_DISPOSABLE_PLAYTEST === '1';
+function setClipboard(text) {
+  ok(clipboardAllowed(), 'Refusing to modify the clipboard outside a disposable hosted runner');
+  clipboardUsed = true;
+  ok(
+    powershell(
+      '[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); Set-Clipboard -Value ([Console]::In.ReadToEnd())',
+      text,
+    ),
+    'The synthetic clipboard text could not be set',
+  );
+}
+function clearClipboard() {
+  return powershell(
+    'Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.Clipboard]::Clear(); if ([Windows.Forms.Clipboard]::ContainsText()) { exit 3 }',
+  );
+}
+
+async function openDirectCode() {
+  await openManager();
+  await choose('client-location', 'remote');
+  await choose('remote-method', 'direct');
+  await showCode();
+  ok(!(await visible(CHECK)), 'Direct offered a Managed check');
+  ok((await value(CODE)) === '', 'The connection code field was prefilled');
+  ok(
+    await evaluate(`document.querySelector(${J(CODE)}).type === 'password'`),
+    'The connection code is not masked',
+  );
+}
+
+const previewText = () => evaluate(`document.querySelector(${J(CODE_PREVIEW)})?.textContent.trim() ?? null`);
+const fixtureSaves = () => (browser ? evaluate('window.managedCheckFixture.saves') : 0);
+
+// Installed: the code goes through the real clipboard and a real Ctrl+V key event on the focused field.
+// Controlled browser: a synthetic ClipboardEvent on that field, i.e. a simulated user-initiated paste.
+async function pasteCode(text) {
+  await click(CODE);
+  await focusIs(CODE, 'the connection code field');
+  if (browser) {
+    await evaluate(`(() => {
+      const data = new DataTransfer();
+      data.setData('text/plain', ${J(text)});
+      document.querySelector(${J(CODE)}).dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    })()`);
+    return;
+  }
+  setClipboard(text);
+  const base = { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 };
+  // `commands` makes the key event run the editor's Paste command, as the platform shortcut does.
+  await cdp('Input.dispatchKeyEvent', { ...base, type: 'rawKeyDown', commands: ['paste'] });
+  await cdp('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
+}
+
+// A rejected code focuses its field, explains itself without echoing it, leaves no field text or preview, and writes nothing.
+async function expectRejected(before, savesBefore, description) {
+  await waitFor(
+    () => evaluate(`!!document.querySelector(${J(`${DIALOG} #connection-field-error`)})?.textContent.trim()`),
+    `a rejection for ${description}`,
+  );
+  await focusIs(`${CODE}[aria-invalid="true"]`, 'the invalid connection code');
+  ok(
+    await evaluate(
+      `document.querySelector(${J(CODE)}).getAttribute('aria-describedby')?.split(/\\s+/).includes('connection-field-error')`,
+    ),
+    'The invalid connection code has no accessible error description',
+  );
+  ok((await value(CODE)) === '', 'A rejected connection code stayed in the field');
+  ok((await previewText()) === '', 'A rejected connection code produced a preview');
+  await assertNoSecrets(codeSecrets(), true);
+  ok(await storedIs(before), 'A rejected connection code changed settings');
+  ok((await fixtureSaves()) === savesBefore, 'A rejected connection code crossed IPC');
+}
+
+// The installed gate pastes a declared representative subset: NUL cannot round-trip the Windows Unicode
+// clipboard and each paste costs a PowerShell start. The full fixture runs in the browser and renderer/native tests.
+const INSTALLED_INVALID = ['unsupported version', 'oversized before trimming', 'decoded newline'];
+// No fixture holds a raw newline inside the code, so build one from the valid synthetic code.
+const embeddedNewline = { name: 'embedded newline', code: `${CODE_A.slice(0, 20)}\n${CODE_A.slice(20)}` };
+
+// Each selected invalid input is pasted (the handler clears the field) and then submitted empty.
+async function rejectInvalidCodes() {
+  const before = await persisted();
+  const savesBefore = await fixtureSaves();
+  const { invalid } = directCodes();
+  const cases = browser ? invalid : invalid.filter(({ name }) => INSTALLED_INVALID.includes(name));
+  ok(
+    browser || cases.length === INSTALLED_INVALID.length,
+    'The installed invalid subset is missing a fixture',
+  );
+  let first = true;
+  for (const { name, code } of [...cases, embeddedNewline]) {
+    if (code !== '') {
+      await pasteCode(code);
+      await expectRejected(before, savesBefore, `pasted fixture ${name}`);
+      if (first) await screenshot(`${SHOT}-invalid-code.png`);
+      first = false;
+    }
+    await save();
+    await expectRejected(before, savesBefore, `submitted fixture ${name}`);
+  }
+}
+
+// Route without saved Direct credentials: errors, manual fallback, paste, preview, save.
+async function codeNew() {
+  const secrets = codeSecrets();
+  await openDirectCode();
+  await rejectInvalidCodes();
+
+  await typeInto(CODE, '');
+  await showManual(); // Fallback must start blank and must not inherit the rejected code.
+  ok((await value(URL_FIELD)) === '' && (await value(TOKEN)) === '', 'Manual fallback was prefilled');
+  await assertNoSecrets(secrets);
+  await showCode();
+  ok((await value(CODE)) === '', 'Returning to the connection code kept a rejected code');
+
+  if (browser) {
+    for (const { code, endpoint, token } of directCodes().valid) {
+      await pasteCode(code);
+      await previewIs(endpoint);
+      await assertNoSecrets([code.trim(), token], true);
+    }
+    await typeInto(CODE, '');
+    ok((await previewText()) === '', 'Clearing the code left a preview');
+  }
+
+  await pasteCode(` \t${CODE_A}\r\n`); // Outer whitespace from a paste is tolerated.
+  await previewIs(ENDPOINT_A);
+  await assertNoSecrets(secrets, true);
+  const invalid = directCodes().invalid.find(({ code }) => code !== '');
+  const unchanged = await persisted();
+  const savesBefore = await fixtureSaves();
+  await pasteCode(invalid.code); // A new invalid code replaces a valid one: no stale preview or saved code.
+  await expectRejected(unchanged, savesBefore, 'an invalid code pasted after a valid one');
+  await pasteCode(CODE_A);
+  await previewIs(ENDPOINT_A);
+  await dialogLacks('This connection code is not valid');
+  await previewIs(ENDPOINT_A);
+  await assertNoSecrets(secrets, true);
+  await screenshot(`${SHOT}-preview.png`);
+  const before = await persisted();
+  if (browser) {
+    await evaluate(`window.managedCheckFixture.failNextSave = 'Imp could not save the connection.'`);
+    await save();
+    await waitFor(() => visible(`${DIALOG} .error`), 'the native save error');
+    await assertNoSecrets(secrets, true);
+    ok(await storedIs(before), 'A failed save changed settings');
+  }
+  await save();
+  await savedShows();
+  await dialogShows(PENDING);
+  ok(
+    await storedIs({ mode: 'direct', remoteUrl: ENDPOINT_A, pairingToken: TOKEN_A }),
+    'The connection code was not saved',
+  );
+  await assertNoSecrets(secrets); // Saved fields are cleared; nothing is echoed.
+  await screenshot(`${SHOT}-saved.png`);
+  await closeManager('footer', MANAGER_TRIGGER);
+}
+
+// Route with saved Direct credentials: manual form, retention, replacement by code, removal.
+async function codeSaved() {
+  const secrets = codeSecrets();
+  await openManager();
+  ok(await manualOpen(), 'A saved Direct route did not open the manual form');
+  ok((await value(URL_FIELD)) === ENDPOINT_A, 'The saved endpoint was not shown');
+  ok((await value(TOKEN)) === '', 'The saved credential was shown');
+  await dialogShows('Leave the token blank to keep your saved credential.');
+  await assertNoSecrets(secrets);
+  await save(); // Blank token on the same endpoint keeps the credential.
+  await savedShows();
+  ok(
+    await storedIs({ mode: 'direct', remoteUrl: ENDPOINT_A, pairingToken: TOKEN_A }),
+    'A blank-token save altered the credential',
+  );
+  if (browser) {
+    const update = await evaluate('window.managedCheckFixture.updates.at(-1)');
+    ok(
+      !('pairingToken' in update) && !('connectionCode' in update),
+      'Retention sent a replacement credential',
+    );
+  }
+  await assertNoSecrets(secrets);
+
+  await showCode(); // Replace the endpoint and credential with a second code.
+  ok((await value(CODE)) === '', 'The connection code field was prefilled');
+  await pasteCode(CODE_B);
+  await previewIs(ENDPOINT_B);
+  await assertNoSecrets(secrets, true);
+  await save();
+  await dialogShows(PENDING);
+  await dialogShows(ENDPOINT_B);
+  ok(
+    await storedIs({ mode: 'direct', remoteUrl: ENDPOINT_B, pairingToken: TOKEN_B }),
+    'The replacement code was not saved',
+  );
+  await assertNoSecrets(secrets);
+
+  await choose('client-location', 'local'); // Cancel keeps; confirmation removes.
+  await save();
+  await dialogShows('Remove credentials and save');
+  await assertFits();
+  await screenshot(`${SHOT}-remove-confirmation.png`);
+  await cancel();
+  await focusIs(`${DIALOG} button[type="submit"]`, 'Save after cancelling');
+  ok(
+    await storedIs({ mode: 'direct', remoteUrl: ENDPOINT_B, pairingToken: TOKEN_B }),
+    'Cancelling removal changed settings',
+  );
+  await save();
+  await click(`${DIALOG} button`, 'Remove credentials and save');
+  await savedShows();
+  ok(await storedIs({ mode: 'local' }), 'Credentials were not removed');
+  await assertNoSecrets(secrets);
+  await closeManager('footer', MANAGER_TRIGGER);
+}
+
 const phases = {
   async first() {
     await openManager('setup');
@@ -857,6 +1147,11 @@ const phases = {
     await waitFor(() => visible(SSH_HOST), 'the server address field');
     await choose('remote-method', 'direct');
     ok(!(await visible(CHECK)), 'Direct offered a Managed check');
+    ok(
+      (await visible(CODE)) && !(await visible(URL_FIELD)) && !(await visible(TOKEN)),
+      'Direct did not start with the connection code',
+    );
+    await showManual();
     ok((await value(URL_FIELD)) === '' && (await value(TOKEN)) === '', 'Direct fields were prefilled');
     await typeInto(URL_FIELD, 'https://127.0.0.1/state');
     await press('Enter');
@@ -884,6 +1179,7 @@ const phases = {
       ok((await checked('client-location')) === null, 'A client location was preselected');
       await choose('client-location', 'remote');
       await choose('remote-method', 'direct');
+      await showManual();
       await assertFits();
       await typeInto(URL_FIELD, 'wss://127.0.0.1/state');
       await save();
@@ -1151,6 +1447,37 @@ const phases = {
 
   'managed-diagnostic': installedManagedDiagnostic,
   'browser-managed': browserManaged,
+
+  async code() {
+    await setView('expanded', 'dark');
+    await codeNew();
+    await closeSettings();
+  },
+
+  // Relaunched by the harness: the saved code must have become the running Direct route.
+  async 'code-restart'() {
+    await setView('compact', 'light');
+    await openManager();
+    await dialogShows('Remote Imp credentials');
+    await dialogLacks(PENDING);
+    await closeManager('footer', MANAGER_TRIGGER);
+    await codeSaved();
+    await closeSettings();
+  },
+
+  async 'browser-direct'() {
+    await hudShows('Browser Active Fixture', 67);
+    await setView('expanded', 'dark');
+    await codeNew();
+    await setView('compact', 'light');
+    await codeSaved();
+    await closeSettings();
+    await hudShows('Browser Active Fixture', 67);
+    ok(
+      await evaluate(`JSON.stringify(window.managedCheckFixture.sockets) === '["/state"]'`),
+      'Direct code entry opened or replaced a consumer',
+    );
+  },
 };
 
 const environment = browser ? 'Controlled Chromium' : 'Installed';
@@ -1196,6 +1523,10 @@ try {
   console.error('Installed form state:', state);
   process.exitCode = 1;
 } finally {
+  if (clipboardUsed && !clearClipboard()) {
+    console.error('The synthetic clipboard text could not be cleared');
+    process.exitCode = 1;
+  }
   if (browser) await closeBrowser().catch(() => {});
   socket.close();
 }

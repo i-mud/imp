@@ -66,7 +66,8 @@ Explicit `--behind-nat` remains independent of interface discovery.
 Trusted HTTPS 404 readiness precedes the installer's direct inherited-terminal
 `imp-direct-wss setup --public-url ...` invocation; NAT adds `--verify-via-loopback`,
 which dials only `127.0.0.1:443` while preserving the public TLS/SNI/Host identity.
-Only that command generates or hands off a token. Schema-3 owned state uses a
+Only that command generates or hands off a token (or a source-only connection
+code embedding it). Schema-3 owned state uses a
 full `{http.request.orig_uri}` CEL allowlist: literal `/state`, `/action`, or
 `/healthz`, optionally followed by literal `?` query, never a normalized `.path`.
 The gateway independently rejects noncanonical targets and queries; no

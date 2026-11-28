@@ -76,6 +76,8 @@ export interface ConnectionSettingsUpdate {
    * Any supplied string, including an empty one, is validated as a replacement.
    */
   readonly pairingToken?: string;
+  /** Direct only; native parses it and the renderer never displays or stores it. Exclusive with manual fields. */
+  readonly connectionCode?: string;
 }
 
 export type ManagedCheckDestination =
