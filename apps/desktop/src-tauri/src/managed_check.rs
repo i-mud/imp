@@ -5,6 +5,7 @@ pub(crate) mod process;
 #[path = "managed_check/protocol.rs"]
 mod protocol;
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ use serde_json::Value;
 use crate::tunnel_config::ManagedDestination;
 
 const CHECK_BUDGET: Duration = Duration::from_secs(5);
+const SHUTDOWN_BUDGET: Duration = CHECK_BUDGET.saturating_add(crate::runtime::DIAGNOSTIC_CLEANUP);
 const MAX_REQUEST_ID: u64 = (1 << 53) - 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -35,6 +37,23 @@ pub(crate) enum CheckResult {
     Cancelled,
     ConnectionFailed,
     Busy,
+    RetirementUnconfirmed,
+}
+
+pub(crate) type CheckOutcome = Result<CheckResult, RetirementEvidence>;
+
+// Retain only the original ownership handles until app exit. They are never used
+// to find, signal, or adopt a replacement process.
+pub(crate) enum RetirementEvidence {
+    Child {
+        _owner: crate::runtime::RuntimeOwner,
+        _child: crate::runtime::OwnedChild,
+    },
+    #[cfg(unix)]
+    Startup {
+        _guardian: crate::runtime::StartupRetirementUnconfirmed,
+    },
+    WorkerLost,
 }
 
 #[derive(Default)]
@@ -51,29 +70,63 @@ struct State {
     high_water: u64,
     active: Option<u64>,
     saves: usize,
-    closing: bool,
+    retirement_fault: Option<RetirementEvidence>,
+    shutdown_deadline: Option<Instant>,
+    shutdown_outcome: Option<ShutdownOutcome>,
 }
 
 impl State {
     fn is_idle(&self) -> bool {
         self.active.is_none() && self.saves == 0
     }
+
+    fn shutdown_readiness(&self) -> Option<ShutdownOutcome> {
+        if self.retirement_fault.is_some() {
+            Some(ShutdownOutcome::RetirementUnconfirmed)
+        } else if self.is_idle() {
+            Some(ShutdownOutcome::Retired)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ExitReadiness {
-    Ready,
+    Ready(ShutdownOutcome),
     NeedsWait,
     Waiting,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShutdownOutcome {
+    Retired,
+    RetirementUnconfirmed,
+    TimedOut,
+}
+
+impl ShutdownOutcome {
+    pub(crate) fn report(self) {
+        match self {
+            Self::Retired => {}
+            Self::RetirementUnconfirmed => {
+                eprintln!("imp: managed connection check retirement was not confirmed")
+            }
+            Self::TimedOut => eprintln!("imp: connection settings shutdown wait timed out"),
+        }
+    }
+}
+
 impl ManagedCheck {
     fn admit(self: &Arc<Self>, id: u64) -> Result<ActiveCheck, CheckResult> {
+        let mut state = self.state.lock();
+        if state.retirement_fault.is_some() {
+            return Err(CheckResult::RetirementUnconfirmed);
+        }
         if !(1..=MAX_REQUEST_ID).contains(&id) {
             return Err(CheckResult::InvalidDestination);
         }
-        let mut state = self.state.lock();
-        if state.closing || id <= state.high_water {
+        if state.shutdown_deadline.is_some() || id <= state.high_water {
             return Err(CheckResult::Cancelled);
         }
         state.high_water = id;
@@ -87,7 +140,10 @@ impl ManagedCheck {
 
     pub(crate) fn reserve_save(self: &Arc<Self>) -> Result<SaveReservation, &'static str> {
         let mut state = self.state.lock();
-        if state.closing {
+        if state.retirement_fault.is_some() {
+            return Err("retirement_unconfirmed");
+        }
+        if state.shutdown_deadline.is_some() {
             return Err("Imp is closing. Reopen it before saving connection settings.");
         }
         if state.active.is_some() {
@@ -111,24 +167,46 @@ impl ManagedCheck {
 
     pub(crate) fn begin_shutdown(&self) -> ExitReadiness {
         let mut state = self.state.lock();
-        let was_closing = state.closing;
-        state.closing = true;
-        if state.is_idle() {
-            ExitReadiness::Ready
+        let was_closing = state.shutdown_deadline.is_some();
+        if !was_closing {
+            state.shutdown_deadline = Some(Instant::now() + SHUTDOWN_BUDGET);
+            self.cancelled.store(true, Ordering::Release);
+        }
+        if let Some(outcome) = state
+            .shutdown_outcome
+            .or_else(|| state.shutdown_readiness())
+        {
+            ExitReadiness::Ready(outcome)
         } else if was_closing {
             ExitReadiness::Waiting
         } else {
-            self.cancelled.store(true, Ordering::Release);
             ExitReadiness::NeedsWait
         }
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn shutdown(&self) -> ShutdownOutcome {
         self.begin_shutdown();
+        let deadline = self.state.lock().shutdown_deadline.unwrap();
+        self.shutdown_until(deadline)
+    }
+
+    fn shutdown_until(&self, deadline: Instant) -> ShutdownOutcome {
         let mut state = self.state.lock();
-        while !state.is_idle() {
-            self.retired.wait(&mut state);
-        }
+        let outcome = loop {
+            if let Some(outcome) = state
+                .shutdown_outcome
+                .or_else(|| state.shutdown_readiness())
+            {
+                break outcome;
+            }
+            if self.retired.wait_until(&mut state, deadline).timed_out() {
+                break state
+                    .shutdown_readiness()
+                    .unwrap_or(ShutdownOutcome::TimedOut);
+            }
+        };
+        state.shutdown_outcome = Some(outcome);
+        outcome
     }
 
     #[cfg(any(test, feature = "runtime-acceptance"))]
@@ -137,7 +215,7 @@ impl ManagedCheck {
         self: &Arc<Self>,
         id: u64,
         destination: Value,
-        run: impl FnOnce(&ManagedDestination, Instant, &AtomicBool) -> CheckResult,
+        run: impl FnOnce(&ManagedDestination, Instant, &AtomicBool) -> CheckOutcome,
     ) -> CheckResult {
         let deadline = Instant::now() + CHECK_BUDGET;
         match self.admit(id) {
@@ -166,37 +244,44 @@ impl ActiveCheck {
         mut self,
         destination: Value,
         deadline: Instant,
-        run: impl FnOnce(&ManagedDestination, Instant, &AtomicBool) -> CheckResult,
+        run: impl FnOnce(&ManagedDestination, Instant, &AtomicBool) -> CheckOutcome,
     ) -> CheckResult {
-        let cancelled = &self.0.as_ref().unwrap().cancelled;
-        let result = if cancelled.load(Ordering::Acquire) {
-            CheckResult::Cancelled
-        } else if let Some(destination) = ManagedDestination::from_check_input(destination) {
-            run(&destination, deadline, cancelled)
-        } else {
-            CheckResult::InvalidDestination
-        };
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let cancelled = &self.0.as_ref().unwrap().cancelled;
+            if cancelled.load(Ordering::Acquire) {
+                Ok(CheckResult::Cancelled)
+            } else if let Some(destination) = ManagedDestination::from_check_input(destination) {
+                run(&destination, deadline, cancelled)
+            } else {
+                Ok(CheckResult::InvalidDestination)
+            }
+        }))
+        .unwrap_or(Err(RetirementEvidence::WorkerLost));
         self.finish(result)
     }
 
-    fn finish(&mut self, result: CheckResult) -> CheckResult {
-        let Some(owner) = self.0.take() else {
-            return result;
-        };
+    fn finish(&mut self, result: CheckOutcome) -> CheckResult {
+        let owner = self.0.take().expect("active check");
         let mut state = owner.state.lock();
+        let response = match result {
+            Err(evidence) => {
+                state.retirement_fault = Some(evidence);
+                CheckResult::RetirementUnconfirmed
+            }
+            Ok(_) if owner.cancelled.load(Ordering::Acquire) => CheckResult::Cancelled,
+            Ok(result) => result,
+        };
         state.active = None;
         owner.retired.notify_all();
-        if owner.cancelled.load(Ordering::Acquire) {
-            CheckResult::Cancelled
-        } else {
-            result
-        }
+        response
     }
 }
 
 impl Drop for ActiveCheck {
     fn drop(&mut self) {
-        self.finish(CheckResult::ConnectionFailed);
+        if self.0.is_some() {
+            self.finish(Err(RetirementEvidence::WorkerLost));
+        }
     }
 }
 
@@ -215,7 +300,7 @@ pub(crate) async fn check_managed_connection(
         active.run(destination, deadline, process::run)
     })
     .await
-    .unwrap_or(CheckResult::ConnectionFailed))
+    .unwrap_or(CheckResult::RetirementUnconfirmed))
 }
 
 #[tauri::command]
@@ -284,7 +369,7 @@ mod tests {
                     destination,
                     &ManagedDestination::Alias("synthetic-alias".into())
                 );
-                CheckResult::Live
+                Ok(CheckResult::Live)
             }),
             CheckResult::Live
         );
@@ -292,7 +377,7 @@ mod tests {
             assert_eq!(
                 check.run_with(id, json!({"sshTarget": target}), |destination, _, _| {
                     assert_eq!(destination, &ManagedDestination::Alias(target.into()));
-                    CheckResult::Stale
+                    Ok(CheckResult::Stale)
                 }),
                 CheckResult::Stale
             );
@@ -308,7 +393,7 @@ mod tests {
                     assert_eq!(server.host, "2001:db8::1");
                     assert_eq!(server.username, "imp");
                     assert_eq!(server.port, Some(2222));
-                    CheckResult::Down
+                    Ok(CheckResult::Down)
                 },
             ),
             CheckResult::Down
@@ -333,7 +418,7 @@ mod tests {
             CheckResult::Cancelled
         );
         assert_eq!(
-            check.run_with(3, alias(), |_, _, _| CheckResult::Live),
+            check.run_with(3, alias(), |_, _, _| Ok(CheckResult::Live)),
             CheckResult::Live
         );
     }
@@ -349,7 +434,7 @@ mod tests {
                 entered.send(()).unwrap();
                 proceed.recv().unwrap();
                 assert!(cancelled.load(Ordering::Acquire));
-                CheckResult::Live
+                Ok(CheckResult::Live)
             })
         });
         started.recv().unwrap();
@@ -373,7 +458,7 @@ mod tests {
                 check.cancel(1);
                 check.cancel(4);
                 assert!(!cancelled.load(Ordering::Acquire));
-                CheckResult::Live
+                Ok(CheckResult::Live)
             }),
             CheckResult::Live
         );
@@ -392,9 +477,9 @@ mod tests {
         drop(first);
         assert_eq!(check.admit(2).err(), Some(CheckResult::Busy));
         drop(second);
-        let active = check.admit(3).unwrap();
+        let mut active = check.admit(3).unwrap();
         assert!(check.reserve_save().is_err());
-        drop(active);
+        assert_eq!(active.finish(Ok(CheckResult::Live)), CheckResult::Live);
         assert!(check.reserve_save().is_ok());
     }
 
@@ -406,8 +491,7 @@ mod tests {
         let (closing, started) = mpsc::channel();
         let waiter = thread::spawn(move || {
             closing.send(other.begin_shutdown()).unwrap();
-            other.shutdown();
-            assert!(other.state.lock().is_idle());
+            assert_eq!(other.shutdown(), ShutdownOutcome::Retired);
         });
         assert_eq!(started.recv().unwrap(), ExitReadiness::NeedsWait);
         assert!(check.reserve_save().is_err());
@@ -419,13 +503,12 @@ mod tests {
     #[test]
     fn shutdown_signals_active_check_and_waits_for_retirement() {
         let check = Arc::new(ManagedCheck::default());
-        let active = check.admit(1).unwrap();
+        let mut active = check.admit(1).unwrap();
         let other = Arc::clone(&check);
         let (closing, started) = mpsc::channel();
         let waiter = thread::spawn(move || {
             closing.send(other.begin_shutdown()).unwrap();
-            other.shutdown();
-            assert!(other.state.lock().active.is_none());
+            assert_eq!(other.shutdown(), ShutdownOutcome::Retired);
         });
         assert_eq!(started.recv().unwrap(), ExitReadiness::NeedsWait);
         assert!(check.cancelled.load(Ordering::Acquire));
@@ -436,8 +519,67 @@ mod tests {
             )),
             CheckResult::Cancelled
         );
-        drop(active);
+        assert_eq!(active.finish(Ok(CheckResult::Live)), CheckResult::Cancelled);
         waiter.join().unwrap();
-        assert_eq!(check.begin_shutdown(), ExitReadiness::Ready);
+        assert_eq!(
+            check.begin_shutdown(),
+            ExitReadiness::Ready(ShutdownOutcome::Retired)
+        );
+    }
+
+    #[test]
+    fn shutdown_timeout_does_not_claim_an_admitted_save_retired() {
+        let check = Arc::new(ManagedCheck::default());
+        let saving = check.reserve_save().unwrap();
+        assert_eq!(check.begin_shutdown(), ExitReadiness::NeedsWait);
+        assert_eq!(
+            check.shutdown_until(Instant::now()),
+            ShutdownOutcome::TimedOut
+        );
+        assert_eq!(
+            check.begin_shutdown(),
+            ExitReadiness::Ready(ShutdownOutcome::TimedOut)
+        );
+        drop(saving);
+    }
+
+    #[test]
+    fn shutdown_timeout_does_not_claim_an_active_check_retired() {
+        let check = Arc::new(ManagedCheck::default());
+        let active = check.admit(1).unwrap();
+        assert_eq!(check.begin_shutdown(), ExitReadiness::NeedsWait);
+        assert_eq!(
+            check.shutdown_until(Instant::now()),
+            ShutdownOutcome::TimedOut
+        );
+        assert_eq!(
+            check.begin_shutdown(),
+            ExitReadiness::Ready(ShutdownOutcome::TimedOut)
+        );
+        drop(active);
+    }
+
+    #[test]
+    fn worker_panic_or_drop_without_settlement_blocks_checks_and_saves() {
+        for panic in [false, true] {
+            let check = Arc::new(ManagedCheck::default());
+            if panic {
+                let result = check.run_with(1, alias(), |_, _, _| {
+                    check.cancel(1);
+                    panic!("worker lost before settlement");
+                });
+                assert_eq!(result, CheckResult::RetirementUnconfirmed);
+            } else {
+                let active = check.admit(1).unwrap();
+                check.cancel(1);
+                drop(active);
+            }
+            assert_eq!(
+                check.admit(2).err(),
+                Some(CheckResult::RetirementUnconfirmed)
+            );
+            assert_eq!(check.reserve_save().err(), Some("retirement_unconfirmed"));
+            assert_eq!(check.shutdown(), ShutdownOutcome::RetirementUnconfirmed);
+        }
     }
 }

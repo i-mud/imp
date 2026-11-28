@@ -223,3 +223,19 @@ describe('Managed connection check bridge', () => {
     expect(sequence).toEqual(new Map([['imp.managed-check-sequence', '952']]));
   });
 });
+
+it('latches a native save retirement fault and blocks subsequent checks and saves before IPC', async () => {
+  // Exercise the app-lifetime latch in a fresh bridge without changing the shared test instance.
+  vi.resetModules();
+  const bridge = await import('../src/lib/tunnel.ts');
+  setTauriRuntime(true);
+  invoke.mockRejectedValueOnce('retirement_unconfirmed');
+  const update = { mode: 'managed', sshTarget: 'configured-alias' } as const;
+
+  await expect(bridge.saveConnectionSettings(update)).rejects.toBe('retirement_unconfirmed');
+  expect(get(bridge.managedCheckRestartRequired)).toBe(true);
+  expect(get(bridge.managedCheckPending)).toBe(false);
+  expect(bridge.checkManagedConnection({ sshTarget: update.sshTarget })).toBeNull();
+  await expect(bridge.saveConnectionSettings(update)).rejects.toBe('retirement_unconfirmed');
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('save_connection_settings', { update });
+});

@@ -513,32 +513,38 @@ describe('ConnectionDialog Managed check', () => {
     },
   );
 
-  it('keeps the save lock after cancel acknowledgement and discards a racing success', async ({ signal }) => {
-    const { onsave } = await setup(ALIAS);
-    const check = deferredCheck();
-    const cancel = Promise.withResolvers<void>();
-    invoke.mockReturnValueOnce(cancel.promise);
-    const checkButton = button('Check connection');
-    await click(checkButton);
-    const requestId = invoke.mock.calls[0]?.[1]?.requestId;
-    const cancelButton = button('Cancel check');
-    cancelButton.focus();
-    await click(cancelButton);
-    expect(document.activeElement).toBe(checkButton);
-    expect(status()).toBe('Cancelling check…');
-    expect(invoke).toHaveBeenLastCalledWith('cancel_managed_connection', { requestId });
-    cancel.resolve();
-    await cancel.promise;
-    await settle();
-    expect(button('Save').disabled).toBe(true);
-    await submit();
-    expect(onsave).not.toHaveBeenCalled();
+  it.for([
+    ['live', ''],
+    ['cancelled', 'Connection check cancelled.'],
+  ] as const)(
+    'keeps the save lock after cancel acknowledgement until native returns %s',
+    async ([result, message], { signal }) => {
+      const { onsave } = await setup(ALIAS);
+      const check = deferredCheck();
+      const cancel = Promise.withResolvers<void>();
+      invoke.mockReturnValueOnce(cancel.promise);
+      const checkButton = button('Check connection');
+      await click(checkButton);
+      const requestId = invoke.mock.calls[0]?.[1]?.requestId;
+      const cancelButton = button('Cancel check');
+      cancelButton.focus();
+      await click(cancelButton);
+      expect(document.activeElement).toBe(checkButton);
+      expect(status()).toBe('Cancelling check…');
+      expect(invoke).toHaveBeenLastCalledWith('cancel_managed_connection', { requestId });
+      cancel.resolve();
+      await cancel.promise;
+      await settle();
+      expect(button('Save').disabled).toBe(true);
+      await submit();
+      expect(onsave).not.toHaveBeenCalled();
 
-    check.resolve('live');
-    await waitForSaveEnabled(signal);
-    expect(status()).toBe('Connection check cancelled.');
-    expect(button('Save').disabled).toBe(false);
-  });
+      check.resolve(result);
+      await waitForSaveEnabled(signal);
+      expect(status()).toBe(message);
+      expect(button('Save').disabled).toBe(false);
+    },
+  );
 
   it.for(['edit', 'representation', 'mode'])(
     'cancels on %s and never shows the retired result',

@@ -7,10 +7,13 @@ use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{RuntimeStdout, SshUnavailable, DIAGNOSTIC_CLEANUP, DIAGNOSTIC_POLL};
+use super::{
+    confirm_retirement, RuntimeStdout, SshUnavailable, DIAGNOSTIC_CLEANUP, DIAGNOSTIC_POLL,
+};
 
 #[cfg(not(test))]
 const HELPER_MODE: &str = "--imp-runtime-owner";
@@ -26,6 +29,12 @@ const CONTROL_OK: u8 = 0;
 const CONTROL_ERROR: u8 = 1;
 const CONTROL_EXEC_ERROR: u8 = 2;
 const HELPER_FAILURE_EXIT: i32 = 125;
+const HELPER_NO_CHILD_EXIT: i32 = 126;
+
+#[derive(Debug)]
+pub(crate) struct StartupRetirementUnconfirmed {
+    _guardian: Child,
+}
 
 pub struct RuntimeOwner;
 
@@ -167,39 +176,45 @@ impl RuntimeOwner {
         drop(control_writer);
         drop(stdin_read);
 
-        let lifetime = guardian.stdin.take().expect("piped runtime lifetime");
-        let stdout = guardian
-            .stdout
-            .take()
-            .map(|stdout| unsafe { File::from_raw_fd(stdout.into_raw_fd()) });
-        let stderr = unsafe {
-            File::from_raw_fd(guardian.stderr.take().expect("piped stderr").into_raw_fd())
+        let mut startup = || {
+            let lifetime = guardian.stdin.take().expect("piped runtime lifetime");
+            let stdout = guardian
+                .stdout
+                .take()
+                .map(|stdout| unsafe { File::from_raw_fd(stdout.into_raw_fd()) });
+            let stderr = unsafe {
+                File::from_raw_fd(guardian.stderr.take().expect("piped stderr").into_raw_fd())
+            };
+            (
+                read_start(&mut control_reader, check),
+                lifetime,
+                stdout,
+                stderr,
+            )
         };
-
-        let start = read_start(&mut control_reader, check);
+        let (start, lifetime, stdout, stderr) = if check.is_some() {
+            match catch_unwind(AssertUnwindSafe(startup)) {
+                Ok(start) => start,
+                Err(_) => {
+                    drop(guardian.stdin.take());
+                    return Err(StartupRetirementUnconfirmed::from_guardian(guardian));
+                }
+            }
+        } else {
+            startup()
+        };
         let child_pid = match start {
             Ok(pid) => pid,
             Err(error) => {
                 drop(lifetime);
                 if check.is_some() {
-                    let deadline = Instant::now() + DIAGNOSTIC_CLEANUP;
-                    loop {
-                        match guardian.try_wait() {
-                            Ok(Some(_)) => break,
-                            Ok(None) if Instant::now() < deadline => {
-                                std::thread::park_timeout(DIAGNOSTIC_POLL);
-                            }
-                            _ => {
-                                // Lifetime is already closed; do not kill the native reaper
-                                // ahead of the group it is responsible for.
-                                eprintln!("imp: managed connection check could not confirm startup retirement");
-                                return Err(io::Error::other("runtime guardian retirement failed"));
-                            }
-                        }
-                    }
-                } else {
-                    let _ = guardian.wait();
+                    return Err(StartupRetirementUnconfirmed::after_failed_start(
+                        guardian,
+                        error,
+                        Instant::now() + DIAGNOSTIC_CLEANUP,
+                    ));
                 }
+                let _ = guardian.wait();
                 return Err(error);
             }
         };
@@ -221,6 +236,46 @@ impl RuntimeOwner {
             stdout,
             stderr: Some(stderr),
         })
+    }
+}
+
+impl StartupRetirementUnconfirmed {
+    pub(crate) fn after_failed_start(
+        mut guardian: Child,
+        error: io::Error,
+        deadline: Instant,
+    ) -> io::Error {
+        if confirm_retirement(deadline, || startup_retired(guardian.try_wait()?)) {
+            error
+        } else {
+            Self::from_guardian(guardian)
+        }
+    }
+
+    fn from_guardian(guardian: Child) -> io::Error {
+        // Lifetime is already closed; only the original guardian may
+        // signal its private group.
+        io::Error::other(Self {
+            _guardian: guardian,
+        })
+    }
+}
+
+impl std::fmt::Display for StartupRetirementUnconfirmed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("runtime guardian startup retirement unconfirmed")
+    }
+}
+
+impl std::error::Error for StartupRetirementUnconfirmed {}
+
+fn startup_retired(status: Option<ExitStatus>) -> io::Result<bool> {
+    match status {
+        None => Ok(false),
+        Some(status) if status.success() || status.code() == Some(HELPER_NO_CHILD_EXIT) => Ok(true),
+        Some(_) => Err(io::Error::other(
+            "runtime guardian did not confirm retirement",
+        )),
     }
 }
 
@@ -323,15 +378,15 @@ fn run_guardian(
     args: impl Iterator<Item = OsString>,
 ) -> GuardianOutcome {
     if fd <= libc::STDERR_FILENO || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
-        return GuardianOutcome::Failure;
+        return GuardianOutcome::NoChild;
     }
     let mut control = unsafe { File::from_raw_fd(fd) };
     if configure_guardian_signals().is_err() {
-        return GuardianOutcome::Failure;
+        return GuardianOutcome::NoChild;
     }
     if let Err(error) = set_cloexec(fd, true) {
         send_start_error(&mut control, &error);
-        return GuardianOutcome::Failure;
+        return GuardianOutcome::NoChild;
     }
     let stdin = match stdin_fd {
         Some(stdin_fd) => {
@@ -342,7 +397,7 @@ fn run_guardian(
             };
             if let Err(error) = result {
                 send_start_error(&mut control, &error);
-                return GuardianOutcome::Failure;
+                return GuardianOutcome::NoChild;
             }
             Stdio::from(unsafe { File::from_raw_fd(stdin_fd) })
         }
@@ -351,7 +406,7 @@ fn run_guardian(
     #[cfg(target_os = "linux")]
     if let Err(error) = enable_subreaper() {
         send_start_error(&mut control, &error);
-        return GuardianOutcome::Failure;
+        return GuardianOutcome::NoChild;
     }
 
     #[cfg(target_os = "linux")]
@@ -389,13 +444,13 @@ fn run_guardian(
     }
 
     if stdin_fd.is_some() && lifetime_closed_before_spawn(libc::STDIN_FILENO) {
-        return GuardianOutcome::Failure;
+        return GuardianOutcome::NoChild;
     }
     let child = match runtime.spawn() {
         Ok(child) => child,
         Err(error) => {
             write_start_error(&mut control, CONTROL_EXEC_ERROR, &error);
-            return GuardianOutcome::Failure;
+            return GuardianOutcome::NoChild;
         }
     };
     drop(runtime);
@@ -441,12 +496,14 @@ fn run_guardian(
 
 enum GuardianOutcome {
     Success,
+    NoChild,
     Failure,
 }
 
 fn exit_guardian(outcome: GuardianOutcome) -> ! {
     match outcome {
         GuardianOutcome::Success => std::process::exit(0),
+        GuardianOutcome::NoChild => std::process::exit(HELPER_NO_CHILD_EXIT),
         GuardianOutcome::Failure => std::process::exit(HELPER_FAILURE_EXIT),
     }
 }
@@ -771,6 +828,43 @@ fn decode_command(encoded: &str) -> Option<(OsString, Vec<OsString>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardian_exit_alone_is_not_startup_retirement_evidence() {
+        let code = |code| Some(ExitStatus::from_raw(code << 8));
+        let expired = Instant::now();
+        for status in [code(0), code(HELPER_NO_CHILD_EXIT)] {
+            assert!(confirm_retirement(expired, || startup_retired(status)));
+        }
+        for status in [
+            None,
+            code(HELPER_FAILURE_EXIT),
+            Some(ExitStatus::from_raw(libc::SIGKILL)),
+        ] {
+            assert!(!confirm_retirement(expired, || startup_retired(status)));
+        }
+    }
+
+    #[test]
+    fn panic_during_guardian_startup_keeps_the_original_guardian() {
+        let executable = env::current_exe().unwrap();
+        let calls = std::cell::Cell::new(0);
+        let check = || {
+            calls.set(calls.get() + 1);
+            // After the two pre-spawn checks, the guardian is already owned.
+            assert!(calls.get() < 3, "injected failure during startup read");
+            Ok(())
+        };
+        let Err(error) = RuntimeOwner::new().unwrap().spawn_duplex_interruptible(
+            executable.as_os_str(),
+            [OsStr::new("--list")],
+            &check,
+        ) else {
+            panic!("startup panic was treated as normal");
+        };
+        let mut evidence = error.downcast::<StartupRetirementUnconfirmed>().unwrap();
+        evidence._guardian.wait().unwrap();
+    }
 
     #[test]
     #[ignore]

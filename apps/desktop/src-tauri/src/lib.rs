@@ -187,7 +187,7 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
                 if let Some(check) = app_handle.try_state::<Arc<ManagedCheck>>() {
                     match check.begin_shutdown() {
-                        ExitReadiness::Ready => {}
+                        ExitReadiness::Ready(_) => {}
                         ExitReadiness::Waiting => api.prevent_exit(),
                         ExitReadiness::NeedsWait => {
                             api.prevent_exit();
@@ -208,7 +208,14 @@ pub fn run() {
             // requested. Stop the gateway before its local node.
             if let tauri::RunEvent::Exit = event {
                 if let Some(check) = app_handle.try_state::<Arc<ManagedCheck>>() {
-                    check.shutdown();
+                    match check.begin_shutdown() {
+                        ExitReadiness::Ready(outcome) => outcome.report(),
+                        ExitReadiness::NeedsWait | ExitReadiness::Waiting => {
+                            eprintln!(
+                                "imp: exit started before connection settings shutdown completed"
+                            );
+                        }
+                    }
                 }
                 if let Some(supervisor) = app_handle.try_state::<Arc<GatewaySupervisor>>() {
                     supervisor.shutdown();

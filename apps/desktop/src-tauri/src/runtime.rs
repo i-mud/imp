@@ -2,7 +2,8 @@
 //! Runtime children inherit cwd/environment and are hidden on Windows. The
 //! diagnostic uses duplex pipes; gameplay uses null stdin and piped stderr.
 
-use std::time::Duration;
+use std::io;
+use std::time::{Duration, Instant};
 
 pub(crate) const DIAGNOSTIC_POLL: Duration = Duration::from_millis(10);
 pub(crate) const DIAGNOSTIC_CLEANUP: Duration = Duration::from_secs(1);
@@ -26,6 +27,28 @@ mod platform;
 mod platform;
 
 pub use platform::{OwnedChild, RuntimeOwner};
+
+#[cfg(unix)]
+pub(crate) type StartupRetirementUnconfirmed = platform::StartupRetirementUnconfirmed;
+
+pub(crate) fn confirm_retirement(
+    deadline: Instant,
+    mut retired: impl FnMut() -> io::Result<bool>,
+) -> bool {
+    loop {
+        match retired() {
+            Ok(true) => return true,
+            Ok(false) => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return false;
+                }
+                std::thread::park_timeout(DIAGNOSTIC_POLL.min(left));
+            }
+            Err(_) => return false,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum RuntimeStdout {

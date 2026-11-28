@@ -1105,9 +1105,10 @@ must be operator-configured for verified, noninteractive foreground use
 without additional forwards or listeners. There is no port adoption,
 remote command, retry, `/action` or `/ingest` request. The five-second
 overall deadline includes login and relay frames.
-Cancellation, dialog close and edited login details retire the check; stale
-results cannot update a newer check. Only safe result categories cross to
-the renderer, and the check does not save or activate a route.
+Cancellation, dialog close and edited login details request retirement;
+stale results cannot update a newer draft. If retirement cannot be confirmed,
+Imp refuses another check or save until restart. Only safe result categories
+cross to the renderer, and the check does not save or activate a route.
 
 The diagnostic validates versioned `hello` and `status` rather than just a
 WebSocket upgrade or `/healthz`. A live result needs a valid snapshot with

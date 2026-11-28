@@ -72,7 +72,36 @@ These are measurements, not WAN latency guarantees. The diagnostic deadline
 is five seconds; retirement has a separate one-second budget. Unknown SSH
 diagnostics are not guessed from exit status 255. The [browser result
 screenshots](audits/managed-check-browser) use controlled IPC, not SSH. The
-installed NSIS/WebView2 gate exercises actual native IPC separately on the PR.
+installed NSIS/WebView2 gate tests actual native IPC separately. At reviewed
+PR #73 head `1054d051ed`, the [Windows job](https://github.com/i-mud/imp/actions/runs/46074232761/job/140758159956)
+passed native tests and OpenSSH prerequisite setup. Its independent control
+SSH client exited 255 before any candidate diagnostic, NSIS build or
+installed phase ran. That exit did not identify a cause; the job never
+reached WebView2. No surviving diagnostic process was observed in the
+native tests. Independent review found that the admission logic could
+nevertheless mistake a failed retirement observation for completed cleanup.
+
+The review remediation treats unconfirmed retirement as a restart-required
+fault. It is separate from ordinary cancellation and prevents another check
+or connection save. The installed fixture now keeps its redirected logs
+outside its required-empty configuration directory. Its SSH username and
+file ACLs derive from the same local account token. A configuration preflight
+and bounded client/server evidence identify which startup stage failed
+without publishing raw SSH logs. These fixes do not establish the cause of
+the earlier exit 255.
+
+The installed phase checks idle action feedback. The separate renderer
+regression holds a synthetic action pending through a check of a different
+destination and verifies its own result still supplies the eventual feedback.
+In local remediation acceptance, fault injection during startup and teardown
+blocked both check and save after cancellation; no unrelated child was
+signalled. The authenticated diagnostic passed all 20 cases on each native
+client. Observed cancellation retirement was 10.2 ms on Linux and 15.1 ms
+on Windows. The [restart-required screen](audits/managed-check-browser/browser-managed-expanded-dark-20-restart-required.png)
+is a controlled Chromium result. The local Windows NSIS candidate built;
+the installed eleven-phase gate is separate. See the exact-head results on
+[PR #73](https://github.com/i-mud/imp/pull/73).
+
 Neither source-fixture results nor candidate-installer checks are
 published-artifact acceptance or independent human onboarding. Slice 28
 recruitment requirements remain unchanged. The

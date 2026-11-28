@@ -1,14 +1,16 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{protocol, CheckResult};
+use super::{protocol, CheckOutcome, CheckResult, RetirementEvidence};
 use crate::runtime::{
-    OwnedChild, RuntimeOwner, SshUnavailable, DIAGNOSTIC_CLEANUP, DIAGNOSTIC_POLL,
+    confirm_retirement, OwnedChild, RuntimeOwner, SshUnavailable, DIAGNOSTIC_CLEANUP,
+    DIAGNOSTIC_POLL,
 };
 use crate::tunnel::{ssh_destination_args, strict_host_key_args};
 use crate::tunnel_config::ManagedDestination;
@@ -19,7 +21,7 @@ pub(super) fn run(
     destination: &ManagedDestination,
     deadline: Instant,
     cancelled: &AtomicBool,
-) -> CheckResult {
+) -> CheckOutcome {
     run_command(
         &ssh_command(destination, None),
         deadline,
@@ -39,7 +41,7 @@ pub(crate) fn run_fixture(
     config: &OsStr,
     on_spawn: impl FnOnce(u32),
     on_cleanup: impl FnOnce(Duration),
-) -> CheckResult {
+) -> CheckOutcome {
     let command = ssh_command(destination, Some(config));
     let mut fixture = Command::new(program);
     fixture.args(command.get_args());
@@ -88,13 +90,13 @@ fn run_command(
     cancelled: &AtomicBool,
     on_spawn: impl FnOnce(u32),
     on_cleanup: impl FnOnce(Duration),
-) -> CheckResult {
+) -> CheckOutcome {
     let check = || stop_reason(cancelled.load(Ordering::Acquire), Instant::now(), deadline);
     if let Some(result) = check() {
-        return result;
+        return Ok(result);
     }
     let Ok(owner) = RuntimeOwner::new() else {
-        return CheckResult::ConnectionFailed;
+        return Ok(CheckResult::ConnectionFailed);
     };
     let mut child =
         match owner.spawn_duplex_interruptible(command.get_program(), command.get_args(), &|| {
@@ -105,51 +107,77 @@ fn run_command(
             }
         }) {
             Ok(child) => child,
-            Err(error) => return check().unwrap_or_else(|| spawn_failure(&error)),
+            Err(error) => return spawn_outcome(error, check),
         };
-    let (result, cleanup_started) = match Duplex::new(&mut child, &owner, cancelled, deadline) {
-        Ok(mut stream) => {
-            on_spawn(stream.child.id());
-            let result = protocol::exchange(&mut stream, deadline);
-            let result = if result == CheckResult::ConnectionFailed && !stream.received {
-                stream.ssh_failure().unwrap_or(result)
-            } else {
-                result
-            };
-            (
-                check().unwrap_or(result),
-                stream.retirement_started.unwrap_or_else(Instant::now),
-            )
-        }
-        Err(_) => (CheckResult::ConnectionFailed, Instant::now()),
-    };
+    let result = match catch_unwind(AssertUnwindSafe(|| {
+        let (result, cleanup_started) = match Duplex::new(&mut child, &owner, cancelled, deadline) {
+            Ok(mut stream) => {
+                on_spawn(stream.child.id());
+                let result = protocol::exchange(&mut stream, deadline);
+                let result = if result == CheckResult::ConnectionFailed && !stream.received {
+                    stream.ssh_failure().unwrap_or(result)
+                } else {
+                    result
+                };
+                (
+                    check().unwrap_or(result),
+                    stream.retirement_started.unwrap_or_else(Instant::now),
+                )
+            }
+            Err(_) => (CheckResult::ConnectionFailed, Instant::now()),
+        };
 
-    let retired = retire(&owner, &mut child, cleanup_started + DIAGNOSTIC_CLEANUP);
-    on_cleanup(cleanup_started.elapsed());
-    if retired {
-        result
+        let retired = retire(&owner, &mut child, cleanup_started + DIAGNOSTIC_CLEANUP);
+        on_cleanup(cleanup_started.elapsed());
+        retired.then_some(result)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = owner.begin_diagnostic_retirement(&mut child);
+            None
+        }
+    };
+    finish_exchange(result, owner, child)
+}
+
+fn finish_exchange(
+    result: Option<CheckResult>,
+    owner: RuntimeOwner,
+    child: OwnedChild,
+) -> CheckOutcome {
+    if let Some(result) = result {
+        Ok(result)
     } else {
-        eprintln!(
-            "imp: managed connection check could not confirm retirement within cleanup budget"
-        );
-        CheckResult::ConnectionFailed
+        Err(RetirementEvidence::Child {
+            _owner: owner,
+            _child: child,
+        })
     }
 }
 
 fn retire(owner: &RuntimeOwner, child: &mut OwnedChild, deadline: Instant) -> bool {
-    if matches!(owner.diagnostic_retired(child), Ok(true)) {
+    retire_owned(
+        child,
+        deadline,
+        |child| owner.begin_diagnostic_retirement(child),
+        |child| owner.diagnostic_retired(child),
+    )
+}
+
+fn retire_owned<T>(
+    owned: &mut T,
+    deadline: Instant,
+    begin: impl FnOnce(&mut T) -> io::Result<()>,
+    mut retired: impl FnMut(&mut T) -> io::Result<bool>,
+) -> bool {
+    if matches!(retired(owned), Ok(true)) {
         return true;
     }
-    if owner.begin_diagnostic_retirement(child).is_err() {
-        return false;
+    // Even a failed termination request can race independently confirmed exit.
+    if begin(owned).is_err() {
+        return matches!(retired(owned), Ok(true));
     }
-    loop {
-        match owner.diagnostic_retired(child) {
-            Ok(true) => return true,
-            Ok(false) if Instant::now() < deadline => pause(deadline),
-            _ => return false,
-        }
-    }
+    confirm_retirement(deadline, || retired(owned))
 }
 
 fn pause(deadline: Instant) {
@@ -164,6 +192,19 @@ fn stop_reason(cancelled: bool, now: Instant, deadline: Instant) -> Option<Check
     } else {
         None
     }
+}
+
+fn spawn_outcome(error: io::Error, stop: impl FnOnce() -> Option<CheckResult>) -> CheckOutcome {
+    #[cfg(unix)]
+    let error = match error.downcast::<crate::runtime::StartupRetirementUnconfirmed>() {
+        Ok(evidence) => {
+            return Err(RetirementEvidence::Startup {
+                _guardian: evidence,
+            });
+        }
+        Err(error) => error,
+    };
+    Ok(stop().unwrap_or_else(|| spawn_failure(&error)))
 }
 
 fn spawn_failure(error: &io::Error) -> CheckResult {
@@ -509,6 +550,203 @@ fn ssh_record(line: &str, pid: u32) -> Option<(&str, &str)> {
 mod tests {
     use super::*;
     use crate::tunnel_config::SshDestination;
+    use std::io::BufRead;
+    use std::sync::{mpsc, Arc};
+
+    #[test]
+    #[ignore]
+    fn retirement_fixture_child() {
+        println!("retirement fixture ready");
+        let mut byte = [0];
+        io::stdin().read_exact(&mut byte).unwrap();
+        assert_eq!(byte, [b'x']);
+    }
+
+    fn retirement_fixture_command() -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "managed_check::process::tests::retirement_fixture_child",
+            "--ignored",
+            "--nocapture",
+        ]);
+        command
+    }
+
+    fn retirement_fixture(owner: &RuntimeOwner) -> OwnedChild {
+        let command = retirement_fixture_command();
+        let mut child = owner
+            .spawn_duplex_interruptible(command.get_program(), command.get_args(), &|| Ok(()))
+            .unwrap();
+        assert!(io::BufReader::new(child.stdout.as_mut().unwrap())
+            .lines()
+            .map_while(Result::ok)
+            .any(|line| line.contains("retirement fixture ready")));
+        child
+    }
+
+    #[test]
+    fn failed_retirement_reaches_original_check_and_latches_even_when_cancelled() {
+        use crate::managed_check::{ExitReadiness, ManagedCheck, ShutdownOutcome};
+        use serde_json::json;
+
+        for (race_cancel, race_shutdown) in [(false, false), (true, false), (false, true)] {
+            let gameplay = RuntimeOwner::new().unwrap();
+            let mut sibling = retirement_fixture(&gameplay);
+            let check = Arc::new(ManagedCheck::default());
+            let other = Arc::clone(&check);
+            let (ready, started) = mpsc::channel();
+            let (release, finish) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                other.run_with(1, json!({"sshTarget": "synthetic"}), |_, _, cancelled| {
+                    let owner = RuntimeOwner::new().unwrap();
+                    let mut child = retirement_fixture(&owner);
+                    let original_id = child.id();
+                    let confirmed = retire_owned(
+                        &mut child,
+                        Instant::now(),
+                        |owned| {
+                            assert_eq!(owned.id(), original_id);
+                            owner.begin_diagnostic_retirement(owned).unwrap();
+                            Ok(())
+                        },
+                        |owned| {
+                            assert_eq!(owned.id(), original_id);
+                            Err(io::Error::other("injected retirement query failure"))
+                        },
+                    );
+                    ready.send(original_id).unwrap();
+                    finish.recv().unwrap();
+                    assert_eq!(
+                        cancelled.load(Ordering::Acquire),
+                        race_cancel || race_shutdown
+                    );
+                    finish_exchange(confirmed.then_some(CheckResult::Live), owner, child)
+                })
+            });
+
+            let original_id = started.recv().unwrap();
+            if race_cancel {
+                check.cancel(1);
+            }
+            if race_shutdown {
+                assert_eq!(check.begin_shutdown(), ExitReadiness::NeedsWait);
+            }
+            assert!(check.reserve_save().is_err());
+            release.send(()).unwrap();
+            let result = worker.join().unwrap();
+            assert_eq!(result, CheckResult::RetirementUnconfirmed);
+            assert_eq!(
+                serde_json::to_value(result).unwrap(),
+                "retirement_unconfirmed"
+            );
+            assert_eq!(check.admit(2).err(), Some(result));
+            assert_eq!(check.reserve_save().err(), Some("retirement_unconfirmed"));
+            assert_eq!(
+                check.begin_shutdown(),
+                ExitReadiness::Ready(ShutdownOutcome::RetirementUnconfirmed)
+            );
+            assert_eq!(check.shutdown(), ShutdownOutcome::RetirementUnconfirmed);
+            sibling.stdin.take().unwrap().write_all(b"x").unwrap();
+            assert!(sibling.wait().unwrap().success());
+
+            let mut state = check.state.lock();
+            let Some(RetirementEvidence::Child { _child, .. }) = &mut state.retirement_fault else {
+                panic!("original process ownership was lost");
+            };
+            assert_eq!(_child.id(), original_id);
+            _child.wait().unwrap(); // The real fixture teardown request was delivered above.
+        }
+    }
+
+    #[test]
+    fn panic_after_spawn_blocks_checks_and_keeps_the_original_child() {
+        use crate::managed_check::ManagedCheck;
+        use serde_json::json;
+
+        let check = Arc::new(ManagedCheck::default());
+        let mut spawned = None;
+        let result = check.run_with(
+            1,
+            json!({"sshTarget": "synthetic"}),
+            |_, deadline, cancelled| {
+                run_command(
+                    &retirement_fixture_command(),
+                    deadline,
+                    cancelled,
+                    |pid| {
+                        spawned = Some(pid);
+                        panic!("injected failure after spawn");
+                    },
+                    |_| {},
+                )
+            },
+        );
+        assert_eq!(result, CheckResult::RetirementUnconfirmed);
+        assert_eq!(check.admit(2).err(), Some(result));
+        assert_eq!(check.reserve_save().err(), Some("retirement_unconfirmed"));
+
+        let mut state = check.state.lock();
+        let Some(RetirementEvidence::Child { _child, .. }) = &mut state.retirement_fault else {
+            panic!("original process ownership was lost");
+        };
+        assert_eq!(_child.id(), spawned.unwrap());
+        _child.wait().unwrap();
+    }
+
+    #[test]
+    fn failed_termination_requires_independent_exit_confirmation() {
+        for confirmed in [false, true] {
+            let mut polls = 0;
+            assert_eq!(
+                retire_owned(
+                    &mut (),
+                    Instant::now(),
+                    |_| Err(io::Error::other("injected termination failure")),
+                    |_| {
+                        polls += 1;
+                        Ok(confirmed && polls == 2)
+                    },
+                ),
+                confirmed
+            );
+            assert_eq!(polls, 2);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_guardian_startup_retirement_is_sticky_not_a_startup_cancellation() {
+        use crate::managed_check::{ManagedCheck, ShutdownOutcome};
+        use crate::runtime::StartupRetirementUnconfirmed;
+        use serde_json::json;
+        use std::process::Stdio;
+
+        let mut guardian = Command::new(std::env::current_exe().unwrap())
+            .arg("--inject-guardian-exit-without-proof")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(!guardian.wait().unwrap().success());
+        let check = Arc::new(ManagedCheck::default());
+        let destination = json!({"sshTarget": "synthetic"});
+        let result = check.run_with(1, destination, |_, _, _| {
+            check.cancel(1);
+            spawn_outcome(
+                StartupRetirementUnconfirmed::after_failed_start(
+                    guardian,
+                    io::ErrorKind::ConnectionAborted.into(),
+                    Instant::now(),
+                ),
+                || Some(CheckResult::Cancelled),
+            )
+        });
+        assert_eq!(result, CheckResult::RetirementUnconfirmed);
+        assert_eq!(check.admit(2).err(), Some(result));
+        assert_eq!(check.reserve_save().err(), Some("retirement_unconfirmed"));
+        assert_eq!(check.shutdown(), ShutdownOutcome::RetirementUnconfirmed);
+    }
 
     #[cfg(windows)]
     #[test]

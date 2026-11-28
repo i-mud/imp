@@ -373,16 +373,19 @@ function Assert-OwnedNode([string]$Log) {
 
 function Test-InstalledManagedDiagnostic([int]$BlockedPort) {
     Wait-FixtureGone
-    $Directory = (New-Item -ItemType Directory -Path (Join-Path $env:TEMP ('imp-managed-check-' + [guid]::NewGuid()))).FullName
+    $Scratch = (New-Item -ItemType Directory -Path (Join-Path $env:TEMP ('imp-managed-check-' + [guid]::NewGuid()))).FullName
+    # OpenSSH's fixture requires an empty root. Start-Process creates its redirection files before Python starts.
+    $Directory = (New-Item -ItemType Directory -Path (Join-Path $Scratch 'fixture')).FullName
     $ManifestPath = Join-Path $Directory 'manifest.json'
-    $Log = Join-Path $Directory 'desktop.log'
-    $Fixture = $Desktop = $Manifest = $null
+    $Log = Join-Path $Scratch 'desktop.log'
+    $Fixture = $Desktop = $Manifest = $Observer = $Uv = $null
+    $Passed = $false
     try {
         $Uv = (Get-Command uv.exe).Source
         $Fixture = Start-Process -FilePath $Uv -WorkingDirectory (Split-Path $PSScriptRoot) -ArgumentList @(
             'run --locked --project services/relay python -u scripts/test-managed-check.py installed',
             ('"{0}"' -f $Directory)
-        ) -PassThru -RedirectStandardOutput (Join-Path $Directory 'fixture.out') -RedirectStandardError (Join-Path $Directory 'fixture.err')
+        ) -PassThru -RedirectStandardOutput (Join-Path $Scratch 'fixture.out') -RedirectStandardError (Join-Path $Scratch 'fixture.err')
         $Deadline = [DateTime]::UtcNow.AddSeconds(30)
         while (!(Test-Path $ManifestPath -PathType Leaf)) {
             if ($Fixture.HasExited -or [DateTime]::UtcNow -ge $Deadline) { throw 'The disposable SSH fixture did not become ready' }
@@ -396,32 +399,87 @@ function Test-InstalledManagedDiagnostic([int]$BlockedPort) {
             sshTarget = "ssh://imp-fixture@127.0.0.1:$BlockedPort"
         } | ConvertTo-Json))
         Start-FixtureDesktop $Log ([ref]$Desktop) $Manifest
+        $Observer = Start-ThreadJob -ArgumentList $Desktop.Id, $Directory -ScriptBlock {
+            param($DesktopId, $Directory)
+            $ErrorActionPreference = 'Stop'
+            $Filter = "ParentProcessId=$DesktopId AND Name='ssh.exe'"
+            if (Get-CimInstance Win32_Process -Filter $Filter) { throw 'SSH child existed before checking' }
+            [IO.File]::WriteAllText((Join-Path $Directory 'ssh-observer-ready'), '')
+            foreach ($Check in 1..3) {
+                $Request = Join-Path $Directory "ssh-check-$Check"
+                while (!(Test-Path -LiteralPath $Request)) { Start-Sleep -Milliseconds 50 }
+                $Candidates = @(Get-CimInstance Win32_Process -Filter $Filter)
+                if ($Candidates.Count -ne 1) { throw 'Expected exactly one held desktop SSH child' }
+                $Ssh = [Diagnostics.Process]::GetProcessById([int]$Candidates[0].ProcessId)
+                try {
+                    $null = $Ssh.Handle
+                    if ([Math]::Abs(($Ssh.StartTime.ToUniversalTime() - $Candidates[0].CreationDate.ToUniversalTime()).TotalMilliseconds) -ge 1 -or
+                        $Ssh.HasExited) { throw 'Held desktop SSH child identity changed' }
+                    [IO.File]::WriteAllText("$Request.observed", '')
+                    if (!$Ssh.WaitForExit(10000)) { throw 'The observed SSH child did not retire' }
+                    [IO.File]::WriteAllText("$Request.retired", '')
+                } finally { $Ssh.Dispose() }
+            }
+        }
+        $Deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (!(Test-Path -LiteralPath (Join-Path $Directory 'ssh-observer-ready'))) {
+            if ($Observer.State -in 'Completed', 'Failed', 'Stopped' -or [DateTime]::UtcNow -ge $Deadline) {
+                throw 'The desktop SSH child observer did not start'
+            }
+            Start-Sleep -Milliseconds 50
+        }
         Invoke-ConnectionUi $Desktop 'managed-diagnostic' $BlockedPort $Directory
         if ($Desktop.HasExited) { throw 'Installed desktop exited during Managed diagnostic acceptance' }
+        if (!(Wait-Job $Observer -Timeout 10) -or $Observer.State -ne 'Completed' -or
+            (Get-CimInstance Win32_Process -Filter "ParentProcessId=$($Desktop.Id) AND Name='ssh.exe'")) {
+            throw 'Could not verify diagnostic SSH child retirement before desktop exit'
+        }
         Assert-NoManagedRuntime $Log
         if (Select-String -Path $Log -Pattern '^imp: owned node pid=' -Quiet) {
             throw 'Installed desktop started a node over the disposable SSH backend'
         }
+        $Passed = $true
     } finally {
+        $CleanupErrors = @()
+        try {
+            if ($Observer) { Remove-Job $Observer -Force }
+        } catch { $CleanupErrors += 'Could not stop the desktop SSH child observer' }
         try {
             if ($Desktop) { Stop-FixtureDesktop $Desktop $Log }
-        } finally {
+        } catch { $CleanupErrors += 'Could not stop the installed diagnostic desktop' }
+        try {
             if ($Fixture) {
                 if (!$Fixture.HasExited) {
-                    [IO.File]::AppendAllText((Join-Path $Directory 'commands.log'), "stop`n")
-                    if (!$Fixture.WaitForExit(15000)) {
-                        $Fixture.Kill($true)
-                        throw 'The disposable SSH fixture did not exit cleanly; SSH profile restoration could not be verified'
+                    try {
+                        [IO.File]::AppendAllText((Join-Path $Directory 'commands.log'), "stop`n")
+                        if (!$Fixture.WaitForExit(15000)) { throw 'Fixture exit timeout' }
+                    } finally {
+                        if (!$Fixture.HasExited) { $Fixture.Kill($true) }
                     }
                 }
-                if ($Fixture.ExitCode -ne 0) { throw 'The disposable SSH fixture exited unsuccessfully' }
+                if ($Fixture.ExitCode -ne 0) { throw 'Fixture exit failure' }
             }
+        } catch { $CleanupErrors += 'The disposable SSH fixture did not exit cleanly; profile restoration could not be verified' }
+        if (!$Passed -and $Uv -and (!$Fixture -or $Fixture.HasExited)) {
+            Push-Location (Split-Path $PSScriptRoot)
+            try {
+                & $Uv run --locked --project services/relay python scripts/test-managed-check.py startup-evidence $Directory 2>$null
+                if ($LASTEXITCODE) { Write-Host 'Windows OpenSSH fixture startup evidence unavailable' }
+            } catch { Write-Host 'Windows OpenSSH fixture startup evidence unavailable' }
+            finally { Pop-Location }
+        }
+        try {
             if ($Manifest -and (Get-NetTCPConnection -State Listen -LocalPort $Manifest.port -ErrorAction SilentlyContinue)) {
                 throw 'The disposable SSH listener survived fixture cleanup'
             }
-            Remove-Item -LiteralPath $Directory -Recurse
             Wait-FixtureGone
-        }
+        } catch { $CleanupErrors += 'A disposable fixture listener or process survived cleanup' }
+        try {
+            Remove-Item -LiteralPath $Scratch -Recurse -Force
+        } catch { $CleanupErrors += 'Could not remove the disposable diagnostic fixtures' }
+        foreach ($Message in $CleanupErrors) { Write-Warning $Message -WarningAction Continue }
+        if ($CleanupErrors) { $script:FixtureCleanupFailed = $true }
+        if ($Passed -and $CleanupErrors) { throw 'Installed Managed diagnostic cleanup failed' }
     }
 }
 

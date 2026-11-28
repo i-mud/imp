@@ -81,6 +81,9 @@ feed is different from a login failure: see
 [Imp is connected but shows no character](#imp-is-connected-but-shows-no-character).
 If the check reports live but the HUD still isn't connected after Save and
 restart, check the [gameplay forward and desktop port](../deploy/ssh.md#troubleshooting).
+If Imp cannot confirm that the temporary SSH process stopped, **quit and
+reopen Imp** before checking or saving again. This is a local cleanup fault,
+not evidence that your server login failed. Your saved settings are unchanged.
 
 ## Imp is connected but shows no character
 

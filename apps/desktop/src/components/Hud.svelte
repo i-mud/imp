@@ -35,6 +35,9 @@
   import type { TextSourceListener } from '../lib/hud/store.svelte.ts';
   import {
     loadConnectionSettings,
+    managedCheckRestartRequired,
+    MANAGED_CHECK_RESTART_MESSAGE,
+    RETIREMENT_UNCONFIRMED,
     saveConnectionSettings,
     type ConnectionSettingsState,
     type ConnectionSettingsUpdate,
@@ -319,6 +322,8 @@
       return true;
     } catch (error) {
       switch (error) {
+        case RETIREMENT_UNCONFIRMED:
+          break;
         case CONNECTION_FILE_UNREADABLE:
         case CONNECTION_FILE_CHANGED:
         case 'Wait for the connection check to finish, then try saving again.':
@@ -622,6 +627,12 @@
   </div>
 {/snippet}
 
+{#snippet connectionCheckWarning()}
+  {#if $managedCheckRestartRequired}
+    <p class="connection-check-warning" role="alert">{MANAGED_CHECK_RESTART_MESSAGE}</p>
+  {/if}
+{/snippet}
+
 {#snippet actionList()}
   <div class="contextual-heading">
     <h2>Actions</h2>
@@ -709,6 +720,7 @@
           {#if exitInvoker !== null}
             <ExitConfirmation invoker={exitInvoker} onclose={() => (exitInvoker = null)} />
           {/if}
+          {@render connectionCheckWarning()}
           {#if setupState !== undefined && openPanel === null}
             {@render connectionSetup()}
           {/if}
@@ -775,6 +787,7 @@
           {#if exitInvoker !== null}
             <ExitConfirmation invoker={exitInvoker} onclose={() => (exitInvoker = null)} />
           {/if}
+          {@render connectionCheckWarning()}
         </header>
 
         {#if openPanel === 'settings'}
@@ -947,6 +960,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .connection-check-warning {
+    margin: 0;
+    padding: var(--space-4);
+    color: var(--bad-text);
+    font-size: var(--font-xs);
   }
 
   .settings-body,

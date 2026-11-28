@@ -302,9 +302,13 @@ The operator must configure this: the target client's overrides do not
 propagate to nested processes, and Imp does not enforce their policy.
 This diagnostic precondition does not change Managed gameplay configuration.
 
-One five-second overall deadline covers the check, including SSH and state
-protocol exchange. Cancellation or completion retires the check and its
-owned resources; a late result cannot update a newer form or check.
+The check has five seconds for SSH and the state exchange, then a separate
+one-second retirement budget. Cancellation requests cleanup; it is not
+proof that the child and its owned processes exited. If native code cannot
+confirm retirement during startup or teardown, it refuses further checks
+and connection saves until Imp restarts. This fault takes precedence over
+cancellation. It does not stop the running gameplay route, and a late
+result cannot update a newer draft.
 Isolation from `8789` means a successful check says nothing about whether
 the Managed gameplay forward can bind or which endpoint state and actions
 will reach after restart.

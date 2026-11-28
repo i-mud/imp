@@ -547,7 +547,7 @@ async function browserManaged() {
     await probe(`cancellations.at(-1).requestId === ${J(next)}`),
     'Cancel did not address the active request',
   );
-  await finish('live'); // Late completion cannot overwrite the explicit cancellation.
+  await finish('cancelled');
   await checkShows(CHECK_COPY.cancelled);
   await startCheck();
   await checkShows(CHECK_COPY.progress);
@@ -561,6 +561,15 @@ async function browserManaged() {
   await finish('live');
   await waitFor(checkReady, 'the edited server login to become checkable');
   ok((await status()) === '', 'An obsolete result appeared for the edited draft');
+  await startCheck();
+  await checkShows(CHECK_COPY.progress);
+  await tabTo(CHECK);
+  await press('Tab');
+  await press(' ');
+  await checkShows('Cancelling check…');
+  await finish('live'); // An ordinary result racing explicit Cancel is not a cancellation acknowledgement.
+  await waitFor(checkReady, 'a checkable draft after discarding the racing result');
+  ok((await status()) === '', 'The racing result appeared after explicit Cancel');
   await startCheck();
   await checkShows(CHECK_COPY.progress);
   const closing = await probe('checks.at(-1).args');
@@ -616,6 +625,27 @@ async function browserManaged() {
       }
     }
   }
+  const restartRequired =
+    'Imp could not confirm that a connection check stopped. Quit and reopen Imp before checking or saving connections.';
+  await openManager();
+  await startCheck();
+  await checkShows(CHECK_COPY.progress);
+  await tabTo(CHECK);
+  await press('Tab');
+  await press(' ');
+  await checkShows('Cancelling check…');
+  await finish('retirement_unconfirmed');
+  await dialogShows(restartRequired);
+  await assertFits();
+  await screenshot('browser-managed-expanded-dark-20-restart-required.png');
+  ok((await status()) === '', 'Unconfirmed retirement appeared as an ordinary check result');
+  await closeManager('footer', MANAGER_TRIGGER);
+  await visibleText(restartRequired);
+  await openManager();
+  await typeInto(SSH, 'imp-browser-alternate');
+  await dialogShows(restartRequired);
+  ok(!(await checkReady()) && (await saveDisabled()), 'Unconfirmed retirement allowed check or save');
+  await closeManager('footer', MANAGER_TRIGGER);
   await closeSettings();
   await hudShows(initial, 68);
   ok(
@@ -644,8 +674,25 @@ async function installedManagedDiagnostic() {
     appendFileSync(join(diagnosticFixture, 'commands.log'), `${name}\n`);
     await traffic(ack, before + 1);
   }
+  async function observeSsh(check) {
+    // B is held until PowerShell acquires a handle to this desktop's exact SSH child.
+    const request = join(diagnosticFixture, `ssh-check-${check}`);
+    writeFileSync(request, '');
+    await waitFor(() => existsSync(`${request}.observed`), 'the held SSH child to be observed');
+    return () => waitFor(() => existsSync(`${request}.retired`), 'the exact SSH child to retire');
+  }
   const before = readFileSync(tunnelConfig);
   const expectedRunning = config().sshTarget;
+  const assertUnchanged = async () => {
+    await summaryShows('In use', 'Server login', expectedRunning);
+    await dialogLacks(PENDING);
+    await dialogLacks(diagnosticName);
+    ok(readFileSync(tunnelConfig).equals(before), 'The diagnostic changed saved connection bytes');
+    ok(
+      count('A OPEN /state') === 1 && count('A CLOSED /state') === 0,
+      'The diagnostic replaced the active consumer',
+    );
+  };
   // Both real relay backends must have retained live data and a registered, idle action consumer.
   for (const backend of ['A', 'B']) {
     await traffic(`${backend} FIXTURE OPEN /ingest`, 1);
@@ -668,16 +715,16 @@ async function installedManagedDiagnostic() {
   await press('Enter');
   await checkShows(CHECK_COPY.progress);
   await traffic('B OPEN /state', 1);
+  const liveRetired = await observeSsh(1);
   await screenshot('managed-check-progress.png');
   await command('update');
   await traffic('A UPDATED', 1);
   await command('live');
   await checkShows(CHECK_COPY.live);
   await traffic('B CLOSED /state', 1);
-  await dialogLacks(diagnosticName);
+  await liveRetired();
   await screenshot('managed-check-live.png');
-  await summaryShows('In use', 'Server login', expectedRunning);
-  await dialogLacks(PENDING);
+  await assertUnchanged();
   await closeManager('escape', MANAGER_TRIGGER);
   await closeSettings();
   await hudShows(runningName, runningHp + 1);
@@ -688,12 +735,18 @@ async function installedManagedDiagnostic() {
   await setView('compact', 'light');
   await openManager();
   await structured(host, username, port);
-  await command('down');
+  await command('hold');
   await startCheck();
-  await checkShows(CHECK_COPY.down);
+  await checkShows(CHECK_COPY.progress);
   await traffic('B OPEN /state', 2);
+  const downRetired = await observeSsh(2);
+  await command('update');
+  await traffic('A UPDATED', 2);
+  await command('down');
+  await checkShows(CHECK_COPY.down);
+  await downRetired();
   await traffic('B CLOSED /state', 2);
-  await dialogLacks(diagnosticName);
+  await assertUnchanged();
   await assertCheckWraps();
   await screenshot('managed-check-no-live.png');
   await tabWrap();
@@ -701,24 +754,30 @@ async function installedManagedDiagnostic() {
   await startCheck();
   await checkShows(CHECK_COPY.progress);
   await traffic('B OPEN /state', 3);
+  const cancelledRetired = await observeSsh(3);
+  await command('update');
+  await traffic('A UPDATED', 3);
   await tabTo(CHECK);
   await press('Tab');
   await press(' ');
   await checkShows(CHECK_COPY.cancelled);
   await traffic('B CLOSED /state', 3);
+  await cancelledRetired();
+  await assertUnchanged();
   await focusIs(CHECK, 'Check connection after cancel');
 
   await fontMetrics(16);
   await typeInto(SSH_PORT, fixturePort);
   await startCheck();
   await checkShows(CHECK_COPY.unreachable);
-  await dialogLacks(diagnosticName);
+  await assertUnchanged();
   await assertCheckWraps();
   await screenshot('managed-check-failure.png');
-  await summaryShows('In use', 'Server login', expectedRunning);
   await closeManager('footer', MANAGER_TRIGGER);
   await closeSettings();
-  await hudShows(runningName, runningHp + 1);
+  await hudShows(runningName, runningHp + 3);
+  await command('update');
+  await hudShows(runningName, runningHp + 4);
   await bodyLacks(diagnosticName);
   await click('button[aria-label="Actions"]');
   ok((await feedback()) === '', 'Checking changed installed HUD action feedback');

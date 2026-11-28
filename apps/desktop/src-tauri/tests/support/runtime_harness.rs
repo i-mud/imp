@@ -19,7 +19,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tunnel_config::{ManagedDestination, SshDestination};
@@ -207,34 +207,47 @@ fn managed_check(args: &[std::ffi::OsString]) {
     };
     let destination = serde_json::from_str(destination.to_str().unwrap()).unwrap();
     let check = Arc::new(managed_check::ManagedCheck::default());
-    thread::scope(|scope| {
-        let worker = scope.spawn(|| {
-            let result = check.run_with(1, destination, |destination, deadline, cancelled| {
-                managed_check::process::run_fixture(
-                    destination,
-                    deadline,
-                    cancelled,
-                    program,
-                    config,
-                    |pid| println!("pid {pid}"),
-                    |duration| println!("cleanup_us {}", duration.as_micros()),
-                )
-            });
-            println!(
-                "result {}",
-                serde_json::to_value(result).unwrap().as_str().unwrap()
-            );
+    let worker_check = Arc::clone(&check);
+    let program = program.clone();
+    let config = config.clone();
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        let result = worker_check.run_with(1, destination, |destination, deadline, cancelled| {
+            managed_check::process::run_fixture(
+                destination,
+                deadline,
+                cancelled,
+                &program,
+                &config,
+                |pid| println!("pid {pid}"),
+                |duration| println!("cleanup_us {}", duration.as_micros()),
+            )
         });
-        for command in io::stdin().lock().lines() {
-            match command.unwrap().as_str() {
-                "cancel" => check.cancel(1),
-                "shutdown" => break,
-                _ => panic!("invalid Managed check fixture command"),
-            }
-        }
-        check.shutdown();
-        worker.join().unwrap();
+        println!(
+            "result {}",
+            serde_json::to_value(result).unwrap().as_str().unwrap()
+        );
+        let _ = done.send(());
     });
+    for command in io::stdin().lock().lines() {
+        match command.unwrap().as_str() {
+            "cancel" => check.cancel(1),
+            "shutdown" => break,
+            _ => panic!("invalid Managed check fixture command"),
+        }
+    }
+    let outcome = check.shutdown();
+    outcome.report();
+    if outcome == managed_check::ShutdownOutcome::TimedOut {
+        std::process::exit(1);
+    }
+    if finished.recv_timeout(runtime::DIAGNOSTIC_CLEANUP).is_err() {
+        eprintln!("imp: Managed check fixture worker did not report a result");
+        std::process::exit(1);
+    }
+    if outcome != managed_check::ShutdownOutcome::Retired {
+        std::process::exit(1);
+    }
 }
 
 fn main() {

@@ -6,6 +6,9 @@
     cancelManagedConnection,
     checkManagedConnection,
     managedCheckPending,
+    managedCheckRestartRequired,
+    MANAGED_CHECK_RESTART_MESSAGE,
+    RETIREMENT_UNCONFIRMED,
     type ConnectionMode,
     type ConnectionSettings,
     type ConnectionSettingsState,
@@ -77,6 +80,7 @@
   let saved = $state(false);
   let activeCheck: number | null = null;
   let checking = $state(false);
+  let cancelRequested = $state(false);
   let checkResult = $state<ManagedCheckResult | null>(null);
   let checkButton = $state<HTMLButtonElement>();
   let cancelCheckButton = $state<HTMLButtonElement>();
@@ -104,16 +108,21 @@
   const canKeepPairingToken = $derived(
     stored?.mode === 'direct' && stored.hasPairingToken && sameEndpoint(stored.remoteUrl, remoteUrl.trim()),
   );
+  const checkBlocked = $derived(
+    checking || cancelRequested || $managedCheckPending || $managedCheckRestartRequired,
+  );
   const checkStatus = $derived(
-    checking
-      ? 'Checking connection…'
-      : $managedCheckPending
-        ? checkResult === 'cancelled'
+    $managedCheckRestartRequired
+      ? ''
+      : checking
+        ? 'Checking connection…'
+        : cancelRequested
           ? 'Cancelling check…'
-          : 'Finishing previous check…'
-        : checkResult === null
-          ? ''
-          : CHECK_MESSAGES[checkResult],
+          : $managedCheckPending
+            ? 'Finishing previous check…'
+            : checkResult === null
+              ? ''
+              : CHECK_MESSAGES[checkResult],
   );
 
   // Rebuild the draft only when the native settings actually load or save.
@@ -172,21 +181,23 @@
 
   function invalidateCheck(): void {
     const requestId = activeCheck;
+    if (requestId !== null && !cancelRequested) void cancelManagedConnection(requestId).catch(() => {});
     activeCheck = null;
     checking = false;
+    cancelRequested = false;
     checkResult = null;
-    if (requestId !== null) void cancelManagedConnection(requestId).catch(() => {});
   }
 
   function cancelCheck(): void {
-    if (activeCheck === null) return;
+    if (activeCheck === null || cancelRequested) return;
     if (document.activeElement === cancelCheckButton) checkButton?.focus();
-    invalidateCheck();
-    checkResult = 'cancelled';
+    checking = false;
+    cancelRequested = true;
+    void cancelManagedConnection(activeCheck).catch(() => {});
   }
 
   async function checkConnection(): Promise<void> {
-    if (mode !== 'managed' || saving || $managedCheckPending) return;
+    if (mode !== 'managed' || saving || checkBlocked) return;
     issue = null;
     checkResult = null;
     const destination = managedDestination(true);
@@ -206,7 +217,10 @@
       if (document.activeElement === cancelCheckButton) checkButton?.focus();
       activeCheck = null;
       checking = false;
-      checkResult = Object.hasOwn(CHECK_MESSAGES, result) ? result : 'connection_failed';
+      if (result !== RETIREMENT_UNCONFIRMED && (!cancelRequested || result === 'cancelled')) {
+        checkResult = Object.hasOwn(CHECK_MESSAGES, result) ? result : 'connection_failed';
+      }
+      cancelRequested = false;
     } catch {
       checkResult = 'connection_failed';
     }
@@ -372,7 +386,7 @@
       settings === null ||
       mode === null ||
       saving ||
-      $managedCheckPending ||
+      checkBlocked ||
       (discardConfirmed && !confirmingDiscard)
     ) {
       return;
@@ -462,6 +476,9 @@
   </header>
 
   <div class="dialog-content">
+    {#if $managedCheckRestartRequired}
+      <p id="managed-check-restart-required" class="error" role="alert">{MANAGED_CHECK_RESTART_MESSAGE}</p>
+    {/if}
     {#if loadError !== null}
       <p class="error" role="alert">{loadError}</p>
     {:else if settings === null}
@@ -658,8 +675,10 @@
                 name="check-managed-connection"
                 type="button"
                 disabled={saving}
-                aria-disabled={$managedCheckPending || undefined}
-                aria-describedby="managed-check-help"
+                aria-disabled={checkBlocked || undefined}
+                aria-describedby={$managedCheckRestartRequired
+                  ? 'managed-check-help managed-check-restart-required'
+                  : 'managed-check-help'}
                 onclick={() => void checkConnection()}>Check connection</button
               >
               {#if checking}
@@ -767,7 +786,7 @@
               class="manager-btn danger"
               type="button"
               aria-describedby="discard-direct-warning"
-              disabled={$managedCheckPending}
+              disabled={checkBlocked}
               onclick={() => void save(true)}>Remove credentials and save</button
             >
           {:else}
@@ -775,7 +794,7 @@
               bind:this={saveButton}
               class="manager-btn primary"
               type="submit"
-              disabled={saving || mode === null || $managedCheckPending}
+              disabled={saving || mode === null || checkBlocked}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
