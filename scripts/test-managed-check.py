@@ -45,14 +45,20 @@ PHASES = ("tools", "account-context", "key-generation", "key-acl", "server-confi
 PERMISSION_ROLES = {
     "fixture-directory": ".", "server-config": "sshd.config",
     "host-key": "host_key", "authorized-keys": "authorized_keys",
+    "client-key": "client_key",
 }
+PERMISSION_SNAPSHOT_ROLES = ("authorized-keys", "host-key", "client-key")
+PERMISSION_PATH_FORMS = ("drive", "openssh-realpath", "extended-length", "cygdrive", "program-data",
+                         "repeated-separators", "other")
 PERMISSION_REPORTS = {
     "rejected-ace": rb"Bad permissions\. Try removing permissions for user: .+? "
                     rb"(?:\((?P<sid>S-1(?:-[0-9]{1,20}){2,16})\) )?on file (?P<path>.+)\.",
     "rejected-owner": rb"Bad owner on (?P<path>.+)",
     "descriptor-read-failed": rb"failed to retrieve the owner sid and dacl of file (?P<path>.+) with error code: [0-9]+",
-    "bad-ownership-or-modes": rb"(?:Authentication refused: bad ownership or modes for (?:file|directory) "
-                              rb"(?P<path>.+)|Ignored (?P<ignored>.+): bad ownership or modes)",
+    "auth-strict-refused": rb"Authentication refused\.",
+    "ignored-authorized-keys": rb"Ignored authorized keys(?:: bad ownership or modes)?",
+    "bad-ownership-or-modes": rb"Authentication refused: bad ownership or modes for (?:file|directory) (?P<path>.+)",
+    "ignored-path-modes": rb"Ignored (?P<path>.+): bad ownership or modes",
     "access-denied": rb"Could not open authorized keys '(?P<path>.+)': Permission denied",
 }
 IDENTITY_ROLES = ("token-user", "login-user", "sshd-listener-user")
@@ -133,31 +139,51 @@ def ssh_version(data):
     return "unidentified"
 
 
-def permission_reports(data, paths):
+def permission_reports(data, paths, program_data=None):
     def windows_path(path):
-        return ntpath.normcase(path.removeprefix('\\\\?\\'))
+        if path.startswith('"') and path.endswith('"'):
+            path = path[1:-1]
+        path = ntpath.normcase(path)
+        form = "drive"
+        if path.startswith("\\\\?\\"):
+            path, form = path[4:], "extended-length"
+        elif re.match(r"^\\[a-z]:\\", path):
+            # Win32's internal OpenSSH realpath form is /x:/dir/file.
+            path, form = path[1:], "openssh-realpath"
+        elif cygdrive := re.fullmatch(r"\\cygdrive\\([a-z])\\(.+)", path):
+            path, form = f"{cygdrive[1]}:\\{cygdrive[2]}", "cygdrive"
+        elif path.startswith("__programdata__\\") and program_data:
+            _, _, suffix = path.partition("\\")
+            base = ntpath.normcase(program_data).rstrip("\\")
+            path, form = base + "\\" + suffix.lstrip("\\"), "program-data"
+        if re.match(r"^[a-z]:\\", path):
+            normalized = re.sub(r"\\{2,}", r"\\", path)
+            if path != normalized and form == "drive":
+                form = "repeated-separators"
+            return normalized, form
+        return path, "other"
 
-    known = {windows_path(str(path)): role for role, path in paths.items()}
+    known = {windows_path(str(path))[0]: role for role, path in paths.items()}
+    templates = set()
     reports = {}
     for line in diagnostic_lines(data):
         for reason, pattern in PERMISSION_REPORTS.items():
             if match := re.fullmatch(pattern, line):
+                templates.add(reason)
                 groups = match.groupdict()
-                path = (groups["path"] or groups.get("ignored")).decode("ascii")
-                if path.startswith('"') and path.endswith('"'):
-                    path = path[1:-1]
-                if role := known.get(windows_path(path)):
-                    if role not in reports or reason == "rejected-ace":
+                if raw_path := groups.get("path"):
+                    path, form = windows_path(raw_path.decode("ascii"))
+                    if (role := known.get(path)) and (role not in reports or reason == "rejected-ace"):
                         sid = groups.get("sid")
-                        reports[role] = {"reason": reason, "sid": sid.decode("ascii") if sid else None}
+                        reports[role] = {"reason": reason, "pathForm": form, "sid": sid.decode("ascii") if sid else None}
                 break
-    return reports
-
-
-def inspect_permissions(root, login, server_process, reports):
+    return sorted(templates), reports
+def inspect_permissions(root, login, server_process, templates, reports):
     executable = openssh("sshd").parent.parent / "WindowsPowerShell" / "v1.0" / "powershell.exe"
     pid = server_process.pid if server_process is not None and server_process.poll() is None else None
-    request = {"root": str(root), "login": login, "serverPid": pid, "reports": reports, "limit": ACE_LIMIT}
+    roles = reports.keys() or PERMISSION_SNAPSHOT_ROLES
+    paths = {role: reports.get(role, {}).get("sid") for role in roles}
+    request = {"root": str(root), "login": login, "serverPid": pid, "paths": paths, "limit": ACE_LIMIT}
     try:
         with tempfile.TemporaryFile() as output:
             subprocess.run(
@@ -175,13 +201,15 @@ def inspect_permissions(root, login, server_process, reports):
     identities = result.get("identities", {})
     descriptors = result.get("descriptors", {})
     permissions = {
+        "templates": templates,
         "identities": {role: identities.get(role) if isinstance(identities, dict) else None for role in IDENTITY_ROLES},
         "files": {
             role: {
-                "reason": report["reason"],
+                "reason": reports.get(role, {}).get("reason"),
+                "pathForm": reports.get(role, {}).get("pathForm"),
                 "descriptor": descriptors.get(role) if isinstance(descriptors, dict) else None,
             }
-            for role, report in reports.items()
+            for role in roles
         },
     }
     try:
@@ -210,24 +238,37 @@ def render_permissions(permissions):
             return value
         raise ValueError
 
-    fields(permissions, "identities", "files")
+    fields(permissions, "templates", "identities", "files")
+    templates = permissions["templates"]
+    if not isinstance(templates, list) or not 1 <= len(templates) <= len(PERMISSION_REPORTS) or any(
+        template not in PERMISSION_REPORTS for template in templates
+    ):
+        raise ValueError
     identities = permissions["identities"]
     files = permissions["files"]
     fields(identities, *IDENTITY_ROLES)
-    if not isinstance(files, dict) or not files.keys() <= PERMISSION_ROLES.keys():
+    if not isinstance(files, dict) or not files or not files.keys() <= PERMISSION_ROLES.keys():
         raise ValueError
-    if not files:
-        return ["  permission rejection: no known fixture path matched"]
-    output = ["  identities: " + "; ".join(
+    output = ["  permission templates: " + ",".join(templates)]
+    unattributed = all(isinstance(report, dict) and report.get("reason") is None for report in files.values())
+    if unattributed:
+        if set(files) != set(PERMISSION_SNAPSHOT_ROLES):
+            raise ValueError
+        output.append("  permission rejection: no known fixture path matched; snapshots are not attribution")
+    output.append("  identities: " + "; ".join(
         f"{role}={principals(identities[role]) if identities[role] is not None else 'unavailable'}"
         for role in IDENTITY_ROLES
-    ) + "; auth-child-token=not-observed"]
+    ) + "; auth-child-token=not-observed")
     for role, report in files.items():
-        fields(report, "reason", "descriptor")
+        fields(report, "reason", "pathForm", "descriptor")
         reason = report["reason"]
-        if reason not in PERMISSION_REPORTS:
+        form = report["pathForm"]
+        if unattributed and reason is None and form is None:
+            prefix = f"  descriptor {role}: rejection=not-attributed; snapshot=after-rejection"
+        elif reason in templates and form in PERMISSION_PATH_FORMS:
+            prefix = f"  descriptor {role}: rejection={reason}; path-form={form}; snapshot=after-rejection"
+        else:
             raise ValueError
-        prefix = f"  descriptor {role}: rejection={reason}; snapshot=after-rejection"
         descriptor = report["descriptor"]
         if descriptor is None:
             output.append(prefix + "; unavailable")
@@ -384,14 +425,10 @@ class WindowsStartup:
         self.summary.pop("permissions", None)
         if "key-permissions" in self.summary[side]:
             root = root.resolve()
-            reports = permission_reports(data, {role: root / name for role, name in PERMISSION_ROLES.items()})
-            if reports:
-                self.summary["permissions"] = inspect_permissions(root, login, server_process, reports)
-            else:
-                self.summary["permissions"] = {
-                    "identities": dict.fromkeys(IDENTITY_ROLES),
-                    "files": {},
-                }
+            templates, reports = permission_reports(
+                data, {role: root / name for role, name in PERMISSION_ROLES.items()}, os.environ.get("ProgramData"),
+            )
+            self.summary["permissions"] = inspect_permissions(root, login, server_process, templates, reports)
 
     def publish(self):
         if self.installed_root is None:

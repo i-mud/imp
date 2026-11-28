@@ -1,4 +1,4 @@
-# Invoked only by the hosted Managed fixture after a known-path sshd rejection.
+# Invoked only by the hosted Managed fixture after an sshd permission rejection.
 $ErrorActionPreference = 'Stop'
 $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $names = @{
@@ -6,6 +6,7 @@ $names = @{
     'server-config' = 'sshd.config'
     'host-key' = 'host_key'
     'authorized-keys' = 'authorized_keys'
+    'client-key' = 'client_key'
 }
 $root = Get-Item -LiteralPath $request.root -Force
 if (!$root.PSIsContainer -or ($root.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -88,8 +89,8 @@ foreach ($role in 'token-user', 'login-user', 'sshd-listener-user') {
     if ($principals[$role]) { $identities[$role] = @(Get-PrincipalRoles $principals[$role]) }
 }
 $descriptors = @{}
-foreach ($report in $request.reports.PSObject.Properties) {
-    $role = $report.Name
+foreach ($path in $request.paths.PSObject.Properties) {
+    $role = $path.Name
     if (!$names.ContainsKey($role)) { throw 'Unexpected fixture role' }
     $descriptors[$role] = $null
     try {
@@ -98,7 +99,7 @@ foreach ($report in $request.reports.PSObject.Properties) {
         $bytes = [ImpFixtureSecurity]::Read($item.FullName)
         $raw = [Security.AccessControl.RawSecurityDescriptor]::new($bytes, 0)
         $dacl = $raw.DiscretionaryAcl
-        $sid = $report.Value.sid
+        $sid = $path.Value
         $matching = @()
         $other = @()
         $matched = 0
