@@ -13,6 +13,7 @@ import runpy
 import secrets
 import select
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -60,6 +61,8 @@ INSPECTOR_STATUSES = (*INSPECTOR_SCRIPT_STATUSES, "execution-policy", "process-f
 DESCRIPTOR_STATUSES = ("read", "unavailable", "missing", "file-unavailable", "not-ordinary-file",
                        "access-denied", "native-read-failed", "descriptor-decode-failed",
                        "descriptor-enumeration-failed", "invalid-output")
+CORRECTION_STATUSES = ("verified", "not-proven", "file-identity-unavailable", "descriptor-not-applicable",
+                       "correction-write-failed", "correction-verification-failed", "inspector-unavailable")
 PERMISSION_REPORTS = {
     "rejected-ace": rb"Bad permissions\. Try removing permissions for user: .+? "
                     rb"(?:\((?P<sid>S-1(?:-[0-9]{1,20}){2,16})\) )?on file (?P<path>.+)\.",
@@ -149,7 +152,7 @@ def ssh_version(data):
     return "unidentified"
 
 
-def permission_reports(data, paths, program_data=None):
+def permission_reports(data, paths, program_data=None, *, prove_authorized=None):
     def windows_path(path):
         if path.startswith('"') and path.endswith('"'):
             path = path[1:-1]
@@ -196,6 +199,8 @@ def permission_reports(data, paths, program_data=None):
     templates = set()
     reports = {}
     unmatched = []
+    verified_sids = set()
+    verified_form = None
     for line in diagnostic_lines(data):
         for reason, pattern in PERMISSION_REPORTS.items():
             if match := re.fullmatch(pattern, line):
@@ -203,8 +208,11 @@ def permission_reports(data, paths, program_data=None):
                 groups = match.groupdict()
                 if raw_path := groups.get("path"):
                     path, form = windows_path(raw_path.decode("ascii"))
+                    sid = groups.get("sid")
+                    if reason == "rejected-ace" and sid and prove_authorized and prove_authorized(path):
+                        verified_sids.add(sid.decode("ascii"))
+                        verified_form = form
                     if (role := known.get(path)) and (role not in reports or reason == "rejected-ace"):
-                        sid = groups.get("sid")
                         reports[role] = {"reason": reason, "pathForm": form, "sid": sid.decode("ascii") if sid else None}
                     if not role and len(unmatched) < PERMISSION_SHAPE_LIMIT:
                         basename, location, count = path_shape(path)
@@ -213,15 +221,17 @@ def permission_reports(data, paths, program_data=None):
                         if shape not in unmatched:
                             unmatched.append(shape)
                 break
+    if prove_authorized:
+        reports.pop("authorized-keys", None)
+        if len(verified_sids) == 1:
+            reports["authorized-keys"] = {
+                "reason": "rejected-ace", "pathForm": verified_form, "sid": verified_sids.pop(),
+            }
     return sorted(templates), reports, unmatched
 
 
-def inspect_permissions(root, login, server_process, templates, reports, unmatched):
+def windows_permission_command(request, statuses):
     executable = openssh("sshd").parent.parent / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-    pid = server_process.pid if server_process is not None and server_process.poll() is None else None
-    roles = reports.keys() or PERMISSION_SNAPSHOT_ROLES
-    paths = {role: reports.get(role, {}).get("sid") for role in roles}
-    request = {"root": str(root), "login": login, "serverPid": pid, "paths": paths, "limit": ACE_LIMIT}
     result = {}
     status = "invalid-output"
     try:
@@ -243,7 +253,7 @@ def inspect_permissions(root, login, server_process, templates, reports, unmatch
                 output.seek(0)
                 data = output.read(EVIDENCE_LIMIT + 1)
                 payload = json.loads(data) if len(data) <= EVIDENCE_LIMIT else None
-                if isinstance(payload, dict) and payload.get("status") in INSPECTOR_SCRIPT_STATUSES:
+                if isinstance(payload, dict) and payload.get("status") in statuses:
                     status = payload["status"]
                     result = payload
     except subprocess.TimeoutExpired:
@@ -252,6 +262,15 @@ def inspect_permissions(root, login, server_process, templates, reports, unmatch
         status = "launch-failed"
     except (ValueError, RecursionError):
         pass
+    return status, result
+
+
+def inspect_permissions(root, login, server_process, templates, reports, unmatched):
+    pid = server_process.pid if server_process is not None and server_process.poll() is None else None
+    roles = reports.keys() or PERMISSION_SNAPSHOT_ROLES
+    paths = {role: reports.get(role, {}).get("sid") for role in roles}
+    request = {"root": str(root), "login": login, "serverPid": pid, "paths": paths, "limit": ACE_LIMIT}
+    status, result = windows_permission_command(request, INSPECTOR_SCRIPT_STATUSES)
     identities = result.get("identities", {})
     files = result.get("files", {})
     permissions = {
@@ -439,6 +458,11 @@ def render_evidence(summary):
         if summary["independentForward"] != "relay-health-live":
             return unavailable
         output.append("  independent forward: live production relay health verified")
+    if "authorizedKeysCorrection" in summary:
+        status = summary["authorizedKeysCorrection"]
+        if status not in CORRECTION_STATUSES:
+            return unavailable
+        output.append(f"  fixture authorized-keys correction: {status}")
     if "permissions" in summary:
         try:
             output.extend(render_permissions(summary["permissions"]))
@@ -464,6 +488,7 @@ class StartupFailed(Exception):
 class WindowsStartup:
     def __init__(self, installed_root=None):
         self.installed_root = installed_root
+        self.correct_independent = None
         self.summary = {"phase": "tools", "config": "not-checked", "observation": "error"}
         for side in EVIDENCE:
             self.summary[side] = ["unidentified"]
@@ -501,13 +526,7 @@ class WindowsStartup:
             raise StartupFailed from None
 
     def observe(self, side, log, *, root=None, login=None, server_process=None):
-        end = log.seek(0, os.SEEK_END)
-        start = max(0, end - EVIDENCE_LIMIT)
-        # Inspect the preceding byte so a truncated line cannot look like a diagnostic.
-        log.seek(max(0, start - 1))
-        data = log.read(EVIDENCE_LIMIT + bool(start))
-        if start:
-            data = data.partition(b"\n")[2]
+        data = evidence_tail(log)
         self.summary[side] = classify_evidence(data, side)
         if side != "server" or root is None:
             return
@@ -528,6 +547,16 @@ class WindowsStartup:
     def ready(self):
         self.summary.update(phase="ready", observation="ready")
         self.publish()
+
+
+def evidence_tail(log):
+    end = log.seek(0, os.SEEK_END)
+    start = max(0, end - EVIDENCE_LIMIT)
+    # Inspect the preceding byte so a truncated line cannot look like a diagnostic.
+    log.seek(max(0, start - 1))
+    data = log.read(EVIDENCE_LIMIT + bool(start))
+    log.seek(0, os.SEEK_END)
+    return data.partition(b"\n")[2] if start else data
 
 
 def listening(port, pid=None):
@@ -716,6 +745,41 @@ def restrict_windows_key(path, identity, system):
     )
 
 
+def same_authorized_file(root, path):
+    if (not re.match(r"^[a-z]:\\", path) or ntpath.splitdrive(path)[0] != ntpath.splitdrive(str(root).lower())[0]
+            or ":" in path[2:] or {".", ".."} & set(path[3:].split("\\"))):
+        return False
+    parent, name = ntpath.split(path)
+    if name != "authorized_keys":
+        return False
+    try:
+        return os.path.samefile(parent, root) and os.path.samefile(path, root / name)
+    except (OSError, ValueError):
+        return False
+
+
+def fixture_file_id(path):
+    info = path.stat(follow_symlinks=False)
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not info.st_ino
+            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+        raise ValueError("fixture authorized keys is not an ordinary singly-linked file")
+    return (info.st_dev.to_bytes(8, "little") + info.st_ino.to_bytes(16, "little")).hex()
+
+
+def authorized_correction(root, login, file_id, **proof):
+    request = {
+        "root": str(root), "login": login, "paths": {"authorized-keys": None}, "limit": ACE_LIMIT,
+        "correction": {"fileId": file_id, **proof},
+    }
+    status, result = windows_permission_command(request, ("corrected", *CORRECTION_STATUSES))
+    if status == "corrected":
+        fingerprint = result.get("fingerprint")
+        if isinstance(fingerprint, str) and re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            return "verified", fingerprint
+        return "correction-verification-failed", None
+    return (status if status in CORRECTION_STATUSES else "inspector-unavailable"), None
+
+
 @contextmanager
 def windows_server(root, startup):
     with startup.stage("tools"):
@@ -748,17 +812,24 @@ def windows_server(root, startup):
             )
     authorized = root / "authorized_keys"
     config = root / "sshd.config"
+    fingerprint = None
     with startup.stage("server-config"), reserve_port() as port:
         jump_target = port if (root / "jump_key.pub").exists() else None
         jump_permit = f" {HOST}:{jump_target}" if jump_target is not None else ""
 
         def permit(allowed):
+            if fingerprint:
+                assert fixture_file_id(authorized) == file_id, "fixture authorized keys was replaced"
             authorized.write_text(authorize(root, allowed, jump_target), encoding="ascii")
+            if fingerprint:
+                status, _ = authorized_correction(root, identity, file_id, fingerprint=fingerprint)
+                assert status == "verified", "fixture authorized keys rewrite changed its descriptor"
 
         with startup.stage("key-acl"):
             permit(True)
             for path in (*[root / name for name in names], authorized):
                 restrict_windows_key(path, identity, system)
+            file_id = fixture_file_id(authorized)
         startup.summary["phase"] = "server-config"
         config.write_text(
             f"""ListenAddress {HOST}
@@ -799,8 +870,26 @@ LogLevel DEBUG3
                 process = subprocess.Popen([server, "-D", "-e", "-f", config], env=ENV,
                                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
                 startup.wait_for_listener(port, process, "disposable Windows sshd")
+
+            def correct():
+                nonlocal fingerprint
+                paths = {role: root / name for role, name in PERMISSION_ROLES.items()}
+                _, reports, _ = permission_reports(
+                    evidence_tail(log), paths, os.environ.get("ProgramData"),
+                    prove_authorized=lambda path: same_authorized_file(root, path),
+                )
+                report = reports.get("authorized-keys")
+                if not report:
+                    status = "not-proven"
+                else:
+                    status, fingerprint = authorized_correction(root, identity, file_id, sid=report["sid"])
+                startup.summary["authorizedKeysCorrection"] = status
+                return fingerprint is not None
+
+            startup.correct_independent = correct
             yield username, port, jump_target, permit, [sys.executable, "-u", str(ENDPOINT)]
         finally:
+            startup.correct_independent = None
             try:
                 if startup.summary["phase"] != "ready":
                     startup.observe("server", log, root=root, login=identity, server_process=process)
@@ -828,7 +917,7 @@ def probe_relay(port):
 
 
 @contextmanager
-def independent(root, username, port, backend, startup=None):
+def independent_attempt(root, username, port, backend, startup):
     with tempfile.TemporaryFile() as log:
         process = None
         try:
@@ -861,6 +950,29 @@ def independent(root, username, port, backend, startup=None):
                 stop(process)
             if startup and startup.summary["phase"] != "ready":
                 startup.observe("client", log)
+
+
+@contextmanager
+def independent(root, username, port, backend, startup=None):
+    with ExitStack() as stack:
+        def connect():
+            return stack.enter_context(independent_attempt(root, username, port, backend, startup))
+
+        try:
+            alive = connect()
+        except StartupFailed:
+            if (not startup or not startup.correct_independent
+                    or startup.summary["observation"] != "process-exited"
+                    or startup.summary["client"] != ["authentication-rejected"]):
+                raise
+            with startup.stage("independent-forward"):
+                corrected = startup.correct_independent()
+            if not corrected:
+                raise
+            startup.summary.pop("exitCode", None)
+            startup.summary.update(observation="error", client=["unidentified"])
+            alive = connect()
+        yield alive
 
 
 @contextmanager

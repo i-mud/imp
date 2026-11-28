@@ -7,8 +7,8 @@ import runpy
 import subprocess
 import tempfile
 import unittest
-from contextlib import nullcontext
-from pathlib import Path
+from contextlib import contextmanager, nullcontext
+from pathlib import Path, PureWindowsPath
 from unittest.mock import Mock, patch
 
 FIXTURE = runpy.run_path(str(Path(__file__).with_name("test-managed-check.py")))
@@ -381,6 +381,85 @@ class StartupEvidenceTest(unittest.TestCase):
                 rendered = FIXTURE["render_evidence"](startup.summary)
                 self.assertIn(f"permission inspector: {status}", rendered)
                 self.assertNotIn("private", rendered)
+
+    def test_authorized_path_proof_requires_same_parent_and_file(self):
+        prove = FIXTURE["same_authorized_file"]
+        root = PureWindowsPath(r"C:\Fixture Parent\Fixture Child")
+        alias = r"c:\fixtur~1\fixture child\authorized_keys"
+        with patch("os.path.samefile", side_effect=[True, True]) as same:
+            self.assertTrue(prove(root, alias))
+            self.assertEqual(same.call_args_list[0].args, (r"c:\fixtur~1\fixture child", root))
+            self.assertEqual(same.call_args_list[1].args, (alias, root / "authorized_keys"))
+        with patch("os.path.samefile", return_value=False) as same:
+            self.assertFalse(prove(root, alias))
+            same.assert_called_once()
+        for other in (r"\\host\share\authorized_keys", r"d:\fixture\authorized_keys", r"c:\fixture\..\authorized_keys",
+                      r"c:\fixture\authorized_keys:alternate", r"c:\fixture\host_key"):
+            with self.subTest(other=other), patch("os.path.samefile") as same:
+                self.assertFalse(prove(root, other))
+                same.assert_not_called()
+
+    def test_correction_report_requires_one_sid_from_the_proven_file(self):
+        parse = FIXTURE["permission_reports"]
+        paths = {"authorized-keys": r"C:\Fixture\authorized_keys"}
+        verified = r"c:\fixtur~1\authorized_keys"
+
+        def rejection(path, rid):
+            return f"Bad permissions. Try removing permissions for user: other (S-1-5-21-1-2-3-{rid}) on file {path}.\n"
+
+        one = rejection(verified, 1001)
+        for evidence, accepted in (
+            (one + one + rejection(paths["authorized-keys"], 1002), True),
+            (one + rejection(verified, 1002), False),
+            (rejection(paths["authorized-keys"], 1002), False),
+        ):
+            _, reports, _ = parse(evidence.encode(), paths, prove_authorized=lambda path: path == verified)
+            self.assertEqual(reports.get("authorized-keys"), {
+                "reason": "rejected-ace", "pathForm": "drive", "sid": "S-1-5-21-1-2-3-1001",
+            } if accepted else None)
+
+    def test_fixture_identity_rejects_hard_links(self):
+        file_id = FIXTURE["fixture_file_id"]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "authorized_keys"
+            path.write_text("first", encoding="ascii")
+            before = file_id(path)
+            path.write_text("second", encoding="ascii")
+            self.assertEqual(file_id(path), before)
+            path.with_suffix(".alias").hardlink_to(path)
+            with self.assertRaises(ValueError):
+                file_id(path)
+
+    def test_only_proven_independent_authentication_refusal_gets_one_retry(self):
+        independent = FIXTURE["independent"]
+        failed = FIXTURE["StartupFailed"]
+        for client, corrected, retry_fails, attempts in (
+            (["authentication-rejected"], True, False, 2),
+            (["authentication-rejected"], True, True, 2),
+            (["authentication-rejected"], False, False, 1),
+            (["authentication-rejected", "host-verification"], True, False, 1),
+            (["forwarding-denied"], True, False, 1),
+        ):
+            with self.subTest(client=client, corrected=corrected, retry_fails=retry_fails):
+                startup = FIXTURE["WindowsStartup"]()
+                startup.correct_independent = Mock(return_value=corrected)
+                calls = []
+
+                @contextmanager
+                def attempt(*_):
+                    calls.append(None)
+                    if len(calls) == 1 or retry_fails:
+                        startup.summary.update(client=client, observation="process-exited", exitCode=255)
+                        raise failed
+                    self.assertNotIn("exitCode", startup.summary)
+                    yield "owned-forward"
+
+                with patch.dict(independent.__wrapped__.__globals__, {"independent_attempt": attempt}):
+                    outcome = nullcontext() if attempts == 2 and not retry_fails else self.assertRaises(failed)
+                    with outcome, independent(None, None, None, None, startup) as result:
+                        self.assertEqual(result, "owned-forward")
+                self.assertEqual(len(calls), attempts)
+                self.assertEqual(startup.correct_independent.call_count, int(client == ["authentication-rejected"]))
 
     def test_independent_relay_probe_requires_the_live_health_response(self):
         probe = FIXTURE["probe_relay"]
