@@ -112,6 +112,14 @@ generic connection failure, not a proven forwarding refusal. The Linux
 container sshd refused the channel in both cases, including when the client
 ran on Windows. The native diagnostic did not change.
 
+The [next candidate run](https://github.com/i-mud/imp/actions/runs/46133143025/job/140942633911)
+passed all 20 Windows diagnostic cases, built NSIS and passed the first ten
+installed WebView2 phases. The eleventh timed out waiting for a check status;
+its assertion did not identify the status. Replaying that fixture exposed a
+sequencing error: disconnecting the producer after the subscriber opens queues
+`live` at startup and `down` later. The installed fixture now disconnects the
+producer before subscribing, then releases the held startup frames.
+
 Neither source-fixture results nor candidate-installer checks are
 published-artifact acceptance or independent human onboarding. Slice 28
 recruitment requirements remain unchanged. The

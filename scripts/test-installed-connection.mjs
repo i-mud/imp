@@ -137,6 +137,9 @@ const CHECK_COPY = {
   failure: 'SSH could not reach the remote Imp port.',
   cancelled: 'Connection check cancelled.',
   unreachable: 'Could not check the connection.',
+  timeout: 'The check timed out.',
+  authentication: 'SSH sign-in failed.',
+  hostVerification: 'SSH could not verify the server.',
 };
 const URL_FIELD = `${DIALOG} input[type="url"]`;
 const TOKEN = `${DIALOG} input[type="password"]`;
@@ -381,7 +384,7 @@ const startCheck = () => click(CHECK, 'Check connection');
 const checkReady = () => visible(`${CHECK}:enabled:not([aria-disabled=true])`);
 const status = () => evaluate(`document.querySelector(${J(CHECK_STATUS)})?.textContent ?? null`);
 const checkShows = (copy) =>
-  waitFor(async () => (await status())?.startsWith(copy), 'the expected Managed check status');
+  waitFor(async () => (await status())?.startsWith(copy), `Managed check status "${copy}"`);
 
 async function fontMetrics(pixels) {
   // Changes CSS rem metrics only; it is not native DPI or browser zoom.
@@ -735,6 +738,8 @@ async function installedManagedDiagnostic() {
   await setView('compact', 'light');
   await openManager();
   await structured(host, username, port);
+  // The real relay captures startup status when B subscribes, not when its held writer is released.
+  await command('down');
   await command('hold');
   await startCheck();
   await checkShows(CHECK_COPY.progress);
@@ -742,7 +747,7 @@ async function installedManagedDiagnostic() {
   const downRetired = await observeSsh(2);
   await command('update');
   await traffic('A UPDATED', 2);
-  await command('down');
+  await command('release');
   await checkShows(CHECK_COPY.down);
   await downRetired();
   await traffic('B CLOSED /state', 2);
@@ -1154,6 +1159,11 @@ try {
   // Messages are fixed strings, but redact token- and digest-shaped runs in case a CDP error carries one.
   const message = String(error?.message).replace(/[A-Za-z0-9_-]{40,}/g, '[redacted]');
   console.error(`${environment} connection UI phase ${phase} failed: ${message}`);
+  if (phase === 'managed-diagnostic') {
+    const text = await status().catch(() => null);
+    const category = Object.entries(CHECK_COPY).find(([, prefix]) => text?.startsWith(prefix))?.[0];
+    console.error(`Installed Managed status: ${category ?? (text ? 'other' : 'empty')}`);
+  }
   // Allowlisted booleans/enums only. Never print the form, configuration object or native error.
   const state = await evaluate(`(() => {
     const d = document.querySelector('.connection-dialog');

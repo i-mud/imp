@@ -1221,6 +1221,8 @@ async def installed_endpoints(root, username, port, startup):
                 command = command.strip()
                 if command in ("hold", "live", "down"):
                     await diagnostic.set_mode(command)
+                elif command == "release":
+                    diagnostic.relay.release.set()
                 elif command == "update":
                     await running.update()
                 elif command != "stop":
